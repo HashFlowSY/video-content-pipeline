@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "phase": 1,
+  "tools": [
+    {
+      "id": "git",
+      "path": "/usr/bin/git",
+      "version": "2.50.1",
+      "status": "available",
+      "used_in_phase_1": true
+    },
+    {
+      "id": "ffmpeg",
+      "path": "/opt/homebrew/bin/ffmpeg",
+      "version": "8.1.2",
+      "status": "available_not_used",
+      "used_in_phase_1": false
+    },
+    {
+      "id": "ffprobe",
+      "path": "/opt/homebrew/bin/ffprobe",
+      "version": "8.1.2",
+      "status": "available_not_used",
+      "used_in_phase_1": false
+    },
+    {
+      "id": "yt-dlp",
+      "path": "/opt/homebrew/bin/yt-dlp",
+      "version": "2026.07.04",
+      "status": "available_not_used",
+      "used_in_phase_1": false
+    },
+    {
+      "id": "node",
+      "path": "/Users/shangyang/.nvm/versions/node/v24.15.0/bin/node",
+      "version": "24.15.0",
+      "status": "available_not_used",
+      "used_in_phase_1": false
+    },
+    {
+      "id": "pnpm",
+      "path": "/Users/shangyang/Library/pnpm/bin/pnpm",
+      "version": "11.10.0",
+      "status": "available_not_used",
+      "used_in_phase_1": false
+    },
+    {
+      "id": "jq",
+      "path": "/usr/bin/jq",
+      "version": "1.7.1-apple",
+      "status": "available_used_for_phase_1_audit",
+      "used_in_phase_1": true,
+      "purpose": "JSON inventory generation and validation"
+    },
+    {
+      "id": "uv",
+      "path": "tools/uv/uv",
+      "version": "0.11.15",
+      "status": "verified_project_local",
+      "used_in_phase_1": true,
+      "source": "https://github.com/astral-sh/uv/releases/download/0.11.15/uv-aarch64-apple-darwin.tar.gz",
+      "archive_path": "cache/uv/uv-0.11.15-aarch64-apple-darwin.tar.gz",
+      "archive_size_bytes": 20336096,
+      "archive_sha256": "7e5b336108f8576eda1939920ca0a805b4a9a3c3d3eb2f6140e38b7092fbe4f3",
+      "binary_sha256": "33665b2ef574843dcc48a0f73a1ebe48a1bf863b7c9000856ab57fa442042ee4"
+    },
+    {
+      "id": "managed_python",
+      "path": "runtime/python/cpython-3.12.13-macos-aarch64-none/bin/python3.12",
+      "version": "3.12.13",
+      "status": "verified_project_local",
+      "used_in_phase_1": true,
+      "source": "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "source_archive_sha256": "55bc1a5edbc8ac4da0081f4f5731ed2d1ed10c57cb37a820b2a0dbc7cad742e9",
+      "initial_install_size_kib": 67752,
+      "initial_ordinary_file_count": 1644,
+      "final_audit_size_kib": 71528,
+      "final_audit_ordinary_file_count": 1785,
+      "final_audit_observed_at": "2026-08-02T12:31:48Z",
+      "post_install_growth": "Project-local CPython bytecode caches created by validated Phase 1 Python execution.",
+      "executable_sha256": "a395f264e5612a2819662ed3e37fd30d39ed61179b98e5f86c3c783a008d8623",
+      "measurement_note": "Initial values describe uv installation before validated Python commands; final-audit values are the authoritative Phase 1 runtime snapshot."
+    },
+    {
+      "id": "project_venv",
+      "path": ".venv",
+      "version": "3.12.13",
+      "status": "validated_project_local",
+      "used_in_phase_1": true,
+      "python_executable": ".venv/bin/python",
+      "package_count": 12,
+      "include_system_site_packages": false
+    }
+  ]
+}

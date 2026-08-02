@@ -1,0 +1,31 @@
+schema_version = 1
+phase = 1
+python_version = "3.12.13"
+project_virtual_environment = ".venv"
+managed_python_interpreter = "runtime/python/cpython-3.12.13-macos-aarch64-none/bin/python3.12"
+
+[paths]
+uv_binary = "tools/uv/uv"
+python_install_dir = "runtime/python"
+uv_cache_dir = "cache/uv"
+python_cache_dir = "cache/python"
+temporary_dir = "tmp"
+model_registry = "models/registry.json"
+input_dir = "input"
+work_dir = "work"
+output_dir = "outputs"
+plans_dir = "plans"
+
+[execution]
+require_project_virtual_environment = true
+allow_uv_run = false
+allow_ordinary_pip_install = false
+allow_system_python = false
+automatic_dependency_upgrade = false
+automatic_python_download = false
+
+[network]
+allow_runtime_network = false
+allow_automatic_model_downloads = false
+allow_paid_apis = false
+package_index = "https://pypi.org/simple"

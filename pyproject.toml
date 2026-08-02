@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "video-content-pipeline"
+version = "0.1.0"
+description = "A local, auditable video content processing pipeline."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[project.scripts]
+vcp = "video_content_pipeline.cli:main"
+
+[dependency-groups]
+dev = [
+  "hatchling==1.27.0",
+  "mypy==1.15.0",
+  "pytest==8.3.5",
+  "ruff==0.11.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/video_content_pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+warn_unused_configs = true
