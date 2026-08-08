@@ -15,7 +15,7 @@
 - [x] Write failing unit tests for normalized rational values, signed
   `RawPtsTime`, half-open intervals, and exact comparison; implement the
   smallest `timecode.py` behavior that passes.
-- [ ] Write failing unit tests for `PartRelativeTime` and
+- [x] Write failing unit tests for `PartRelativeTime` and
   `CollectionVirtualTime`, including nonzero and negative PTS; implement only
   exact coordinate translations and compact Part concatenation.
 - [x] Write failing unit tests for `ProbeDocument`, `ProbeProjection`, unknown

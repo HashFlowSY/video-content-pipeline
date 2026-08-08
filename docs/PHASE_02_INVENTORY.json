@@ -16,7 +16,7 @@
     "models_downloaded": false,
     "paid_apis_used": false,
     "ffmpeg_or_ffprobe_executed": false,
-    "notes": "Phase 2 governance and execution records include the approved Ticket 01 envelope and completed Ticket 02 exact-time, Ticket 03 probe-projection, and Ticket 04 decoded-interval coverage unit work. No media tool, fixture, package, download, model, paid API, or user-media action has occurred."
+    "notes": "Phase 2 governance and execution records include the approved Ticket 01 envelope and completed Ticket 02 exact-time, Ticket 03 probe-projection, Ticket 04 decoded-interval coverage, and Ticket 05 compact collection-timeline unit work. No media tool, fixture, package, download, model, paid API, or user-media action has occurred."
   },
   "execution_records": [
     {
@@ -83,6 +83,32 @@
         "ruff_format_check": "passed",
         "mypy": "passed; no issues in 7 source files",
         "pytest_full": "24 passed"
+      },
+      "resource_bounds": {
+        "memory": "less than 256 MiB",
+        "additional_disk": "less than 10 MiB of project-local tooling caches",
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "user_media_accessed": false
+      }
+    },
+    {
+      "ticket": "05",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate; scripts/require-project-venv.sh; pytest tests/unit/test_collection_timeline.py",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff check src/video_content_pipeline/timeline.py tests/unit/test_collection_timeline.py",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff format --check src/video_content_pipeline/timeline.py tests/unit/test_collection_timeline.py",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; mypy src",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; pytest"
+      ],
+      "results": {
+        "tdd_red": "expected import failure before timeline.py existed",
+        "pytest_collection_timeline": "3 passed",
+        "ruff_check": "passed",
+        "ruff_format_check": "passed",
+        "mypy": "passed; no issues in 8 source files",
+        "pytest_full": "27 passed"
       },
       "resource_bounds": {
         "memory": "less than 256 MiB",
@@ -1068,6 +1094,58 @@
       "rebuildable": true,
       "deletion_class": "keep_for_audit",
       "deletion_consequence": "The Ticket 04 completion record would be lost."
+    },
+    {
+      "path": "src/video_content_pipeline/timeline.py",
+      "kind": "file",
+      "action": "created",
+      "purpose": "Ticket 05 compact collection-time mapping with retained Part-relative source evidence",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["canonical_timeline", "subtitle_presentation"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The compact collection-timeline implementation evidence would be lost."
+    },
+    {
+      "path": "tests/unit/test_collection_timeline.py",
+      "kind": "file",
+      "action": "created",
+      "purpose": "Ticket 05 TDD evidence for compact offsets, signed source provenance, and hard Part boundaries",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["phase_2_testing", "canonical_timeline"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The deterministic Ticket 05 behavior evidence would be lost."
+    },
+    {
+      "path": "plans/PHASE-02/05-EXECUTION-ENVELOPE.md",
+      "kind": "file",
+      "action": "created",
+      "purpose": "Record the approved Ticket 05 implementation, command, resource, and retention boundary",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["implementation_authorization", "canonical_timeline"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The Ticket 05 authorization and execution evidence would be lost."
+    },
+    {
+      "path": ".scratch/phase-02-deterministic-media-core-and-timeline-prototype/issues/05-assemble-compact-collection-virtual-time.md",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Record the completed Ticket 05 implementation and verification result",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["issue_tracking", "canonical_timeline"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The Ticket 05 completion record would be lost."
     }
   ]
 }
