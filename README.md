@@ -1,12 +1,15 @@
 # Video Content Pipeline
 
 This repository contains a local, auditable video-content processing pipeline.
-Phase 1, project initialization and reproducible runtime, is complete.
+Phase 1, project initialization and reproducible runtime, is complete. Phase
+2, the deterministic media core and timeline prototype, is authorized and in
+planning.
 
-Phase 1 establishes only the project boundary, local Python runtime, virtual
-environment gate, configuration, registries, and engineering checks. It does
-not process media, download models, call paid services, or implement Phase 2
-timeline functionality.
+Phase 2 is limited to deterministic media and timeline behavior: structured
+FFprobe parsing, rational time calculations, subtitle parsing and
+normalization, virtual-timeline logic, conservative de-duplication, and
+FFmpeg-generated synthetic fixtures. It does not access user media, download
+models, call paid services, or implement ASR, OCR, or source ingestion.
 
 ## Local Runtime
 
@@ -32,6 +35,7 @@ project.
 
 ## Current Status
 
-See `project-state.json` for the machine-readable status and
-`docs/PHASE_01_COMPLETION_REPORT.md` for the Phase 1 audit. The next authorized
-implementation stage is Phase 2; it is not started automatically.
+See `project-state.json` for the machine-readable status,
+`docs/PHASE_01_COMPLETION_REPORT.md` for the Phase 1 audit, and
+`docs/PHASED_EXECUTION_PLAN.md` for the adopted Phase 2 scope. Phase 2 has not
+yet executed media tooling or processed any media.

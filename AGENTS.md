@@ -5,11 +5,15 @@
 - The project root is `/Users/shangyang/Desktop/workspace/projects/video-content-pipeline`.
 - Keep all project code, downloads, caches, temporary files, models, input,
   work products, plans, and outputs inside this root.
-- Work only in the project phase explicitly authorized by the user. While the
-  current authorization is Phase 1, establish infrastructure only; do not
-  implement Phase 2 media, subtitle, timeline, ASR, OCR, model, or
-  real-world-testing functionality. Replace this phase-specific boundary only
-  when a later phase is explicitly authorized and its plan is adopted.
+- Work only in the project phase explicitly authorized by the user. The
+  current authorization is Phase 2: implement only the deterministic media
+  core and timeline prototype in the adopted Phase 2 plan. This permits
+  structured FFprobe parsing, rational time calculations, subtitle parsing and
+  normalization, virtual-timeline logic, conservative subtitle de-duplication,
+  and project-local synthetic fixtures. Do not implement Phase 3 source
+  access, public-URL access, ASR, OCR, model, paid-service, or real-world
+  testing functionality. Replace this phase-specific boundary only when a
+  later phase is explicitly authorized and its plan is adopted.
 - Do not mark the project `production_validated`.
 
 ## Runtime Boundary
@@ -41,3 +45,21 @@
   inventory. Do not delete archives, caches, temporary data, or failed outputs
   without explicit user authorization.
 - Do not create Git remotes, commits, or pushes.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specifications live as local Markdown files under `.scratch/`. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the canonical local tracker labels, including `ready-for-agent`, recorded
+in `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. Read the root `CONTEXT.md` and relevant
+records under `docs/adr/` before changing a domain boundary. See
+`docs/agents/domain.md`.

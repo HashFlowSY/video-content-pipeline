@@ -4,7 +4,7 @@
 
 日期：`2026-08-02`
 
-当前项目阶段：`requirements_locked / planning`
+当前项目阶段：`deterministic_media_core_and_timeline_prototype / planning`
 
 开发完成后的目标阶段：`real_world_testing`
 
@@ -253,11 +253,17 @@ outputs/<source-id>/<run-id>/
 | 对象 | 责任 |
 |---|---|
 | `MediaCollection` | 一次任务中的逻辑合集，包含一个或多个有序 `Part` |
-| `Part` | 独立媒体文件或多 P 中的一项，保留本地 PTS |
+| `Part` | 独立媒体文件或多 P 中的一项，保留 `RawPtsTime` |
 | `SourceArtifact` | 下载或复制后的只读输入、哈希、来源和完整性信息 |
+| `ProbeDocument` | FFprobe 产生的不可变原始 JSON 证据 |
+| `ProbeProjection` | 从 ProbeDocument 提取的强类型媒体与流时间信息 |
+| `DecodedInterval` | 已观测到的可解码流区间，具有精确起点和终点 |
+| `StreamCoverage` | 由 DecodedInterval 外包络与内部空洞诊断组成的实际流覆盖结果 |
 | `SubtitleTrackCandidate` | 原始字幕轨、语言、人工/自动来源、格式和质量统计 |
 | `CanonicalTimeline` | 以流真实 PTS 和 time base 表示的权威时间轴 |
-| `Cue` | 不可变文字证据及其原始、候选和采用时间 |
+| `RawCue` | 不可变的已解析字幕证据，保留原始文字、时间和来源坐标 |
+| `NormalizedCue` | 由 RawCue 无损规范化得到的不可变 cue，保留全部 token |
+| `PresentationCue` | 从 NormalizedCue 派生的显示 cue，可通过可追溯的 token 所有权去除滚动累积显示 |
 | `AlignmentCandidate` | 强制对齐器生成的候选边界和置信度 |
 | `SpeakerTurn` | 匿名说话人、时间范围、重叠和角色候选 |
 | `EvidenceItem` | 字幕、ASR、OCR、无语音状态或其他可引用证据 |
@@ -286,14 +292,40 @@ outputs/<source-id>/<run-id>/
 约束：
 
 1. 选定媒体流的实际 `PTS + time_base` 是权威值。
+   `PTS` 是有符号整数；负值是合法原始时间，不得截断为零或重写。
 2. 容器 `duration` 只作为诊断上界，不能替代实际解码覆盖范围。
 3. 音频 sample 0 映射到第一个实际解码 PTS，并记录 priming、skip 和 discard。
 4. 所有内部区间使用半开区间 `[start, end)`。
-5. 只有导出 SRT/VTT 时才转换成毫秒。
+5. 只有导出 SRT/VTT 时才转换成毫秒：`start_ms = floor(exact_start)`，
+   `end_ms = ceil(exact_end)`。原始正时长小于 1 ms 时仍导出至少 1 ms；精确范围
+   和源 PTS 保持权威，序列化端点向外扩展不足 1 ms 是允许的量化包络，不视为
+   越出来源范围。
 6. 不按总时长比例拉伸字幕。
-7. 多 P 同时保留 `part_local_time` 和由 Part 顺序推导的
-   `collection_virtual_time`。
+7. 多 P 同时保留 `RawPtsTime`、由 Part 覆盖起点导出的
+   `PartRelativeTime`，以及由 Part 顺序推导的 `CollectionVirtualTime`。
 8. Part 边界是硬章节边界，不跨 Part 合并字幕 cue。
+
+`RawPtsTime` 是 `PTS + time_base` 的精确有符号证据坐标。每个 Part 的
+`PartRelativeTime` 等于 `RawPtsTime - Part.coverage_start`，以实际流覆盖外包络
+起点为零；单 Part 的 SRT/VTT 只使用该非负坐标。`CollectionVirtualTime` 使用紧凑
+的实际覆盖范围拼接：第一个 Part 的 `PartRelativeTime` 起点映射为零，每个后续 Part
+的起点恰好映射为前一个 Part 外包络的终点。三个坐标之间只进行有理数平移；负 PTS
+也按该规则保留和映射。容器时长和编码造成的绝对 PTS 空隙不形成合集空档。只有
+单一流时，该流的实际覆盖范围就是该 Part 的外包络。
+
+`StreamCoverage` 只由成功观测到的 `DecodedInterval` 计算。每个区间必须具有精确
+起点和终点；覆盖外包络为 `[min(start), max(end))`，内部空洞另行记录为诊断，既不
+拆碎外包络也不静默填满。容器或流元数据的 `duration` 不得补齐缺失端点；无法确定
+必要边界时，`coverage_status=indeterminate`，且依赖精确范围的字幕校验不能通过。
+
+FFprobe 输出同时保存为不可变 `ProbeDocument` 和强类型 `ProbeProjection`。未知字段
+不导致解析失败，但只保留在原始证据中，不参与决策；任何必需字段缺失或数值无效都
+产生结构化 `probe_invalid` 诊断。系统不得降级为解析人类可读输出、正则提取或以
+容器时长猜测字段；缺少覆盖所需字段时同时报告 `coverage_indeterminate`。
+
+cue 的单调性只表示按 `(start, end, source_ordinal)` 的稳定排序；它不要求一个 cue
+在下一个 cue 开始前结束。重叠区间是合法证据，必须按原始时间保留，不得为消除
+重叠而自动裁剪、合并或平移。
 
 ### 6.2 对齐采用规则
 
@@ -311,6 +343,18 @@ outputs/<source-id>/<run-id>/
 
 ### 6.3 滚动字幕去重
 
+字幕 cue 分为三层不可变表示：`RawCue` 是保留原始文字、时间和来源坐标的解析
+证据；`NormalizedCue` 只进行无损格式规范化并保留全部 token；`PresentationCue`
+仅在可证明属于滚动累积显示时，按 token 所有权从 `NormalizedCue` 派生显示文字。
+任何删除只影响 `PresentationCue`，并关联其来源 token 范围和修正原因；它不得改写
+`RawCue` 或 `NormalizedCue`。
+
+滚动累积显示的证明只在同一 Part、同一字幕轨、稳定顺序相邻的 cue 之间成立：共享
+token 必须是完全一致的规范化连续前后缀，不使用模糊匹配、编辑距离或语义相似度。
+后一个 cue 必须严格扩展前一个 cue，且区间重叠或恰好相接，才允许将共享 token 的
+显示所有权归属到前一个 cue。完全相同的文本只有在起止时间也完全一致时才删除；
+其他相似或重复文字必须保留，并标记 `possible_duplicate`。
+
 - 不把多条字幕轨直接拼接。
 - 对相邻 cue 的规范化 token 序列进行单调匹配。
 - 只移除能证明属于平台滚动字幕累积显示的共享 token。
@@ -323,8 +367,8 @@ outputs/<source-id>/<run-id>/
 
 多 P 合集的字幕同时提供：
 
-- `parts/<part-id>/` 下每个 Part 的本地时间字幕。
-- RunBundle 根目录下按 Part 顺序组成的合集虚拟时间字幕。
+- `parts/<part-id>/` 下每个 Part 的 `PartRelativeTime` 字幕。
+- RunBundle 根目录下按 Part 顺序组成的 `CollectionVirtualTime` 字幕。
 - 每个 Part 保留独立处理状态和质量报告片段。
 - Part 边界是硬章节边界。
 - 真实重复出现的片头、片尾或回顾内容只标记，不自动删除。
@@ -451,6 +495,11 @@ outputs/<source-id>/<run-id>/
 
 其他轨道仅作为专有名词、数字或遗漏检查的候选证据。任何逐段替换必须记录来源，
 不得静默混合。
+
+字幕轨是原子候选：原始文件保持不变，只有全部 cue 都能解析并通过顺序、时长和
+实际流覆盖范围校验后，才允许进行无损规范化和输出。任一 cue 解析或校验失败都
+使整条轨处于 `invalid` 状态；系统必须给出结构化诊断，但不得静默修复、虚构边界
+或只发布剩余可解析 cue。
 
 没有任何合格字幕时，不自动下载或运行模型。`plan` 先展示完整 ASR 所需资源，
 由用户确认后执行。
@@ -797,7 +846,7 @@ running -> pausing -> paused -> running
 
 ### 阶段 0：需求冻结与计划
 
-状态：`当前阶段`
+状态：`已完成`
 
 目标：
 
@@ -847,6 +896,8 @@ running -> pausing -> paused -> running
 
 ### 阶段 2：确定性媒体核心与时间轴原型
 
+状态：`当前阶段，已授权，规格与原子任务清单已就绪，未实现`
+
 目标：
 
 - 首先解决时间戳时长不匹配、重复区间和跨 Part 时间映射问题。
@@ -862,6 +913,16 @@ running -> pausing -> paused -> running
 6. 实现滚动字幕 token 单调匹配与保守去重。
 7. 使用 ffmpeg 生成确定性测试媒体。
 
+合成测试媒体只通过单独宣布的夹具生成任务创建到 `tests/fixtures/`。每个夹具保留
+版本化生成配方、FFmpeg 路径和版本、内容哈希及预期 `ProbeDocument`；普通测试只
+读取这些固定夹具，不在每次运行时重新生成或自动删除。
+
+Phase 2 核心只使用 Python 标准库和已经锁定的测试工具，不新增第三方运行时依赖；
+任何库、锁文件或下载变更都必须作为单独决策与授权事项处理。
+
+Phase 2 不新增面向用户媒体的 CLI 命令；核心只通过库 API、显式夹具生成任务和
+集成测试调用。`vcp plan <source>`、本地文件和 URL 接入仍属于 Phase 3。
+
 合成测试必须覆盖：
 
 - 非零起始 PTS。
@@ -873,7 +934,7 @@ running -> pausing -> paused -> running
 - 滚动字幕累积文本。
 - 真实口头重复。
 - 合法同时说话区间。
-- 多 P 本地时间从零重新开始。
+- 多 P 的 `PartRelativeTime` 分别从零重新开始。
 - 不同 time base。
 
 退出门禁：
@@ -1267,16 +1328,16 @@ running -> pausing -> paused -> running
 
 `real_world_testing / 当前阶段：真实测试，尚未完成生产验收`
 
-## 21. 下一步
+## 21. 当前下一步
 
-本文件确认后，下一次任务只执行“阶段 1 的只读预检与变更计划”。在任何安装、
-下载、Python 命令或 Git 初始化之前，先向用户提交：
+Phase 2 已获授权。进入实现前，先形成可检查的 Phase 2 规格说明和原子化任务
+清单，并向用户提交：
 
 - 要执行的命令。
 - 要创建或修改的文件。
-- 要下载的运行时、工具、依赖或模型。
-- 下载来源、预计大小和本地路径。
+- 是否需要下载运行时、工具、依赖或模型；默认不下载。
+- 如需下载，下载来源、预计大小和本地路径。
 - 预计时间、峰值内存和磁盘占用。
 - 回滚和可删除项。
 
-得到明确确认后，才开始实际执行阶段 1。
+得到明确确认后，才开始实际执行对应的 Phase 2 原子任务。
