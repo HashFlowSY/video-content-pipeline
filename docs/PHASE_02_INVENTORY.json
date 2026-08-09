@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "phase": 2,
-  "status": "in_progress",
-  "recorded_at": "2026-08-09T02:08:08Z",
+  "status": "completed",
+  "recorded_at": "2026-08-09T02:21:19Z",
   "project_root": "/Users/shangyang/Desktop/workspace/projects/video-content-pipeline",
   "summary": {
     "phase_2_implementation_started": true,
@@ -17,7 +17,7 @@
     "models_downloaded": false,
     "paid_apis_used": false,
     "ffmpeg_or_ffprobe_executed": true,
-    "notes": "Phase 2 governance and execution records include the approved Ticket 01 envelope and completed Ticket 02 through Ticket 11 work. Ticket 10 generated only project-owned synthetic fixtures with the approved FFmpeg and FFprobe pair, retained raw probe evidence and hash-pinned artifacts, and archived a defective manifest before a user-authorized manifest-only repair. Ticket 11 added read-only hash verification and fixture-backed integration proof. No user media, network resource, package, model, paid API, or media-facing CLI action occurred."
+    "notes": "Phase 2 governance and execution records include the approved Ticket 01 envelope and completed Ticket 02 through Ticket 12 work. Ticket 10 generated only project-owned synthetic fixtures with the approved FFmpeg and FFprobe pair, retained raw probe evidence and hash-pinned artifacts, and archived a defective manifest before a user-authorized manifest-only repair. Ticket 11 added read-only hash verification and fixture-backed integration proof. Ticket 12 ran the final environment, test, lint, and type gates and published the completion report. No user media, network resource, package, model, paid API, or media-facing CLI action occurred."
   },
   "execution_records": [
     {
@@ -249,6 +249,36 @@
         "models_downloaded": false,
         "paid_apis_used": false
       }
+    },
+    {
+      "ticket": "12",
+      "status": "passed",
+      "commands": [
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; ruff check src tests",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; ruff format --check src tests",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; mypy src",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; python --version; pytest --version; ruff --version; mypy --version",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; /usr/bin/time -l pytest -q"
+      ],
+      "results": {
+        "environment_gate": "passed before every Python-invoking command",
+        "python": "3.12.13",
+        "pytest": "8.3.5; 49 passed in 0.18s",
+        "ruff": "0.11.5; lint passed; 18 files already formatted",
+        "mypy": "1.15.0; no issues in 9 source files",
+        "production_validated": false
+      },
+      "resource_bounds": {
+        "maximum_resident_set_size_bytes": 37142528,
+        "wall_time_seconds": 0.29,
+        "swap_operations": 0,
+        "block_input_operations": 0,
+        "block_output_operations": 0,
+        "network_or_downloads": false,
+        "fixture_generation_or_deletion": false,
+        "user_media_accessed": false
+      }
     }
   ],
   "entries": [
@@ -270,8 +300,8 @@
       "kind": "file",
       "action": "modified",
       "purpose": "Describe the current Phase 2 boundary",
-      "size_bytes": 1527,
-      "sha256": "eed7b085503eb7e307c3e0c5d60d28a3873a30ba74c9618ded6c2779a73df79b",
+      "size_bytes": 1609,
+      "sha256": "38aea022371e7dd1dbb704286241c08a69baa803b5db1b8d7e070b35a827537e",
       "stage": "PHASE-02",
       "used_by": ["project_orientation"],
       "rebuildable": true,
@@ -282,9 +312,9 @@
       "path": "project-state.json",
       "kind": "file",
       "action": "modified",
-      "purpose": "Record Phase 2 as the active project phase",
-      "size_bytes": 1079,
-      "sha256": "708a97b31e46ca2b435d707bcf0c308b3537885dfe8131c53dca836efccfe909",
+      "purpose": "Record the completed Phase 2 project state and handoff boundary",
+      "size_bytes": 1153,
+      "sha256": "267f36448fdb48acbecd69f6d831432a717f4adce7a4aaebee2975974a6585a5",
       "stage": "PHASE-02",
       "used_by": ["project_governance", "phase_handoff"],
       "rebuildable": true,
@@ -296,8 +326,8 @@
       "kind": "file",
       "action": "modified",
       "purpose": "Mark the adopted Phase 2 plan and its immediate pre-implementation work",
-      "size_bytes": 50037,
-      "sha256": "9f55f18f8b4969b3a495fa0ad40a16e16d8e5cdae6d0b998ca86965291f8ae6e",
+      "size_bytes": 50038,
+      "sha256": "d16827b0e49f118e4d9a9c00d510f12f030fe96561de5c0045589c61b6465fc4",
       "stage": "PHASE-02",
       "used_by": ["phase_2_planning"],
       "rebuildable": true,
@@ -322,8 +352,8 @@
       "kind": "file",
       "action": "created",
       "purpose": "Versioned Phase 2 scope, contracts, tests, and authorization boundary",
-      "size_bytes": 9035,
-      "sha256": "26a6d4c2ae84869e25ce02fc3e9e748e5f423478ab9492f20249b14d2414f23c",
+      "size_bytes": 9061,
+      "sha256": "e7479f10eb09ecc24e12ba915c9658ede5a0680efded0bcd057d51701236d575",
       "stage": "PHASE-02",
       "used_by": ["phase_2_planning", "implementation_authorization"],
       "rebuildable": true,
@@ -1856,8 +1886,8 @@
       "kind": "file",
       "action": "created",
       "purpose": "Ticket 11 read-only proof of fixture hash validation, ProbeDocument projection, decoded coverage, coordinate mapping, and subtitle round trips",
-      "size_bytes": 17129,
-      "sha256": "e59abdba199171be0265707a50aeb6a3858e09476a33fa9eb533f7f468a7acb7",
+      "size_bytes": 18114,
+      "sha256": "93df03424d52574293b1bf504f98991e45a2f578bb4a7807b8d3b1d7c83e78af",
       "stage": "PHASE-02",
       "used_by": ["integration_testing", "fixture_manifest", "probe_evidence", "coverage_evidence", "subtitle_evidence"],
       "rebuildable": true,
@@ -1869,8 +1899,8 @@
       "kind": "file",
       "action": "modified",
       "purpose": "Preserve retained subtitle cue identifiers during deterministic SRT and VTT serialization",
-      "size_bytes": null,
-      "sha256": null,
+      "size_bytes": 3179,
+      "sha256": "96749a1d5b2db582c5bde9a911841dbfe1db5922bd9790ca3d396b5d58d9b3e4",
       "stage": "PHASE-02",
       "used_by": ["subtitle_evidence", "subtitle_export", "integration_testing"],
       "rebuildable": true,
@@ -1928,6 +1958,84 @@
       "rebuildable": true,
       "deletion_class": "keep_for_audit",
       "deletion_consequence": "The Phase 2 execution ledger would omit Ticket 11."
+    },
+    {
+      "path": "docs/PHASE_02_COMPLETION_REPORT.md",
+      "kind": "file",
+      "action": "created",
+      "purpose": "Publish the final Phase 2 verification, scope boundary, and handoff record",
+      "size_bytes": 3223,
+      "sha256": "a383e09bf329c38f59664163f9481bb42e27ebb66765eb67c79f66e09eaa32ab",
+      "stage": "PHASE-02",
+      "used_by": ["phase_2_audit", "phase_handoff"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The final Phase 2 verification result would be unavailable."
+    },
+    {
+      "path": "tests/integration/test_fixture_backed_core.py",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Add a fixture-backed regression that coverage ignores contradictory duration metadata",
+      "size_bytes": 18114,
+      "sha256": "93df03424d52574293b1bf504f98991e45a2f578bb4a7807b8d3b1d7c83e78af",
+      "stage": "PHASE-02",
+      "used_by": ["integration_testing", "coverage_evidence", "phase_2_audit"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "Metadata-duration fallback behavior would lack fixture-backed regression coverage."
+    },
+    {
+      "path": "config/runtime-policy.toml",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Set the project runtime policy to the completed Phase 2 boundary",
+      "size_bytes": 824,
+      "sha256": "937102233b01e2c678eccd7f5f9856403287d89ffbb797a5f539187b812b420b",
+      "stage": "PHASE-02",
+      "used_by": ["project_governance", "phase_handoff"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The runtime policy would report the wrong phase."
+    },
+    {
+      "path": "config/tools.json",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Record actual Phase 2 FFmpeg and FFprobe fixture-tool use and provenance",
+      "size_bytes": 3587,
+      "sha256": "512a83ec336efe87c5385246a14d675779eae9e4ce764755e8bae894b930a5a8",
+      "stage": "PHASE-02",
+      "used_by": ["fixture_toolchain", "phase_2_audit"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The canonical tool registry would omit Phase 2 provenance."
+    },
+    {
+      "path": "docs/PHASED_EXECUTION_PLAN.md",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Mark the adopted Phase 2 plan as completed after final verification",
+      "size_bytes": 50038,
+      "sha256": "d16827b0e49f118e4d9a9c00d510f12f030fe96561de5c0045589c61b6465fc4",
+      "stage": "PHASE-02",
+      "used_by": ["phase_2_planning", "phase_handoff"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The adopted plan would report a stale phase status."
+    },
+    {
+      "path": ".scratch/phase-02-deterministic-media-core-and-timeline-prototype/issues/12-verify-phase-2-and-publish-completion-record.md",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Record final Ticket 12 gate results and resolution",
+      "size_bytes": 1276,
+      "sha256": "b60369b6a84780645f454f99b907b988c495bf420eb2152271b4dee009691906",
+      "stage": "PHASE-02",
+      "used_by": ["issue_tracking", "phase_2_audit", "phase_handoff"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The final ticket resolution and verification evidence would be lost."
     }
   ]
 }

@@ -21,13 +21,13 @@
 - [x] Write failing unit tests for `ProbeDocument`, `ProbeProjection`, unknown
   fields, and required-field diagnostics; implement typed JSON parsing without
   text or metadata fallback.
-- [ ] Write failing unit tests for `DecodedInterval`, `StreamCoverage`, gaps,
+- [x] Write failing unit tests for `DecodedInterval`, `StreamCoverage`, gaps,
   and indeterminate boundaries; implement coverage envelopes without duration
   guesses.
-- [ ] Write failing unit tests for valid SRT and VTT input, invalid atomic
+- [x] Write failing unit tests for valid SRT and VTT input, invalid atomic
   rejection, source-bound checks, and lossless normalization; implement the
   smallest `RawCue` and `NormalizedCue` parser behavior that passes.
-- [ ] Write failing unit tests for `PresentationCue`, stable overlap ordering,
+- [x] Write failing unit tests for `PresentationCue`, stable overlap ordering,
   and outward millisecond serialization; implement derived cue and export
   behavior without rewriting source evidence.
 - [x] Write failing unit tests for exact rolling accumulation, exact duplicate
@@ -44,5 +44,5 @@
 - [x] Run the approved unit, integration, lint, type-check, and environment-gate
   commands; record all commands, paths, versions, test results, and resources
   in the Phase 2 inventory.
-- [ ] Publish a Phase 2 completion report and update project status only when
+- [x] Publish a Phase 2 completion report and update project status only when
   every accepted task and gate has passed. Do not mark production validation.

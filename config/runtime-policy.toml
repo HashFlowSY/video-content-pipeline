@@ -1,5 +1,5 @@
 schema_version = 1
-phase = 1
+phase = 2
 python_version = "3.12.13"
 project_virtual_environment = ".venv"
 managed_python_interpreter = "runtime/python/cpython-3.12.13-macos-aarch64-none/bin/python3.12"

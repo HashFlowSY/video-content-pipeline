@@ -337,6 +337,28 @@ def test_retained_frames_prove_coverage_and_exact_coordinate_mapping(
     assert collection_time.part_relative_time.coverage_start.time == ExactTime(10)
 
 
+def test_coverage_ignores_contradictory_probe_duration_metadata(
+    verified_fixture_root: Path,
+) -> None:
+    source = _probe_document(verified_fixture_root, "phase-02-gap-video.ffprobe.json")
+    decoded = json.loads(source.raw_json)
+    assert isinstance(decoded, dict)
+    format_value = decoded.get("format")
+    streams_value = decoded.get("streams")
+    assert isinstance(format_value, dict)
+    assert isinstance(streams_value, list) and isinstance(streams_value[0], dict)
+    format_value["duration"] = "999.0"
+    streams_value[0]["duration"] = "0.001"
+    contradictory = ProbeDocument(raw_json=json.dumps(decoded, sort_keys=True))
+
+    projection = project_probe_document(contradictory).projection
+    assert projection is not None
+    result = _coverage_from_frames(contradictory, projection, stream_index=0)
+
+    assert result.coverage == HalfOpenInterval(ExactTime(10), ExactTime(139, 10))
+    assert result.gaps == (HalfOpenInterval(ExactTime(11), ExactTime(13)),)
+
+
 def test_retained_srt_and_vtt_fixture_tracks_round_trip_against_coverage(
     verified_fixture_root: Path,
 ) -> None:

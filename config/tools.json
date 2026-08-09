@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "phase": 1,
+  "phase": 2,
   "tools": [
     {
       "id": "git",
@@ -13,15 +13,19 @@
       "id": "ffmpeg",
       "path": "/opt/homebrew/bin/ffmpeg",
       "version": "8.1.2",
-      "status": "available_not_used",
-      "used_in_phase_1": false
+      "status": "used_for_phase_2_synthetic_fixtures",
+      "used_in_phase_1": false,
+      "used_in_phase_2": true,
+      "purpose": "Generate only the retained project-owned synthetic media fixtures."
     },
     {
       "id": "ffprobe",
       "path": "/opt/homebrew/bin/ffprobe",
       "version": "8.1.2",
-      "status": "available_not_used",
-      "used_in_phase_1": false
+      "status": "used_for_phase_2_synthetic_fixture_evidence",
+      "used_in_phase_1": false,
+      "used_in_phase_2": true,
+      "purpose": "Retain raw JSON evidence for the project-owned synthetic media fixtures."
     },
     {
       "id": "yt-dlp",
