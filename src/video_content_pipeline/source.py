@@ -161,6 +161,7 @@ def snapshot_local_source(
     input_root: Path,
     *,
     before_copy: Callable[[int], None] | None = None,
+    origin_kind: str = "local_file",
 ) -> SourceArtifact:
     """Create or reuse a double-hashed SourceArtifact below the project input root."""
 
@@ -187,7 +188,9 @@ def snapshot_local_source(
                     "artifact_hash_mismatch",
                     "The existing content-addressed artifact has unexpected bytes.",
                 )
-            return SourceArtifact(before_hash, before_hash, before_size, media_path)
+            return SourceArtifact(
+                before_hash, before_hash, before_size, media_path, origin_kind=origin_kind
+            )
 
         current_hash, current_size = _hash_open_file(descriptor)
         if before_hash != current_hash or before_size != current_size:
@@ -232,7 +235,9 @@ def snapshot_local_source(
             os.replace(pending_path, media_path)
             os.chmod(media_path, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
 
-        return SourceArtifact(before_hash, before_hash, before_size, media_path)
+        return SourceArtifact(
+            before_hash, before_hash, before_size, media_path, origin_kind=origin_kind
+        )
     except SourceIntakeError:
         raise
     except OSError as error:

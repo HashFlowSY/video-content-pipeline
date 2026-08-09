@@ -25,12 +25,14 @@
     "README.md",
     "config/decode-throughput-profiles.json",
     "src/video_content_pipeline/cli.py",
+    "src/video_content_pipeline/acquisition.py",
     "src/video_content_pipeline/external_tools.py",
     "src/video_content_pipeline/inspection.py",
     "src/video_content_pipeline/planning.py",
     "src/video_content_pipeline/source.py",
     "src/video_content_pipeline/url_policy.py",
     "tests/unit/test_phase_3_cli_contract.py",
+    "tests/unit/test_phase_3_acquisition.py",
     "tests/unit/test_phase_3_external_tools.py",
     "tests/unit/test_phase_3_inspection.py",
     "tests/unit/test_phase_3_planning.py",
@@ -61,7 +63,8 @@
     "/Users/shangyang/.agents/skills/domain-modeling/SKILL.md",
     "/Users/shangyang/.agents/skills/implement/SKILL.md",
     "/Users/shangyang/.agents/skills/tdd/SKILL.md",
-    "/Users/shangyang/.agents/skills/code-review/SKILL.md"
+    "/Users/shangyang/.agents/skills/code-review/SKILL.md",
+    "https://github.com/yt-dlp/yt-dlp/blob/master/README.md"
   ],
   "execution_records": [
     {
@@ -112,6 +115,26 @@
       "result": "99 passed in 0.29s; Ruff check and format check passed; strict Mypy passed",
       "network_requests": 0,
       "user_media_accessed": false,
+      "ffmpeg_executed": false,
+      "ffprobe_executed": false
+    },
+    {
+      "command": "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest tests/unit/test_phase_3_acquisition.py tests/unit/test_phase_3_cli_contract.py -q",
+      "purpose": "Ticket 06 controlled public-URL acquisition and CLI workflow verification",
+      "result": "21 passed in 0.18s",
+      "network_requests": 0,
+      "user_media_accessed": false,
+      "yt_dlp_executed": false,
+      "ffmpeg_executed": false,
+      "ffprobe_executed": false
+    },
+    {
+      "command": "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q && python -m ruff check src tests && python -m ruff format --check src tests && python -m mypy src",
+      "purpose": "Ticket 06 final offline regression and static verification",
+      "result": "109 passed in 0.42s; Ruff check and format check passed; strict Mypy passed",
+      "network_requests": 0,
+      "user_media_accessed": false,
+      "yt_dlp_executed": false,
       "ffmpeg_executed": false,
       "ffprobe_executed": false
     }

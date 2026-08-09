@@ -74,6 +74,26 @@ def test_public_url_cli_persists_only_redacted_authorization_evidence(
     )
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        "HTTPS://example.test/watch?token=secret",
+        "ftp://example.test/watch?token=secret",
+    ],
+)
+def test_url_shaped_input_never_persists_its_raw_locator(
+    target: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+
+    exit_code = cli.main(["plan", target, "--url-mode", "direct", "--json"])
+
+    assert exit_code == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "blocked"
+    assert "secret" not in _report_path(tmp_path, result["report"]).read_text(encoding="utf-8")
+
+
 def test_manual_collection_cli_preserves_input_order_and_closes_on_endsignal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -125,6 +145,59 @@ def test_manual_collection_cli_persists_a_blocked_report_for_duplicate_input(
     assert "secret" not in _report_path(tmp_path, result["report"]).read_text(encoding="utf-8")
 
 
+def test_public_url_acquisition_enters_the_local_probe_and_decode_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+    _write_url_planning_configuration(tmp_path)
+    artifact = _public_artifact(tmp_path)
+    yt_dlp = PinnedExternalTool("yt-dlp", tmp_path / "yt-dlp", "test", "a" * 64)
+    ffprobe = PinnedExternalTool("ffprobe", tmp_path / "ffprobe", "test", "b" * 64)
+    ffmpeg = PinnedExternalTool("ffmpeg", tmp_path / "ffmpeg", "test", "c" * 64)
+
+    monkeypatch.setattr(
+        cli,
+        "_configured_tool",
+        lambda _root, tool_id: {"yt-dlp": yt_dlp, "ffprobe": ffprobe, "ffmpeg": ffmpeg}[tool_id],
+    )
+    monkeypatch.setattr(cli, "acquire_public_source", lambda *_args: artifact)
+    monkeypatch.setattr(cli, "capture_probe_documents", lambda *_args: _valid_probe_documents())
+
+    exit_code = cli.main(
+        ["plan", "https://example.test/watch?token=secret", "--url-mode", "direct", "--json"]
+    )
+
+    assert exit_code == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "awaiting_decode_confirmation"
+    assert result["report"]["source_artifacts"] == [artifact.as_json()]
+    assert result["report"]["tools"] == [yt_dlp.as_json(), ffprobe.as_json(), ffmpeg.as_json()]
+    assert result["report"]["url_authorizations"][0]["provenance"]["path"] == "/watch"
+    assert "secret" not in _report_path(tmp_path, result["report"]).read_text(encoding="utf-8")
+
+
+def test_duplicate_collection_content_is_retained_once_and_blocks_the_timeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+    artifact = _public_artifact(tmp_path)
+    yt_dlp = PinnedExternalTool("yt-dlp", tmp_path / "yt-dlp", "test", "a" * 64)
+    submitted = iter(["https://example.test/part-one", "https://example.test/part-two", "结束"])
+
+    monkeypatch.setattr(cli, "_configured_tool", lambda _root, _tool_id: yt_dlp)
+    monkeypatch.setattr(cli, "acquire_public_source", lambda *_args: artifact)
+    monkeypatch.setattr(cli, "_read_collection_line", lambda _prompt: next(submitted))
+
+    exit_code = cli.main(["plan", "--collect", "--url-mode", "direct", "--json"])
+
+    assert exit_code == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "blocked"
+    assert result["report"]["diagnostics"][0]["reason"] == "duplicate_part"
+    assert result["report"]["source_artifacts"] == [artifact.as_json()]
+    assert len(result["report"]["url_authorizations"]) == 2
+
+
 def _prepare_phase_3_cli(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> None:
     monkeypatch.setattr(cli, "assert_runtime_policy", lambda: None)
     monkeypatch.setattr(cli, "assert_project_venv", lambda: object())
@@ -135,6 +208,39 @@ def _report_path(project_root: Path, report: dict[str, object]) -> Path:
     report_id = report["report_id"]
     assert isinstance(report_id, str)
     return project_root / "plans" / "reports" / report_id / "plan-report.json"
+
+
+def _public_artifact(tmp_path: Path) -> SourceArtifact:
+    media_path = tmp_path / "input" / "public" / "media"
+    media_path.parent.mkdir(parents=True)
+    media_path.write_bytes(b"public-source")
+    digest, byte_count = sha256_file(media_path)
+    return SourceArtifact(digest, digest, byte_count, media_path, origin_kind="public_url")
+
+
+def _valid_probe_documents() -> tuple[ProbeDocument, ProbeDocument]:
+    return (
+        ProbeDocument('{"streams": [{"index": 0, "codec_type": "video", "time_base": "1/1000"}]}'),
+        ProbeDocument('{"packets": [{"stream_index": 0, "pts": 0, "duration": 1000}]}'),
+    )
+
+
+def _write_url_planning_configuration(project_root: Path) -> None:
+    config = project_root / "config"
+    config.mkdir()
+    (config / "decode-throughput-profiles.json").write_text(
+        """{
+  "profiles": [{
+    "id": "phase-03-default-v1",
+    "optimistic_realtime_factor": "8",
+    "likely_realtime_factor": "3",
+    "conservative_realtime_factor": "1"
+  }]
+}
+""",
+        encoding="utf-8",
+    )
+    (config / "tools.json").write_text('{"tools": []}\n', encoding="utf-8")
 
 
 def test_local_non_regular_input_returns_a_retained_blocked_report(tmp_path: Path) -> None:

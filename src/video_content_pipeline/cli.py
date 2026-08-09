@@ -6,9 +6,12 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from fractions import Fraction
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from video_content_pipeline import __version__
+from video_content_pipeline.acquisition import URLAcquisitionError, acquire_public_source
 from video_content_pipeline.environment import assert_project_venv, assert_runtime_policy
 from video_content_pipeline.external_tools import PinnedExternalTool, identify_external_tool
 from video_content_pipeline.inspection import (
@@ -134,6 +137,7 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
         return _plan_manual_collection(
             URLAccessMode(arguments.url_mode),
             arguments.allow_insecure_http,
+            project_root,
             plans_root,
             arguments.json,
         )
@@ -141,7 +145,14 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
         raise PlanningError(
             "source_missing", "vcp plan needs a local file, public URL, or --collect."
         )
-    if arguments.target.startswith(("http://", "https://")):
+    if urlsplit(arguments.target).scheme:
+        if urlsplit(arguments.target).scheme.lower() not in {"http", "https"}:
+            return _blocked_url_report(
+                "url_scheme_invalid",
+                "A public source must use HTTP or HTTPS.",
+                plans_root,
+                (),
+            )
         if arguments.url_mode is None:
             return _blocked_url_report(
                 "url_mode_missing",
@@ -157,12 +168,7 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
             )
         except URLPolicyError as error:
             return _blocked_url_report(error.reason, str(error), plans_root, ())
-        return _blocked_url_report(
-            "url_acquisition_pending",
-            "URL policy accepted; acquisition remains intentionally disabled.",
-            plans_root,
-            (authorization,),
-        )
+        return _plan_public_sources((authorization,), project_root, plans_root)
     return _plan_local_file(Path(arguments.target), project_root, plans_root)
 
 
@@ -187,81 +193,130 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
         return _blocked_local_report(
             error, planned_increment, plans_root, configuration_fingerprint
         )
-    ffprobe = _configured_tool(project_root, "ffprobe")
-    ffmpeg = _configured_tool(project_root, "ffmpeg")
-    inspection_evidence: tuple[PlanInspectionEvidence, ...] = ()
+    return _plan_source_artifacts(
+        (artifact,),
+        project_root,
+        plans_root,
+        planned_increment,
+    )
+
+
+def _plan_source_artifacts(
+    source_artifacts: tuple[SourceArtifact, ...],
+    project_root: Path,
+    plans_root: Path,
+    planned_increment: int,
+    *,
+    initial_tools: tuple[PinnedExternalTool, ...] = (),
+    url_authorizations: tuple[URLAuthorization, ...] = (),
+) -> dict[str, object]:
+    """Apply the common strict inspection and decode-estimate workflow to snapshots."""
+
+    configuration_fingerprint = planning_configuration_fingerprint(project_root)
     try:
-        documents = capture_probe_documents(
-            ffprobe, artifact, artifact.media_path.parent / "evidence"
-        )
-        inspection_evidence = (
-            PlanInspectionEvidence.from_documents(artifact.source_id, *documents),
-        )
-        inspection = inspect_documents(*documents)
-    except InspectionError as error:
-        if isinstance(error, ProbeCaptureError):
-            inspection_evidence = (
-                PlanInspectionEvidence.from_capture_error(artifact.source_id, error),
-            )
-        return _blocked_local_report(
-            error,
+        ffprobe = _configured_tool(project_root, "ffprobe")
+        ffmpeg = _configured_tool(project_root, "ffmpeg")
+    except (PlanningError, ValueError) as error:
+        return _blocked_report(
+            _reason(error),
+            str(error),
             planned_increment,
             plans_root,
             configuration_fingerprint,
-            source_artifacts=(artifact,),
-            tools=(ffprobe, ffmpeg),
-            inspection_evidence=inspection_evidence,
+            source_artifacts=source_artifacts,
+            tools=initial_tools,
+            url_authorizations=url_authorizations,
         )
-    inspection_evidence = (PlanInspectionEvidence.from_inspection(artifact.source_id, inspection),)
-    media_coverages = [
-        coverage.coverage
-        for coverage in inspection.coverage_by_stream.values()
-        if coverage.coverage is not None
-    ]
-    if not media_coverages or len(media_coverages) != len(inspection.coverage_by_stream):
-        blocked = create_plan_report(
-            state=PlanState.BLOCKED,
-            source_artifacts=(artifact,),
-            tools=(ffprobe, ffmpeg),
-            planned_increment_bytes=planned_increment,
-            configuration_fingerprint=configuration_fingerprint,
-            diagnostics=(
-                PlanningDiagnostic("coverage_indeterminate", "Source coverage is not complete."),
-            ),
-            inspection_evidence=inspection_evidence,
+    tools = (*initial_tools, ffprobe, ffmpeg)
+    inspection_evidence: list[PlanInspectionEvidence] = []
+    durations = []
+    for artifact in source_artifacts:
+        evidence: PlanInspectionEvidence | None = None
+        try:
+            documents = capture_probe_documents(
+                ffprobe, artifact, artifact.media_path.parent / "evidence"
+            )
+            evidence = PlanInspectionEvidence.from_documents(artifact.source_id, *documents)
+            inspection = inspect_documents(*documents)
+        except InspectionError as error:
+            if isinstance(error, ProbeCaptureError):
+                evidence = PlanInspectionEvidence.from_capture_error(artifact.source_id, error)
+            if evidence is not None:
+                inspection_evidence.append(evidence)
+            return _blocked_report(
+                error.reason,
+                str(error),
+                planned_increment,
+                plans_root,
+                configuration_fingerprint,
+                source_artifacts=source_artifacts,
+                tools=tools,
+                url_authorizations=url_authorizations,
+                inspection_evidence=_complete_inspection_evidence(
+                    source_artifacts, inspection_evidence
+                ),
+            )
+        evidence = PlanInspectionEvidence.from_inspection(artifact.source_id, inspection)
+        inspection_evidence.append(evidence)
+        media_coverages = [
+            coverage.coverage
+            for coverage in inspection.coverage_by_stream.values()
+            if coverage.coverage is not None
+        ]
+        if not media_coverages or len(media_coverages) != len(inspection.coverage_by_stream):
+            return _blocked_report(
+                "coverage_indeterminate",
+                "Source coverage is not complete.",
+                planned_increment,
+                plans_root,
+                configuration_fingerprint,
+                source_artifacts=source_artifacts,
+                tools=tools,
+                url_authorizations=url_authorizations,
+                inspection_evidence=_complete_inspection_evidence(
+                    source_artifacts, inspection_evidence
+                ),
+            )
+        durations.append(
+            max(coverage.end for coverage in media_coverages)
+            - min(coverage.start for coverage in media_coverages)
         )
-        persist_plan_report(blocked, plans_root)
-        return {"status": "blocked", "report": blocked.as_json()}
-    duration = max(coverage.end for coverage in media_coverages) - min(
-        coverage.start for coverage in media_coverages
-    )
     try:
         profile = load_decode_throughput_profile(
             project_root / "config" / "decode-throughput-profiles.json"
         )
         measurements = load_decode_measurements(plans_root / "decode-throughput-history.json")
     except PlanningError as error:
-        return _blocked_local_report(
-            error,
+        return _blocked_report(
+            error.reason,
+            str(error),
             planned_increment,
             plans_root,
             configuration_fingerprint,
-            source_artifacts=(artifact,),
-            tools=(ffprobe, ffmpeg),
-            inspection_evidence=inspection_evidence,
+            source_artifacts=source_artifacts,
+            tools=tools,
+            url_authorizations=url_authorizations,
+            inspection_evidence=_complete_inspection_evidence(
+                source_artifacts, inspection_evidence
+            ),
         )
     awaiting_decode = create_plan_report(
         state=PlanState.AWAITING_DECODE_CONFIRMATION,
-        source_artifacts=(artifact,),
-        tools=(ffprobe, ffmpeg),
+        source_artifacts=source_artifacts,
+        tools=tools,
         planned_increment_bytes=planned_increment,
         configuration_fingerprint=configuration_fingerprint,
         decode_estimate=estimate_full_decode(
-            duration.as_fraction(),
+            sum((duration.as_fraction() for duration in durations), start=Fraction()),
             profile,
-            matching_measurement=find_matching_decode_measurement(measurements, artifact.source_id),
+            matching_measurement=(
+                find_matching_decode_measurement(measurements, source_artifacts[0].source_id)
+                if len(source_artifacts) == 1
+                else None
+            ),
         ),
-        inspection_evidence=inspection_evidence,
+        url_authorizations=tuple(authorization.evidence for authorization in url_authorizations),
+        inspection_evidence=tuple(inspection_evidence),
     )
     persist_plan_report(awaiting_decode, plans_root)
     return {"status": "awaiting_decode_confirmation", "report": awaiting_decode.as_json()}
@@ -279,14 +334,43 @@ def _blocked_local_report(
 ) -> dict[str, object]:
     """Retain an intake or inspection failure as a non-executable planning outcome."""
 
+    return _blocked_report(
+        error.reason,
+        str(error),
+        planned_increment,
+        plans_root,
+        configuration_fingerprint,
+        source_artifacts=source_artifacts,
+        tools=tools,
+        inspection_evidence=inspection_evidence,
+    )
+
+
+def _blocked_report(
+    reason: str,
+    message: str,
+    planned_increment: int,
+    plans_root: Path,
+    configuration_fingerprint: str,
+    *,
+    source_artifacts: tuple[SourceArtifact, ...] = (),
+    tools: tuple[PinnedExternalTool, ...] = (),
+    url_authorizations: tuple[URLAuthorization, ...] = (),
+    inspection_evidence: tuple[PlanInspectionEvidence, ...] = (),
+) -> dict[str, object]:
+    """Persist a blocked report without placing raw URL input in its evidence."""
+
     report = create_plan_report(
         state=PlanState.BLOCKED,
         source_artifacts=source_artifacts,
         tools=tools,
         planned_increment_bytes=planned_increment,
         configuration_fingerprint=configuration_fingerprint,
-        diagnostics=(PlanningDiagnostic(error.reason, str(error)),),
-        inspection_evidence=inspection_evidence,
+        diagnostics=(PlanningDiagnostic(reason, message),),
+        url_authorizations=tuple(authorization.evidence for authorization in url_authorizations),
+        inspection_evidence=_complete_inspection_evidence(
+            source_artifacts, list(inspection_evidence)
+        ),
     )
     persist_plan_report(report, plans_root)
     return {"status": "blocked", "report": report.as_json()}
@@ -354,6 +438,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
 def _plan_manual_collection(
     mode: URLAccessMode,
     allow_insecure_http: bool,
+    project_root: Path,
     plans_root: Path,
     json_output: bool,
 ) -> dict[str, object]:
@@ -362,12 +447,70 @@ def _plan_manual_collection(
         entries = _collect_manual_urls(session, json_output=json_output)
     except URLPolicyError as error:
         return _blocked_url_report(error.reason, str(error), plans_root, session.entries)
-    return _blocked_url_report(
-        "collection_acquisition_pending",
-        "URL policy accepted; acquisition remains intentionally disabled.",
+    return _plan_public_sources(entries, project_root, plans_root)
+
+
+def _plan_public_sources(
+    authorizations: tuple[URLAuthorization, ...], project_root: Path, plans_root: Path
+) -> dict[str, object]:
+    """Acquire authorized public sources before passing their snapshots to preflight."""
+
+    configuration_fingerprint = planning_configuration_fingerprint(project_root)
+    try:
+        downloader = _configured_tool(project_root, "yt-dlp")
+    except (PlanningError, ValueError) as error:
+        return _blocked_report(
+            _reason(error),
+            str(error),
+            0,
+            plans_root,
+            configuration_fingerprint,
+            url_authorizations=authorizations,
+        )
+    artifacts: list[SourceArtifact] = []
+    source_ids: set[str] = set()
+    for ordinal, authorization in enumerate(authorizations, start=1):
+        try:
+            artifact = acquire_public_source(authorization, downloader, project_root)
+        except (SourceIntakeError, URLAcquisitionError, URLPolicyError) as error:
+            return _blocked_report(
+                error.reason,
+                str(error),
+                _public_planned_increment(artifacts),
+                plans_root,
+                configuration_fingerprint,
+                source_artifacts=tuple(artifacts),
+                tools=(downloader,),
+                url_authorizations=authorizations,
+            )
+        if artifact.source_id in source_ids:
+            return _blocked_report(
+                "duplicate_part",
+                (
+                    f"Collection Part {ordinal} has the same SourceArtifact content as an "
+                    "earlier Part."
+                ),
+                _public_planned_increment(artifacts),
+                plans_root,
+                configuration_fingerprint,
+                source_artifacts=tuple(artifacts),
+                tools=(downloader,),
+                url_authorizations=authorizations,
+            )
+        source_ids.add(artifact.source_id)
+        artifacts.append(artifact)
+    return _plan_source_artifacts(
+        tuple(artifacts),
+        project_root,
         plans_root,
-        entries,
+        _public_planned_increment(artifacts),
+        initial_tools=(downloader,),
+        url_authorizations=authorizations,
     )
+
+
+def _public_planned_increment(artifacts: Sequence[SourceArtifact]) -> int:
+    return sum(artifact.byte_count * 2 for artifact in artifacts) + 64 * 1024**2
 
 
 def _collect_manual_urls(
@@ -413,12 +556,31 @@ def _blocked_url_report(
     return {"status": "blocked", "report": report.as_json()}
 
 
+def _complete_inspection_evidence(
+    source_artifacts: tuple[SourceArtifact, ...],
+    inspected: Sequence[PlanInspectionEvidence],
+) -> tuple[PlanInspectionEvidence, ...]:
+    """Retain explicit no-probe evidence for sources after a blocked earlier Part."""
+
+    by_source = {evidence.source_id: evidence for evidence in inspected}
+    return tuple(
+        by_source.get(
+            artifact.source_id,
+            PlanInspectionEvidence(artifact.source_id, None, None, (), ()),
+        )
+        for artifact in source_artifacts
+    )
+
+
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
 def _configured_tool(project_root: Path, tool_id: str) -> PinnedExternalTool:
-    decoded = json.loads((project_root / "config" / "tools.json").read_text(encoding="utf-8"))
+    try:
+        decoded = json.loads((project_root / "config" / "tools.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise PlanningError("tool_registry_invalid", "Tool registry cannot be read.") from error
     tools = decoded.get("tools")
     if not isinstance(tools, list):
         raise PlanningError("tool_registry_invalid", "Tool registry has no tools list.")
