@@ -25,10 +25,14 @@ verifies all 12 canonical manifest entries for relative path, byte count, and
 SHA-256 before reading ProbeDocuments or subtitle evidence; missing and
 mismatched artifacts fail with explicit assertions. The retained frame evidence
 proves `gap-video` coverage `[10, 13.9)` and its internal gap `[11, 13)`; the
-previous `[13, 14)` prose in the approved fixture proposal and Ticket 10 ledger
-was corrected to match the hash-pinned evidence without changing fixture bytes.
+previous `[13, 14)` expectation remains in the approved fixture proposal and
+Ticket 10 ledger. Ticket 11 records this discrepancy but does not amend that
+approved contract or change fixture bytes.
 The follow-up review fixed two gaps: the manifest now requires the exact
-canonical entry set, and SRT/VTT serialization retains source cue identifiers.
+canonical entry set, required retention and fixture metadata, matching media
+and probe tool provenance, and no unexpected retained files beyond the
+non-self-hashable manifest and archived invalid-manifest evidence. SRT/VTT
+serialization also retains source cue identifiers.
 The tests verify the retained VTT identifier, setting, multiline text, and
 one-millisecond interval across both round trips. The suite passed (`48
 passed`), as did ruff, format, and `mypy src`. No fixture generation, deletion,

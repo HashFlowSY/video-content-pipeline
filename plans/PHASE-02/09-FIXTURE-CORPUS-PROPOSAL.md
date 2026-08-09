@@ -24,7 +24,7 @@ as arrays, fixed output paths, and the expected evidence below.
 | Fixture ID | Planned retained artifact | Recipe purpose | Contract evidence |
 | --- | --- | --- | --- |
 | `offset-av-aac` | `tests/fixtures/media/phase-02-offset-av-aac.mkv` | Four-second FFV1 video beginning at zero with AAC shifted by -21 ms. | Different video and audio starts, signed raw PTS, exact stream time bases, and raw `ProbeDocument` projection. |
-| `gap-video` | `tests/fixtures/media/phase-02-gap-video.mkv` | Video frames at source intervals `[10, 11)` and `[13, 13.9)` only. | Decoded-interval outer coverage, preserved internal gap `[11, 13)`, nonzero source start, and compact mapping as a later Part. |
+| `gap-video` | `tests/fixtures/media/phase-02-gap-video.mkv` | Video frames at source intervals `[10, 11)` and `[13, 14)` only. | Decoded-interval outer coverage, preserved internal gap `[11, 13)`, nonzero source start, and compact mapping as a later Part. |
 | `aac-priming` | `tests/fixtures/media/phase-02-aac-priming.m4a` | Two seconds of deterministic mono AAC. | Packet/frame-level AAC priming or skip-sample evidence without substituting duration metadata for an observed boundary. |
 | `rolling-srt` | `tests/fixtures/subtitles/phase-02-rolling.srt` | Literal SRT evidence with rolling accumulation, an exact duplicate, and repeated speech. | Atomic parsing, stable order, exact rolling proof, exact-duplicate rule, and retained ambiguity. |
 | `out-of-range-srt` | `tests/fixtures/subtitles/phase-02-out-of-range.srt` | Literal SRT cue whose endpoint exceeds `offset-av-aac` video coverage. | Atomic rejection and source-bound diagnostics. |
@@ -183,7 +183,7 @@ failed verification or promotion leaves all existing and new bytes in place.
 | Artifact class | Maximum individual size | Required expected evidence |
 | --- | ---: | --- |
 | `offset-av-aac` media | 6 MiB | Both stream projections; video starts at zero; audio has a negative source start; packet/frame evidence is retained unchanged. |
-| `gap-video` media | 4 MiB | Retained video packet/frame evidence yields outer coverage `[10, 13.9)` and internal gap `[11, 13)`. |
+| `gap-video` media | 4 MiB | Video packet/frame evidence yields outer coverage `[10, 14)` and internal gap `[11, 13)`. |
 | `aac-priming` media | 2 MiB | AAC stream projection and packet/frame priming or skip-sample evidence. |
 | Each FFprobe JSON document | 1 MiB | Valid JSON retained unchanged, including unknown FFprobe fields. |
 | Recipe, manifest, version records, and each subtitle file | 64 KiB | Schema/version, provenance, SHA-256, size, and literal source evidence. |

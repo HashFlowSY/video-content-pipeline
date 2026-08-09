@@ -31,6 +31,7 @@ from video_content_pipeline.timeline import CollectionTimeline, TimelinePart
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures"
 MANIFEST_PATH = FIXTURE_ROOT / "phase-02-manifest.json"
+ARCHIVED_INVALID_MANIFEST_PATH = "evidence/phase-02-manifest-rerun-03-invalid.json"
 CANONICAL_FIXTURE_PATHS = frozenset(
     {
         "recipes/phase-02-fixtures-v1.json",
@@ -47,6 +48,7 @@ CANONICAL_FIXTURE_PATHS = frozenset(
         "evidence/phase-02-aac-priming.ffprobe.json",
     }
 )
+AUXILIARY_FIXTURE_PATHS = frozenset({"phase-02-manifest.json", ARCHIVED_INVALID_MANIFEST_PATH})
 
 
 def _manifest() -> dict[str, object]:
@@ -61,7 +63,7 @@ def _verify_fixture_manifest(fixture_root: Path, manifest: Mapping[str, object])
     assert len(entries) == 12, "Fixture manifest must retain exactly 12 canonical entries."
 
     paths: set[str] = set()
-    retained_entries: list[tuple[str, int, str]] = []
+    retained_entries: list[tuple[str, int, str, Mapping[str, object]]] = []
     for ordinal, entry in enumerate(entries):
         assert isinstance(entry, Mapping), f"Fixture manifest entry {ordinal} must be an object."
         path = entry.get("path")
@@ -80,7 +82,15 @@ def _verify_fixture_manifest(fixture_root: Path, manifest: Mapping[str, object])
             and len(sha256) == 64
             and all(character in "0123456789abcdef" for character in sha256)
         ), f"Fixture manifest entry {path} has an invalid SHA-256 digest."
-        retained_entries.append((path, byte_count, sha256))
+        retention_class = entry.get("retention_class")
+        fixture_id = entry.get("fixture_id")
+        assert isinstance(retention_class, str) and retention_class, (
+            f"Fixture manifest entry {path} has an invalid retention class."
+        )
+        assert isinstance(fixture_id, str) and fixture_id, (
+            f"Fixture manifest entry {path} has an invalid fixture ID."
+        )
+        retained_entries.append((path, byte_count, sha256, entry))
 
     missing_paths = CANONICAL_FIXTURE_PATHS - paths
     unexpected_paths = paths - CANONICAL_FIXTURE_PATHS
@@ -89,7 +99,8 @@ def _verify_fixture_manifest(fixture_root: Path, manifest: Mapping[str, object])
         f"missing={sorted(missing_paths)}, unexpected={sorted(unexpected_paths)}."
     )
 
-    for path, byte_count, sha256 in retained_entries:
+    retained_content: dict[str, bytes] = {}
+    for path, byte_count, sha256, _ in retained_entries:
         artifact = fixture_root / path
         assert artifact.is_file(), f"Fixture artifact is missing: {path}"
         content = artifact.read_bytes()
@@ -101,6 +112,43 @@ def _verify_fixture_manifest(fixture_root: Path, manifest: Mapping[str, object])
         assert actual_sha256 == sha256, (
             f"Fixture artifact SHA-256 mismatch for {path}: expected {sha256}, got {actual_sha256}."
         )
+        retained_content[path] = content
+
+    retained_files = frozenset(
+        path.relative_to(fixture_root).as_posix()
+        for path in fixture_root.rglob("*")
+        if path.is_file()
+    )
+    expected_files = CANONICAL_FIXTURE_PATHS | AUXILIARY_FIXTURE_PATHS
+    assert retained_files == expected_files, (
+        "Fixture directory has unexpected or unaccounted retained files: "
+        f"missing={sorted(expected_files - retained_files)}, "
+        f"unexpected={sorted(retained_files - expected_files)}."
+    )
+
+    ffmpeg_version = retained_content["evidence/ffmpeg-version.txt"].decode("utf-8")
+    ffprobe_version = retained_content["evidence/ffprobe-version.txt"].decode("utf-8")
+    for path, _, _, entry in retained_entries:
+        if path.startswith("media/"):
+            _verify_tool_metadata(entry, path, "ffmpeg_version", ffmpeg_version, "ffmpeg")
+        if path.startswith("evidence/") and path.endswith(".ffprobe.json"):
+            _verify_tool_metadata(entry, path, "ffprobe_version", ffprobe_version, "ffprobe")
+
+
+def _verify_tool_metadata(
+    entry: Mapping[str, object], path: str, version_key: str, expected_version: str, tool: str
+) -> None:
+    version = entry.get(version_key)
+    arguments = entry.get("command_arguments")
+    assert version == expected_version, f"Fixture manifest entry {path} has invalid {version_key}."
+    assert (
+        isinstance(arguments, list)
+        and arguments
+        and all(isinstance(argument, str) for argument in arguments)
+    ), f"Fixture manifest entry {path} has invalid command arguments."
+    assert arguments[0].endswith(tool), (
+        f"Fixture manifest entry {path} command does not identify {tool}."
+    )
 
 
 @pytest.fixture
@@ -186,6 +234,15 @@ def test_fixture_manifest_verification_rejects_missing_and_mismatched_artifacts(
     final_entry["path"] = "evidence/replaced-entry.json"
     with pytest.raises(AssertionError, match="Fixture manifest canonical paths differ"):
         _verify_fixture_manifest(FIXTURE_ROOT, missing_entry_manifest)
+
+    invalid_metadata_manifest = copy.deepcopy(_manifest())
+    entries = invalid_metadata_manifest["entries"]
+    assert isinstance(entries, list)
+    first_entry = entries[0]
+    assert isinstance(first_entry, dict)
+    first_entry["retention_class"] = ""
+    with pytest.raises(AssertionError, match="invalid retention class"):
+        _verify_fixture_manifest(FIXTURE_ROOT, invalid_metadata_manifest)
 
     mismatched_manifest = copy.deepcopy(_manifest())
     entries = mismatched_manifest["entries"]
