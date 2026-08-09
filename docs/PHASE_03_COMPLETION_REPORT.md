@@ -43,12 +43,12 @@ controlled tool substitutes only.
 
 ## Retained Evidence And Handoff
 
-All seven Phase 3 tracker tickets are resolved. The phase inventory retains
-the synthetic SourceArtifact, structural and coverage ProbeDocuments, the
-preflight PlanReport, configuration and source changes, external reads, and
-verification command records. The existing PlanReport remains awaiting its
-separate user-approved decode preflight; that is an instance-level execution
-decision, not an unimplemented Phase 3 feature.
+All seven Phase 3 tracker tickets are resolved. The phase inventory records
+the synthetic SourceArtifact, structural and coverage ProbeDocuments, planning
+artifacts, configuration and source changes, external reads, and verification
+commands. After the verification, the user authorized removal of the local
+runtime artifacts; the inventory retains their provenance and deletion record,
+not their runtime files.
 
 Phase 4 may build on immutable RunPlans. It must separately authorize any
 processing behavior and retain the existing restrictions on models, paid APIs,

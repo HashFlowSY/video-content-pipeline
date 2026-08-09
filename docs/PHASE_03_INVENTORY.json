@@ -2,18 +2,19 @@
   "schema_version": 1,
   "phase": 3,
   "status": "completed",
-  "recorded_at": "2026-08-10T06:16:39+08:00",
+  "recorded_at": "2026-08-10T06:29:53+08:00",
   "project_root": "/Users/shangyang/Desktop/workspace/projects/video-content-pipeline",
   "summary": {
     "phase_3_boundary_adopted": true,
     "phase_3_verified_offline": true,
     "all_phase_3_tickets_resolved": true,
     "source_intake_implemented": true,
+    "phase_3_runtime_artifacts_retained": false,
     "user_media_accessed": false,
     "synthetic_media_planned": true,
     "network_requests": 0,
     "ffprobe_executed": true,
-    "ffmpeg_executed": false,
+    "ffmpeg_executed": true,
     "models_downloaded": false,
     "paid_apis_used": false,
     "production_validated": false
@@ -25,6 +26,7 @@
     "docs/PHASED_EXECUTION_PLAN.md",
     "plans/PHASE-03/ATOMIC_TASK_LIST.md",
     "docs/PHASE_03_INVENTORY.json",
+    ".gitignore",
     "project-state.json",
     "README.md",
     "config/decode-throughput-profiles.json",
@@ -162,9 +164,36 @@
       "ffmpeg_executed": false,
       "ffprobe_executed": false,
       "controlled_tool_substitutes": true
+    },
+    {
+      "command": "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline UV_INSTALL_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tools/uv UV_CACHE_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/cache/uv UV_PYTHON_INSTALL_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/runtime/python UV_PROJECT_ENVIRONMENT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/.venv PIP_CACHE_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/cache/pip TMPDIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && vcp plan tests/fixtures/media/phase-02-offset-av-aac.mkv --json",
+      "purpose": "Regenerate a schema-complete synthetic-fixture preflight PlanReport after the retained legacy report could not load",
+      "result": "awaiting_decode_confirmation; report c1d19cdb276745fa91b6d25120387427; estimate 1/2/5 seconds at low confidence",
+      "network_requests": 0,
+      "user_media_accessed": false,
+      "ffprobe_executed": true,
+      "ffmpeg_executed": false
+    },
+    {
+      "command": "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline UV_INSTALL_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tools/uv UV_CACHE_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/cache/uv UV_PYTHON_INSTALL_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/runtime/python UV_PROJECT_ENVIRONMENT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/.venv PIP_CACHE_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/cache/pip TMPDIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && vcp plan decode c1d19cdb276745fa91b6d25120387427 --json",
+      "purpose": "User-confirmed full null-output decode validation of the regenerated synthetic-fixture report",
+      "result": "ready_for_confirmation; report 595a1244270f4a968ca005b864b1f002; one-second observed decode measurement retained",
+      "network_requests": 0,
+      "user_media_accessed": false,
+      "ffprobe_executed": false,
+      "ffmpeg_executed": true
+    },
+    {
+      "command": "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline UV_INSTALL_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tools/uv UV_CACHE_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/cache/uv UV_PYTHON_INSTALL_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/runtime/python UV_PROJECT_ENVIRONMENT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/.venv PIP_CACHE_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/cache/pip TMPDIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && vcp plan confirm 595a1244270f4a968ca005b864b1f002 --json",
+      "purpose": "User-confirmed final evidence revalidation and immutable RunPlan creation",
+      "result": "confirmed; plan e5242c08a3e0cce6582a0d21 created from report 595a1244270f4a968ca005b864b1f002",
+      "network_requests": 0,
+      "user_media_accessed": false,
+      "ffprobe_executed": false,
+      "ffmpeg_executed": false
     }
   ],
-  "retained_phase_3_artifacts": [
+  "generated_phase_3_artifacts": [
     {
       "path": "input/c03999f9f1f377ca20206466b6e4c14963651de630020b257cfe0a4e33822954/media",
       "kind": "synthetic_source_artifact",
@@ -192,8 +221,52 @@
       "action": "created",
       "size_bytes": 1604,
       "sha256": "e1870907566bfd0c6a723d8e32daaaadda213d5d63fea0c679c15d7fcc2baa33"
+    },
+    {
+      "path": "plans/reports/c1d19cdb276745fa91b6d25120387427/plan-report.json",
+      "kind": "PlanReport",
+      "action": "created",
+      "size_bytes": 120179,
+      "sha256": "7b37393d9fe68217041ffcaf2f6c71040b218a42e08f2313e5933ca1a0021805"
+    },
+    {
+      "path": "plans/reports/595a1244270f4a968ca005b864b1f002/plan-report.json",
+      "kind": "PlanReport",
+      "action": "created",
+      "size_bytes": 120203,
+      "sha256": "0e63069f24e5660cb452e47d2bc5ef5ff779a32b89ab6449a04b4cea5166cecd"
+    },
+    {
+      "path": "plans/decode-throughput-history.json",
+      "kind": "decode_measurement_history",
+      "action": "created",
+      "size_bytes": 177,
+      "sha256": "86c17dde8c4bc1e45247437af292a47643050c94b12a513ff4aea428b2895e14"
+    },
+    {
+      "path": "plans/e5242c08a3e0cce6582a0d21/run-plan.json",
+      "kind": "RunPlan",
+      "action": "created",
+      "size_bytes": 1349,
+      "sha256": "02ea79ae6e8fd642bd5ff54c3421e3099a61d02d3a0119afabf80a246d671089"
     }
   ],
+  "runtime_artifact_cleanup": {
+    "authorized_by_user": true,
+    "removed_at": "2026-08-10T06:29:53+08:00",
+    "bytes_removed": 511451,
+    "paths": [
+      "input/c03999f9f1f377ca20206466b6e4c14963651de630020b257cfe0a4e33822954/",
+      "plans/reports/d1d6e7fa3081464ba5657ae508772588/",
+      "plans/reports/c1d19cdb276745fa91b6d25120387427/",
+      "plans/reports/595a1244270f4a968ca005b864b1f002/",
+      "plans/decode-throughput-history.json",
+      "plans/e5242c08a3e0cce6582a0d21/"
+    ],
+    "git_index_removals": [
+      "plans/reports/d1d6e7fa3081464ba5657ae508772588/plan-report.json"
+    ]
+  },
   "external_tool_evidence": [
     {
       "tool_id": "ffprobe",

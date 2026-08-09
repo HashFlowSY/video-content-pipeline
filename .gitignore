@@ -14,6 +14,11 @@ work/*
 outputs/*
 !outputs/.gitkeep
 
+# Generated Phase 3 planning runtime artifacts
+plans/reports/
+plans/*/run-plan.json
+plans/decode-throughput-history.json
+
 # Python tooling
 __pycache__/
 *.py[cod]
