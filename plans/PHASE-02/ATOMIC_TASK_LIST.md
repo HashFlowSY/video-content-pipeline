@@ -33,8 +33,9 @@
 - [x] Write failing unit tests for exact rolling accumulation, exact duplicate
   deletion, real spoken repetition, and `possible_duplicate`; implement only
   the approved local-proof de-duplication and correction provenance.
-- [ ] Submit a concrete FFmpeg fixture recipe, expected paths, expected size,
-  and retention record for user approval.
+- [x] Submit a concrete FFmpeg fixture recipe, expected paths, expected size,
+  and retention record for user approval; await explicit fixture-generation
+  approval before creating or executing it.
 - [ ] After explicit fixture approval, generate retained synthetic media and
   expected ProbeDocuments under `tests/fixtures/`; hash and inventory every
   generated artifact without deleting any prior output.
