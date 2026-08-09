@@ -33,6 +33,9 @@ macOS's system Bash 3.2. It applies the approved 1 MiB limit to raw ProbeDocumen
 the approved 64 KiB limit to recipe, subtitles, tool records, and manifest, and
 the approved 20 MiB total cap. Before promotion it checks JSON syntax, each
 manifest byte count, and each 64-character lowercase SHA-256 digest.
+`.gitattributes` marks both `tests/fixtures/**` and the retained `tmp/**`
+work trees as `-text`, preventing checkout-time LF conversion from changing
+the hash-pinned bytes on environments that enable `core.autocrlf`.
 
 The first manifest-repair attempt stopped before replacement because its JQ
 expression emitted one entry rather than the complete manifest. The archived
