@@ -12,12 +12,17 @@ from video_content_pipeline.planning import (
     DecodeThroughputProfile,
     PlanningError,
     PlanState,
+    ThreePointEstimate,
     build_full_decode_command,
     confirm_run_plan,
     create_plan_report,
     estimate_full_decode,
+    load_decode_measurements,
+    load_decode_throughput_profile,
     load_plan_report,
+    perform_full_decode_validation,
     persist_plan_report,
+    record_decode_measurement,
 )
 from video_content_pipeline.probe import ProbeDocument
 from video_content_pipeline.source import SourceArtifact, sha256_file
@@ -52,6 +57,28 @@ def test_low_confidence_profile_estimate_has_ordered_three_points() -> None:
     assert estimate.likely_seconds == 40
     assert estimate.conservative_seconds == 120
     assert estimate.confidence == "low"
+
+
+def test_matching_observed_decode_history_replaces_the_low_confidence_profile(
+    tmp_path: Path,
+) -> None:
+    history_path = tmp_path / "plans" / "decode-throughput-history.json"
+    record_decode_measurement(history_path, "source-id", 17)
+    measurement = load_decode_measurements(history_path)[0]
+
+    estimate = estimate_full_decode(
+        Fraction(120, 1),
+        DecodeThroughputProfile("v1", Fraction(8), Fraction(3), Fraction(1)),
+        matching_measurement=measurement,
+    )
+
+    assert estimate == ThreePointEstimate(
+        optimistic_seconds=17,
+        likely_seconds=17,
+        conservative_seconds=17,
+        confidence="observed",
+        basis="decode-history:source-id",
+    )
 
 
 def test_report_and_plan_are_persisted_under_separate_ids(tmp_path: Path) -> None:
@@ -171,4 +198,56 @@ def test_full_decode_command_has_null_output_only(tmp_path: Path) -> None:
     artifact = _artifact(tmp_path)
     ffmpeg = PinnedExternalTool("ffmpeg", Path("/tool/ffmpeg"), "test", "a" * 64)
 
-    assert build_full_decode_command(ffmpeg, artifact)[-3:] == ("-f", "null", "-")
+    assert build_full_decode_command(ffmpeg, artifact) == (
+        "/tool/ffmpeg",
+        "-v",
+        "error",
+        "-xerror",
+        "-i",
+        str(artifact.media_path),
+        "-map",
+        "0:v?",
+        "-map",
+        "0:a?",
+        "-f",
+        "null",
+        "-",
+    )
+
+
+def test_decode_profile_rejects_non_positive_throughput(tmp_path: Path) -> None:
+    profile_path = tmp_path / "decode-throughput-profiles.json"
+    profile_path.write_text(
+        """{
+  \"profiles\": [{
+    \"id\": \"phase-03-default-v1\",
+    \"optimistic_realtime_factor\": \"8\",
+    \"likely_realtime_factor\": \"0\",
+    \"conservative_realtime_factor\": \"1\"
+  }]
+}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PlanningError) as error:
+        load_decode_throughput_profile(profile_path)
+
+    assert error.value.reason == "decode_profile_invalid"
+
+
+def test_full_decode_start_failure_is_reported_as_a_planning_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact = _artifact(tmp_path)
+    ffmpeg = PinnedExternalTool("ffmpeg", Path("/tool/ffmpeg"), "test", "a" * 64)
+
+    def unavailable_tool(*_args: object) -> object:
+        raise OSError("FFmpeg is unavailable")
+
+    monkeypatch.setattr("video_content_pipeline.planning.run_tool", unavailable_tool)
+
+    with pytest.raises(PlanningError) as error:
+        perform_full_decode_validation(ffmpeg, artifact)
+
+    assert error.value.reason == "full_decode_failed"

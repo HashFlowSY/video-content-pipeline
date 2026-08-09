@@ -8,8 +8,16 @@ import pytest
 from video_content_pipeline import cli
 from video_content_pipeline.cli import _parser
 from video_content_pipeline.external_tools import PinnedExternalTool
+from video_content_pipeline.inspection import PlanInspectionEvidence
+from video_content_pipeline.planning import (
+    PlanningError,
+    PlanState,
+    ThreePointEstimate,
+    create_plan_report,
+    persist_plan_report,
+)
 from video_content_pipeline.probe import ProbeDocument
-from video_content_pipeline.source import SourceIntakeError
+from video_content_pipeline.source import SourceArtifact, SourceIntakeError, sha256_file
 
 
 def test_phase_3_cli_exposes_local_url_collection_decode_and_confirmation_forms() -> None:
@@ -149,3 +157,88 @@ def test_invalid_inspection_evidence_returns_a_retained_blocked_report(
     ]
     report_path = tmp_path / "plans" / "reports" / report["report_id"] / "plan-report.json"
     assert json.loads(report_path.read_text(encoding="utf-8")) == report
+
+
+def test_decode_confirmation_only_advances_to_final_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = _awaiting_decode_report(tmp_path)
+    persist_plan_report(report, tmp_path / "plans")
+    validated_source_ids: list[str] = []
+
+    def no_stale_evidence(*_args: object) -> tuple[object, ...]:
+        return ()
+
+    def record_validation(_tool: PinnedExternalTool, artifact: SourceArtifact) -> int:
+        validated_source_ids.append(artifact.source_id)
+        return 1
+
+    monkeypatch.setattr(cli, "revalidate_report", no_stale_evidence)
+    monkeypatch.setattr(cli, "perform_full_decode_validation", record_validation)
+
+    result = cli._decode_report(report.report_id, tmp_path, tmp_path / "plans")
+
+    assert result["status"] == "ready_for_confirmation"
+    assert result["report"]["state"] == "ready_for_confirmation"
+    assert result["report"]["parent_report_id"] == report.report_id
+    assert result["report"]["decode_estimate"] == report.decode_estimate.as_json()
+    assert validated_source_ids == [report.source_artifacts[0].source_id]
+    assert json.loads(
+        (tmp_path / "plans" / "decode-throughput-history.json").read_text(encoding="utf-8")
+    ) == {
+        "schema_version": 1,
+        "measurements": [{"source_id": report.source_artifacts[0].source_id, "elapsed_seconds": 1}],
+    }
+
+
+def test_decode_failure_writes_a_blocked_child_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = _awaiting_decode_report(tmp_path)
+    persist_plan_report(report, tmp_path / "plans")
+
+    def no_stale_evidence(*_args: object) -> tuple[object, ...]:
+        return ()
+
+    def failed_validation(*_args: object) -> None:
+        raise PlanningError("full_decode_failed", "FFmpeg rejected a stream.")
+
+    monkeypatch.setattr(cli, "revalidate_report", no_stale_evidence)
+    monkeypatch.setattr(cli, "perform_full_decode_validation", failed_validation)
+
+    result = cli._decode_report(report.report_id, tmp_path, tmp_path / "plans")
+
+    assert result["status"] == "blocked"
+    assert result["report"]["state"] == "blocked"
+    assert result["report"]["parent_report_id"] == report.report_id
+    assert result["report"]["diagnostics"] == [
+        {"reason": "full_decode_failed", "message": "FFmpeg rejected a stream."}
+    ]
+    blocked_path = (
+        tmp_path / "plans" / "reports" / result["report"]["report_id"] / "plan-report.json"
+    )
+    assert json.loads(blocked_path.read_text(encoding="utf-8")) == result["report"]
+
+
+def _awaiting_decode_report(tmp_path: Path):
+    media_path = tmp_path / "input" / "source" / "media"
+    media_path.parent.mkdir(parents=True)
+    media_path.write_bytes(b"source")
+    digest, byte_count = sha256_file(media_path)
+    artifact = SourceArtifact(digest, digest, byte_count, media_path)
+    inspection = PlanInspectionEvidence(
+        source_id=artifact.source_id,
+        structural_document=ProbeDocument('{"streams": []}'),
+        coverage_document=ProbeDocument('{"packets": []}'),
+        coverage_by_stream=(),
+        subtitle_tracks=(),
+    )
+    return create_plan_report(
+        state=PlanState.AWAITING_DECODE_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(PinnedExternalTool("ffmpeg", tmp_path / "ffmpeg", "test", "f" * 64),),
+        planned_increment_bytes=byte_count,
+        configuration_fingerprint="config-v1",
+        decode_estimate=ThreePointEstimate(1, 2, 3, "low", "decode-throughput-profile:v1"),
+        inspection_evidence=(inspection,),
+    )

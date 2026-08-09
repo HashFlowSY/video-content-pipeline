@@ -24,10 +24,13 @@ from video_content_pipeline.planning import (
     confirm_run_plan,
     create_plan_report,
     estimate_full_decode,
+    find_matching_decode_measurement,
+    load_decode_measurements,
     load_decode_throughput_profile,
     load_plan_report,
     perform_full_decode_validation,
     persist_plan_report,
+    record_decode_measurement,
     revalidate_report,
 )
 from video_content_pipeline.source import (
@@ -191,16 +194,31 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
     duration = max(coverage.end for coverage in media_coverages) - min(
         coverage.start for coverage in media_coverages
     )
-    profile = load_decode_throughput_profile(
-        project_root / "config" / "decode-throughput-profiles.json"
-    )
+    try:
+        profile = load_decode_throughput_profile(
+            project_root / "config" / "decode-throughput-profiles.json"
+        )
+        measurements = load_decode_measurements(plans_root / "decode-throughput-history.json")
+    except PlanningError as error:
+        return _blocked_local_report(
+            error,
+            planned_increment,
+            plans_root,
+            source_artifacts=(artifact,),
+            tools=(ffprobe, ffmpeg),
+            inspection_evidence=inspection_evidence,
+        )
     awaiting_decode = create_plan_report(
         state=PlanState.AWAITING_DECODE_CONFIRMATION,
         source_artifacts=(artifact,),
         tools=(ffprobe, ffmpeg),
         planned_increment_bytes=planned_increment,
         configuration_fingerprint="phase-03-local-plan-v1",
-        decode_estimate=estimate_full_decode(duration.as_fraction(), profile),
+        decode_estimate=estimate_full_decode(
+            duration.as_fraction(),
+            profile,
+            matching_measurement=find_matching_decode_measurement(measurements, artifact.source_id),
+        ),
         inspection_evidence=inspection_evidence,
     )
     persist_plan_report(awaiting_decode, plans_root)
@@ -208,7 +226,7 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
 
 
 def _blocked_local_report(
-    error: SourceIntakeError | InspectionError,
+    error: SourceIntakeError | InspectionError | PlanningError,
     planned_increment: int,
     plans_root: Path,
     *,
@@ -255,7 +273,10 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
         raise PlanningError("ffmpeg_missing", "Report has no FFmpeg tool identity.")
     try:
         for artifact in report.source_artifacts:
-            perform_full_decode_validation(ffmpeg, artifact)
+            elapsed_seconds = perform_full_decode_validation(ffmpeg, artifact)
+            record_decode_measurement(
+                plans_root / "decode-throughput-history.json", artifact.source_id, elapsed_seconds
+            )
     except PlanningError as error:
         blocked = create_plan_report(
             state=PlanState.BLOCKED,

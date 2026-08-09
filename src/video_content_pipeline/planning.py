@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
+import time
 import uuid
 from dataclasses import dataclass
 from enum import StrEnum
@@ -60,6 +62,14 @@ class DecodeThroughputProfile:
     optimistic_realtime_factor: Fraction
     likely_realtime_factor: Fraction
     conservative_realtime_factor: Fraction
+
+
+@dataclass(frozen=True)
+class DecodeMeasurement:
+    """One completed full-decode observation for an exact SourceArtifact."""
+
+    source_id: str
+    elapsed_seconds: int
 
 
 @dataclass(frozen=True)
@@ -136,12 +146,23 @@ class RunPlan:
 
 
 def estimate_full_decode(
-    duration_seconds: Fraction, profile: DecodeThroughputProfile
+    duration_seconds: Fraction,
+    profile: DecodeThroughputProfile,
+    *,
+    matching_measurement: DecodeMeasurement | None = None,
 ) -> ThreePointEstimate:
     """Estimate linear decode without reading source media for calibration."""
 
     if duration_seconds <= 0:
         raise PlanningError("duration_invalid", "Decode duration must be positive.")
+    if matching_measurement is not None:
+        return ThreePointEstimate(
+            optimistic_seconds=matching_measurement.elapsed_seconds,
+            likely_seconds=matching_measurement.elapsed_seconds,
+            conservative_seconds=matching_measurement.elapsed_seconds,
+            confidence="observed",
+            basis=f"decode-history:{matching_measurement.source_id}",
+        )
     return ThreePointEstimate(
         optimistic_seconds=_ceil_fraction(duration_seconds / profile.optimistic_realtime_factor),
         likely_seconds=_ceil_fraction(duration_seconds / profile.likely_realtime_factor),
@@ -173,17 +194,87 @@ def load_decode_throughput_profile(
         if not isinstance(profile, dict) or profile.get("id") != profile_id:
             continue
         try:
-            return DecodeThroughputProfile(
+            throughput_profile = DecodeThroughputProfile(
                 version=profile_id,
                 optimistic_realtime_factor=Fraction(str(profile["optimistic_realtime_factor"])),
                 likely_realtime_factor=Fraction(str(profile["likely_realtime_factor"])),
                 conservative_realtime_factor=Fraction(str(profile["conservative_realtime_factor"])),
             )
+            if any(
+                factor <= 0
+                for factor in (
+                    throughput_profile.optimistic_realtime_factor,
+                    throughput_profile.likely_realtime_factor,
+                    throughput_profile.conservative_realtime_factor,
+                )
+            ):
+                raise ValueError
+            return throughput_profile
         except (KeyError, ValueError, ZeroDivisionError) as error:
             raise PlanningError(
                 "decode_profile_invalid", "Decode throughput values must be positive ratios."
             ) from error
     raise PlanningError("decode_profile_missing", f"Decode profile is absent: {profile_id}")
+
+
+def load_decode_measurements(path: Path) -> tuple[DecodeMeasurement, ...]:
+    """Load retained full-decode observations without treating absence as an error."""
+
+    if not path.exists():
+        return ()
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(decoded, dict):
+            raise TypeError
+        measurements = decoded.get("measurements")
+        if decoded.get("schema_version") != 1 or not isinstance(measurements, list):
+            raise TypeError
+        parsed = tuple(
+            DecodeMeasurement(
+                source_id=_required_string(value, "source_id"),
+                elapsed_seconds=_required_integer(value, "elapsed_seconds"),
+            )
+            for value in measurements
+        )
+        if any(measurement.elapsed_seconds <= 0 for measurement in parsed):
+            raise ValueError
+        return parsed
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise PlanningError(
+            "decode_history_invalid", "Decode history has an invalid schema."
+        ) from error
+
+
+def find_matching_decode_measurement(
+    measurements: tuple[DecodeMeasurement, ...], source_id: str
+) -> DecodeMeasurement | None:
+    """Select the newest observation only when the source identity matches exactly."""
+
+    return next(
+        (
+            measurement
+            for measurement in reversed(measurements)
+            if measurement.source_id == source_id
+        ),
+        None,
+    )
+
+
+def record_decode_measurement(path: Path, source_id: str, elapsed_seconds: int) -> None:
+    """Append completed validation timing while retaining all prior observations."""
+
+    if elapsed_seconds <= 0:
+        raise PlanningError("decode_history_invalid", "Decode measurement must be positive.")
+    measurements = (*load_decode_measurements(path), DecodeMeasurement(source_id, elapsed_seconds))
+    payload = {
+        "schema_version": 1,
+        "measurements": [
+            {"source_id": measurement.source_id, "elapsed_seconds": measurement.elapsed_seconds}
+            for measurement in measurements
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
 def create_plan_report(
@@ -331,14 +422,21 @@ def build_full_decode_command(
     )
 
 
-def perform_full_decode_validation(ffmpeg: PinnedExternalTool, artifact: SourceArtifact) -> None:
+def perform_full_decode_validation(ffmpeg: PinnedExternalTool, artifact: SourceArtifact) -> int:
     """Run an explicitly requested null-output full decode and fail closed on error."""
 
-    result = run_tool(build_full_decode_command(ffmpeg, artifact))
+    try:
+        started_at = time.monotonic()
+        result = run_tool(build_full_decode_command(ffmpeg, artifact))
+    except OSError as error:
+        raise PlanningError(
+            "full_decode_failed", f"FFmpeg decode validation could not start: {error}"
+        ) from error
     if result.returncode != 0:
         raise PlanningError(
             "full_decode_failed", f"FFmpeg decode validation failed: {result.stderr.strip()}"
         )
+    return max(1, math.ceil(time.monotonic() - started_at))
 
 
 def revalidate_report(report: PlanReport, project_root: Path) -> tuple[PlanningDiagnostic, ...]:
