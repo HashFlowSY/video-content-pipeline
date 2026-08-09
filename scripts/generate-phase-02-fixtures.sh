@@ -376,23 +376,8 @@ for retained_path in "${retained_paths[@]}"; do
 done
 mkdir -p "$fixtures_root/recipes" "$fixtures_root/media" "$fixtures_root/subtitles" "$fixtures_root/evidence"
 
-declare -a relative_paths=(
-  "recipes/phase-02-fixtures-v1.json"
-  "media/phase-02-offset-av-aac.mkv"
-  "media/phase-02-gap-video.mkv"
-  "media/phase-02-aac-priming.m4a"
-  "subtitles/phase-02-rolling.srt"
-  "subtitles/phase-02-out-of-range.srt"
-  "subtitles/phase-02-roundtrip.vtt"
-  "evidence/ffmpeg-version.txt"
-  "evidence/ffprobe-version.txt"
-  "evidence/phase-02-offset-av-aac.ffprobe.json"
-  "evidence/phase-02-gap-video.ffprobe.json"
-  "evidence/phase-02-aac-priming.ffprobe.json"
-  "phase-02-manifest.json"
-)
-
-for relative_path in "${relative_paths[@]}"; do
+for retained_path in "${retained_paths[@]}"; do
+  relative_path="${retained_path#"$fixtures_root/"}"
   require_absent "$fixtures_root/$relative_path"
   cp -p "$work_root/$relative_path" "$fixtures_root/$relative_path"
 done

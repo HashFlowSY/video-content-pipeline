@@ -1,0 +1,2 @@
+# Preserve FFmpeg's raw progress lines in retained fixture-generation logs.
+tmp/**/generation.log -whitespace
