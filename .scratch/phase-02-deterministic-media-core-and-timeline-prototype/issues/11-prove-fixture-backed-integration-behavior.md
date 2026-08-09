@@ -25,9 +25,8 @@ verifies all 12 canonical manifest entries for relative path, byte count, and
 SHA-256 before reading ProbeDocuments or subtitle evidence; missing and
 mismatched artifacts fail with explicit assertions. The retained frame evidence
 proves `gap-video` coverage `[10, 13.9)` and its internal gap `[11, 13)`; the
-previous `[13, 14)` expectation remains in the approved fixture proposal and
-Ticket 10 ledger. Ticket 11 records this discrepancy but does not amend that
-approved contract or change fixture bytes.
+user approved aligning the fixture proposal and Ticket 10 ledger with this raw
+evidence without changing fixture bytes.
 The follow-up review fixed two gaps: the manifest now requires the exact
 canonical entry set, required retention and fixture metadata, matching media
 and probe tool provenance, and no unexpected retained files beyond the
