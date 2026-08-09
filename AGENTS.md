@@ -44,7 +44,7 @@
 - Record created, modified, downloaded, and read external files in the phase
   inventory. Do not delete archives, caches, temporary data, or failed outputs
   without explicit user authorization.
-- Do not create Git remotes, commits, or pushes.
+- Do not create Git remotes or pushes.
 
 ## Agent skills
 
