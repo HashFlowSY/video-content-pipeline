@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from video_content_pipeline.coverage import StreamCoverage
 from video_content_pipeline.external_tools import PinnedExternalTool
+from video_content_pipeline.inspection import PlanInspectionEvidence, SubtitleTrackCandidate
 from video_content_pipeline.planning import (
     DecodeThroughputProfile,
     PlanningError,
@@ -17,7 +19,9 @@ from video_content_pipeline.planning import (
     load_plan_report,
     persist_plan_report,
 )
+from video_content_pipeline.probe import ProbeDocument
 from video_content_pipeline.source import SourceArtifact, sha256_file
+from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 
 
 def _artifact(tmp_path: Path) -> SourceArtifact:
@@ -26,6 +30,16 @@ def _artifact(tmp_path: Path) -> SourceArtifact:
     media.write_bytes(b"media")
     digest, byte_count = sha256_file(media)
     return SourceArtifact(digest, digest, byte_count, media)
+
+
+def _inspection(artifact: SourceArtifact) -> PlanInspectionEvidence:
+    return PlanInspectionEvidence(
+        source_id=artifact.source_id,
+        structural_document=ProbeDocument('{"streams": []}'),
+        coverage_document=ProbeDocument('{"packets": []}'),
+        coverage_by_stream=(),
+        subtitle_tracks=(),
+    )
 
 
 def test_low_confidence_profile_estimate_has_ordered_three_points() -> None:
@@ -48,6 +62,7 @@ def test_report_and_plan_are_persisted_under_separate_ids(tmp_path: Path) -> Non
         tools=(),
         planned_increment_bytes=artifact.byte_count,
         configuration_fingerprint="config-v1",
+        inspection_evidence=(_inspection(artifact),),
     )
 
     report_path = persist_plan_report(report, tmp_path / "plans")
@@ -60,6 +75,66 @@ def test_report_and_plan_are_persisted_under_separate_ids(tmp_path: Path) -> Non
     assert plan.report_id == report.report_id
 
 
+def test_report_retains_probe_documents_coverage_and_subtitle_metadata(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+    inspection_evidence = PlanInspectionEvidence(
+        source_id=artifact.source_id,
+        structural_document=ProbeDocument('{"streams": [{"index": 0}]}'),
+        coverage_document=ProbeDocument('{"packets": [{"stream_index": 0}]}'),
+        coverage_by_stream=(
+            (
+                0,
+                StreamCoverage(
+                    coverage=HalfOpenInterval(ExactTime(1, 2), ExactTime(3, 2)),
+                    gaps=(),
+                    diagnostics=(),
+                ),
+            ),
+        ),
+        subtitle_tracks=(SubtitleTrackCandidate(1, "en", "webvtt", "embedded", True),),
+    )
+    report = create_plan_report(
+        state=PlanState.AWAITING_DECODE_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint="config-v1",
+        inspection_evidence=(inspection_evidence,),
+    )
+
+    report_path = persist_plan_report(report, tmp_path / "plans")
+    payload = report.as_json()["inspection_evidence"]
+
+    assert load_plan_report(report_path) == report
+    assert payload == [
+        {
+            "source_id": artifact.source_id,
+            "structural_probe_document": {"raw_json": '{"streams": [{"index": 0}]}'},
+            "coverage_probe_document": {"raw_json": '{"packets": [{"stream_index": 0}]}'},
+            "stream_coverage": [
+                {
+                    "stream_index": 0,
+                    "coverage": {
+                        "start": {"numerator": 1, "denominator": 2},
+                        "end": {"numerator": 3, "denominator": 2},
+                    },
+                    "gaps": [],
+                    "diagnostics": [],
+                }
+            ],
+            "subtitle_track_candidates": [
+                {
+                    "stream_index": 1,
+                    "language": "en",
+                    "container_format": "webvtt",
+                    "origin": "embedded",
+                    "available": True,
+                }
+            ],
+        }
+    ]
+
+
 def test_non_ready_report_cannot_create_run_plan(tmp_path: Path) -> None:
     artifact = _artifact(tmp_path)
     report = create_plan_report(
@@ -68,12 +143,28 @@ def test_non_ready_report_cannot_create_run_plan(tmp_path: Path) -> None:
         tools=(),
         planned_increment_bytes=artifact.byte_count,
         configuration_fingerprint="config-v1",
+        inspection_evidence=(_inspection(artifact),),
     )
 
     with pytest.raises(PlanningError) as error:
         confirm_run_plan(report, tmp_path, tmp_path / "plans")
 
     assert error.value.reason == "report_not_ready"
+
+
+def test_report_rejects_source_artifacts_without_one_matching_inspection(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+
+    with pytest.raises(PlanningError) as error:
+        create_plan_report(
+            state=PlanState.BLOCKED,
+            source_artifacts=(artifact,),
+            tools=(),
+            planned_increment_bytes=artifact.byte_count,
+            configuration_fingerprint="config-v1",
+        )
+
+    assert error.value.reason == "inspection_evidence_invalid"
 
 
 def test_full_decode_command_has_null_output_only(tmp_path: Path) -> None:

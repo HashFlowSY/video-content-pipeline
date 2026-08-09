@@ -7,11 +7,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from video_content_pipeline.coverage import DecodedInterval, StreamCoverage, derive_stream_coverage
+from video_content_pipeline.coverage import (
+    CoverageDiagnostic,
+    DecodedInterval,
+    StreamCoverage,
+    derive_stream_coverage,
+)
 from video_content_pipeline.external_tools import PinnedExternalTool, run_tool
 from video_content_pipeline.probe import ProbeDocument, ProbeProjection, project_probe_document
 from video_content_pipeline.source import SourceArtifact
-from video_content_pipeline.timecode import RawPtsTime
+from video_content_pipeline.timecode import ExactTime, HalfOpenInterval, RawPtsTime
 
 
 class InspectionError(ValueError):
@@ -22,13 +27,28 @@ class InspectionError(ValueError):
         self.reason = reason
 
 
+class ProbeCaptureError(InspectionError):
+    """A failed probe invocation that still preserves its emitted documents."""
+
+    def __init__(
+        self,
+        reason: str,
+        message: str,
+        structural_document: ProbeDocument | None,
+        coverage_document: ProbeDocument | None,
+    ) -> None:
+        super().__init__(reason, message)
+        self.structural_document = structural_document
+        self.coverage_document = coverage_document
+
+
 @dataclass(frozen=True)
 class SubtitleTrackCandidate:
     """Metadata-only source subtitle evidence; never subtitle text."""
 
     stream_index: int
     language: str | None
-    codec_name: str | None
+    container_format: str | None
     origin: str
     available: bool
 
@@ -36,7 +56,7 @@ class SubtitleTrackCandidate:
         return {
             "stream_index": self.stream_index,
             "language": self.language,
-            "codec_name": self.codec_name,
+            "container_format": self.container_format,
             "origin": self.origin,
             "available": self.available,
         }
@@ -53,13 +73,98 @@ class InspectionEvidence:
     subtitle_tracks: tuple[SubtitleTrackCandidate, ...]
 
 
+@dataclass(frozen=True)
+class PlanInspectionEvidence:
+    """Immutable inspection evidence retained by a PlanReport for one source."""
+
+    source_id: str
+    structural_document: ProbeDocument | None
+    coverage_document: ProbeDocument | None
+    coverage_by_stream: tuple[tuple[int, StreamCoverage], ...]
+    subtitle_tracks: tuple[SubtitleTrackCandidate, ...]
+
+    @classmethod
+    def from_documents(
+        cls,
+        source_id: str,
+        structural_document: ProbeDocument,
+        coverage_document: ProbeDocument,
+    ) -> PlanInspectionEvidence:
+        """Retain raw ProbeDocuments before their strict decision projection succeeds."""
+
+        return cls(source_id, structural_document, coverage_document, (), ())
+
+    @classmethod
+    def from_capture_error(cls, source_id: str, error: ProbeCaptureError) -> PlanInspectionEvidence:
+        """Associate retained partial output with the source whose probe failed."""
+
+        return cls(source_id, error.structural_document, error.coverage_document, (), ())
+
+    @classmethod
+    def from_inspection(
+        cls, source_id: str, evidence: InspectionEvidence
+    ) -> PlanInspectionEvidence:
+        """Discard the derived projection while retaining its source decision evidence."""
+
+        return cls(
+            source_id,
+            evidence.structural_document,
+            evidence.coverage_document,
+            tuple(sorted(evidence.coverage_by_stream.items())),
+            evidence.subtitle_tracks,
+        )
+
+    def as_json(self) -> dict[str, object]:
+        """Serialize raw probe documents and exact decision evidence without subtitle text."""
+
+        return {
+            "source_id": self.source_id,
+            "structural_probe_document": _probe_document_as_json(self.structural_document),
+            "coverage_probe_document": _probe_document_as_json(self.coverage_document),
+            "stream_coverage": [
+                _stream_coverage_as_json(stream_index, coverage)
+                for stream_index, coverage in self.coverage_by_stream
+            ],
+            "subtitle_track_candidates": [track.as_json() for track in self.subtitle_tracks],
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> PlanInspectionEvidence:
+        """Load retained evidence without deriving coverage from any metadata fallback."""
+
+        if not isinstance(value, Mapping):
+            raise ValueError("Plan inspection evidence must be a JSON object.")
+        source_id = _required_string(value.get("source_id"))
+        structural = _probe_document_from_json(value.get("structural_probe_document"))
+        coverage = _probe_document_from_json(value.get("coverage_probe_document"))
+        stream_values = value.get("stream_coverage")
+        subtitle_values = value.get("subtitle_track_candidates")
+        if not isinstance(stream_values, list) or not isinstance(subtitle_values, list):
+            raise ValueError("Plan inspection evidence has invalid collections.")
+        coverage_by_stream: list[tuple[int, StreamCoverage]] = []
+        stream_indexes: set[int] = set()
+        for stream_value in stream_values:
+            stream_index, stream_coverage = _stream_coverage_from_json(stream_value)
+            if stream_index in stream_indexes:
+                raise ValueError("Plan inspection evidence repeats a stream index.")
+            stream_indexes.add(stream_index)
+            coverage_by_stream.append((stream_index, stream_coverage))
+        return cls(
+            source_id,
+            structural,
+            coverage,
+            tuple(sorted(coverage_by_stream)),
+            tuple(_subtitle_track_from_json(track) for track in subtitle_values),
+        )
+
+
 def capture_probe_documents(
     ffprobe: PinnedExternalTool, artifact: SourceArtifact, evidence_directory: Path
 ) -> tuple[ProbeDocument, ProbeDocument]:
     """Capture unchanged structural and packet-level JSON under one evidence directory."""
 
     evidence_directory.mkdir(parents=True, exist_ok=True)
-    structural = _run_probe(
+    structural, structural_error = _run_probe(
         ffprobe,
         (
             "-v",
@@ -71,7 +176,14 @@ def capture_probe_documents(
             str(artifact.media_path),
         ),
     )
-    coverage = _run_probe(
+    structural_path = evidence_directory / "structural.ffprobe.json"
+    try:
+        _write_once(structural_path, structural.raw_json)
+    except InspectionError as error:
+        raise ProbeCaptureError(error.reason, str(error), structural, None) from error
+    if structural_error is not None:
+        raise ProbeCaptureError(structural_error.reason, str(structural_error), structural, None)
+    coverage, coverage_error = _run_probe(
         ffprobe,
         (
             "-v",
@@ -83,11 +195,14 @@ def capture_probe_documents(
             str(artifact.media_path),
         ),
     )
-    structural_path = evidence_directory / "structural.ffprobe.json"
     coverage_path = evidence_directory / "coverage.ffprobe.json"
-    _write_once(structural_path, structural)
-    _write_once(coverage_path, coverage)
-    return ProbeDocument(structural), ProbeDocument(coverage)
+    try:
+        _write_once(coverage_path, coverage.raw_json)
+    except InspectionError as error:
+        raise ProbeCaptureError(error.reason, str(error), structural, coverage) from error
+    if coverage_error is not None:
+        raise ProbeCaptureError(coverage_error.reason, str(coverage_error), structural, coverage)
+    return structural, coverage
 
 
 def inspect_documents(
@@ -167,6 +282,12 @@ def enumerate_subtitle_track_candidates(
         raise InspectionError(
             "structural_probe_invalid", "Structural ProbeDocument must contain streams."
         )
+    container = decoded.get("format")
+    container_format = (
+        container.get("format_name")
+        if isinstance(container, Mapping) and isinstance(container.get("format_name"), str)
+        else None
+    )
     candidates: list[SubtitleTrackCandidate] = []
     for ordinal, stream in enumerate(streams):
         if not isinstance(stream, Mapping) or stream.get("codec_type") != "subtitle":
@@ -182,24 +303,24 @@ def enumerate_subtitle_track_candidates(
             SubtitleTrackCandidate(
                 stream_index=index,
                 language=language if isinstance(language, str) else None,
-                codec_name=(
-                    stream.get("codec_name") if isinstance(stream.get("codec_name"), str) else None
-                ),
-                origin="unknown",
+                container_format=container_format,
+                origin="embedded",
                 available=True,
             )
         )
     return tuple(candidates)
 
 
-def _run_probe(ffprobe: PinnedExternalTool, arguments: tuple[str, ...]) -> str:
+def _run_probe(
+    ffprobe: PinnedExternalTool, arguments: tuple[str, ...]
+) -> tuple[ProbeDocument, InspectionError | None]:
     result = run_tool((str(ffprobe.path), *arguments))
+    document = ProbeDocument(result.stdout)
     if result.returncode != 0:
-        raise InspectionError(
+        return document, InspectionError(
             "ffprobe_failed", f"FFprobe exited {result.returncode}: {result.stderr.strip()}"
         )
-    _json_object(result.stdout, "ffprobe_output_invalid")
-    return result.stdout
+    return document, None
 
 
 def _write_once(path: Path, contents: str) -> None:
@@ -232,3 +353,126 @@ def _integer(value: object) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _stream_coverage_as_json(stream_index: int, coverage: StreamCoverage) -> dict[str, object]:
+    return {
+        "stream_index": stream_index,
+        "coverage": _interval_as_json(coverage.coverage),
+        "gaps": [_interval_as_json(gap) for gap in coverage.gaps],
+        "diagnostics": [
+            {"reason": diagnostic.reason, "path": diagnostic.path, "message": diagnostic.message}
+            for diagnostic in coverage.diagnostics
+        ],
+    }
+
+
+def _stream_coverage_from_json(value: object) -> tuple[int, StreamCoverage]:
+    if not isinstance(value, Mapping):
+        raise ValueError("Stream coverage must be a JSON object.")
+    stream_index = _required_integer(value.get("stream_index"))
+    coverage = _interval_from_json(value.get("coverage"))
+    gaps = _interval_list_from_json(value.get("gaps"))
+    diagnostic_values = value.get("diagnostics")
+    if not isinstance(diagnostic_values, list):
+        raise ValueError("Stream coverage diagnostics must be a JSON array.")
+    diagnostics = tuple(
+        _coverage_diagnostic_from_json(diagnostic) for diagnostic in diagnostic_values
+    )
+    return stream_index, StreamCoverage(coverage, gaps, diagnostics)
+
+
+def _probe_document_as_json(document: ProbeDocument | None) -> dict[str, str | None]:
+    return {"raw_json": document.raw_json if document is not None else None}
+
+
+def _probe_document_from_json(value: object) -> ProbeDocument | None:
+    if not isinstance(value, Mapping):
+        raise ValueError("Retained ProbeDocument must be a JSON object.")
+    raw_json = value.get("raw_json")
+    if raw_json is not None and not isinstance(raw_json, str):
+        raise ValueError("Retained ProbeDocument raw JSON must be a string or null.")
+    return ProbeDocument(raw_json) if raw_json is not None else None
+
+
+def _interval_as_json(interval: HalfOpenInterval | None) -> dict[str, object] | None:
+    if interval is None:
+        return None
+    return {
+        "start": _exact_time_as_json(interval.start),
+        "end": _exact_time_as_json(interval.end),
+    }
+
+
+def _interval_from_json(value: object) -> HalfOpenInterval | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("Coverage interval must be a JSON object or null.")
+    return HalfOpenInterval(
+        _exact_time_from_json(value.get("start")), _exact_time_from_json(value.get("end"))
+    )
+
+
+def _interval_list_from_json(value: object) -> tuple[HalfOpenInterval, ...]:
+    if not isinstance(value, list):
+        raise ValueError("Coverage gaps must be a JSON array.")
+    gaps = tuple(_interval_from_json(interval) for interval in value)
+    if any(interval is None for interval in gaps):
+        raise ValueError("Coverage gaps must not be null.")
+    return tuple(interval for interval in gaps if interval is not None)
+
+
+def _exact_time_as_json(value: ExactTime) -> dict[str, int]:
+    return {"numerator": value.numerator, "denominator": value.denominator}
+
+
+def _exact_time_from_json(value: object) -> ExactTime:
+    if not isinstance(value, Mapping):
+        raise ValueError("Exact time must be a JSON object.")
+    return ExactTime(
+        _required_integer(value.get("numerator")), _required_integer(value.get("denominator"))
+    )
+
+
+def _coverage_diagnostic_from_json(value: object) -> CoverageDiagnostic:
+    if not isinstance(value, Mapping):
+        raise ValueError("Coverage diagnostic must be a JSON object.")
+    return CoverageDiagnostic(
+        _required_string(value.get("reason")),
+        _required_string(value.get("path")),
+        _required_string(value.get("message")),
+    )
+
+
+def _subtitle_track_from_json(value: object) -> SubtitleTrackCandidate:
+    if not isinstance(value, Mapping):
+        raise ValueError("Subtitle track candidate must be a JSON object.")
+    language = value.get("language")
+    container_format = value.get("container_format")
+    available = value.get("available")
+    if language is not None and not isinstance(language, str):
+        raise ValueError("Subtitle language must be a string or null.")
+    if container_format is not None and not isinstance(container_format, str):
+        raise ValueError("Subtitle container format must be a string or null.")
+    if not isinstance(available, bool):
+        raise ValueError("Subtitle availability must be a boolean.")
+    return SubtitleTrackCandidate(
+        _required_integer(value.get("stream_index")),
+        language,
+        container_format,
+        _required_string(value.get("origin")),
+        available,
+    )
+
+
+def _required_string(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("A required evidence string is missing.")
+    return value
+
+
+def _required_integer(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("A required evidence integer is missing.")
+    return value

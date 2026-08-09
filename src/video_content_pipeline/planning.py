@@ -16,6 +16,7 @@ from video_content_pipeline.external_tools import (
     revalidate_external_tool,
     run_tool,
 )
+from video_content_pipeline.inspection import PlanInspectionEvidence
 from video_content_pipeline.source import (
     DiskHeadroom,
     SourceArtifact,
@@ -93,6 +94,7 @@ class PlanReport:
     configuration_fingerprint: str
     decode_estimate: ThreePointEstimate | None
     diagnostics: tuple[PlanningDiagnostic, ...]
+    inspection_evidence: tuple[PlanInspectionEvidence, ...] = ()
     parent_report_id: str | None = None
 
     def as_json(self) -> dict[str, object]:
@@ -110,6 +112,7 @@ class PlanReport:
             "configuration_fingerprint": self.configuration_fingerprint,
             "decode_estimate": self.decode_estimate.as_json() if self.decode_estimate else None,
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
+            "inspection_evidence": [evidence.as_json() for evidence in self.inspection_evidence],
             "future_stages": {"status": "unavailable/not_estimated"},
         }
 
@@ -192,10 +195,12 @@ def create_plan_report(
     configuration_fingerprint: str,
     decode_estimate: ThreePointEstimate | None = None,
     diagnostics: tuple[PlanningDiagnostic, ...] = (),
+    inspection_evidence: tuple[PlanInspectionEvidence, ...] = (),
     parent_report_id: str | None = None,
 ) -> PlanReport:
     """Build one new immutable report without embedding raw URL inputs."""
 
+    _validate_inspection_evidence(source_artifacts, inspection_evidence)
     return PlanReport(
         report_id=uuid.uuid4().hex,
         state=state,
@@ -205,6 +210,7 @@ def create_plan_report(
         configuration_fingerprint=configuration_fingerprint,
         decode_estimate=decode_estimate,
         diagnostics=diagnostics,
+        inspection_evidence=inspection_evidence,
         parent_report_id=parent_report_id,
     )
 
@@ -266,7 +272,10 @@ def load_plan_report(path: Path) -> PlanReport:
             )
         )
         diagnostic_values = decoded.get("diagnostics", [])
+        inspection_values = decoded.get("inspection_evidence", [])
         if not isinstance(diagnostic_values, list):
+            raise TypeError
+        if not isinstance(inspection_values, list):
             raise TypeError
         diagnostics = tuple(
             PlanningDiagnostic(
@@ -274,6 +283,10 @@ def load_plan_report(path: Path) -> PlanReport:
             )
             for value in diagnostic_values
         )
+        inspection_evidence = tuple(
+            PlanInspectionEvidence.from_json(evidence) for evidence in inspection_values
+        )
+        _validate_inspection_evidence(sources, inspection_evidence)
         return PlanReport(
             report_id=_required_string(decoded, "report_id"),
             state=PlanState(_required_string(decoded, "state")),
@@ -287,6 +300,7 @@ def load_plan_report(path: Path) -> PlanReport:
             configuration_fingerprint=_required_string(decoded, "configuration_fingerprint"),
             decode_estimate=estimate,
             diagnostics=diagnostics,
+            inspection_evidence=inspection_evidence,
             parent_report_id=decoded.get("parent_report_id")
             if isinstance(decoded.get("parent_report_id"), str)
             else None,
@@ -385,6 +399,19 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
 
 def _ceil_fraction(value: Fraction) -> int:
     return (value.numerator + value.denominator - 1) // value.denominator
+
+
+def _validate_inspection_evidence(
+    source_artifacts: tuple[SourceArtifact, ...],
+    inspection_evidence: tuple[PlanInspectionEvidence, ...],
+) -> None:
+    source_ids = tuple(artifact.source_id for artifact in source_artifacts)
+    evidence_source_ids = tuple(evidence.source_id for evidence in inspection_evidence)
+    if source_ids != evidence_source_ids:
+        raise PlanningError(
+            "inspection_evidence_invalid",
+            "Each SourceArtifact needs one matching retained inspection evidence record.",
+        )
 
 
 def _write_json_once(path: Path, payload: dict[str, object]) -> None:

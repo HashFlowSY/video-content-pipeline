@@ -7,6 +7,8 @@ import pytest
 
 from video_content_pipeline import cli
 from video_content_pipeline.cli import _parser
+from video_content_pipeline.external_tools import PinnedExternalTool
+from video_content_pipeline.probe import ProbeDocument
 from video_content_pipeline.source import SourceIntakeError
 
 
@@ -105,3 +107,45 @@ def test_disk_headroom_is_checked_from_the_precopy_snapshot_size(
 
     assert result["status"] == "blocked"
     assert requirements == [4096 * 2 + 64 * 1024**2]
+
+
+def test_invalid_inspection_evidence_returns_a_retained_blocked_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "source.mp4"
+    source_path.write_bytes(b"source")
+    ffprobe = PinnedExternalTool("ffprobe", tmp_path / "ffprobe", "test", "a" * 64)
+    ffmpeg = PinnedExternalTool("ffmpeg", tmp_path / "ffmpeg", "test", "b" * 64)
+
+    def configured_tool(_root: Path, tool_id: str) -> PinnedExternalTool:
+        return {"ffprobe": ffprobe, "ffmpeg": ffmpeg}[tool_id]
+
+    def invalid_probe_documents(*_args: object) -> tuple[ProbeDocument, ProbeDocument]:
+        return ProbeDocument('{"streams": []}'), ProbeDocument('{"packets": []}')
+
+    monkeypatch.setattr(cli, "_configured_tool", configured_tool)
+    monkeypatch.setattr(cli, "capture_probe_documents", invalid_probe_documents)
+
+    result = cli._plan_local_file(source_path, tmp_path, tmp_path / "plans")
+
+    assert result["status"] == "blocked"
+    report = result["report"]
+    assert report["source_artifacts"]
+    assert report["tools"] == [ffprobe.as_json(), ffmpeg.as_json()]
+    assert report["diagnostics"] == [
+        {
+            "reason": "probe_invalid",
+            "message": "Structural ProbeDocument has no valid typed projection.",
+        }
+    ]
+    assert report["inspection_evidence"] == [
+        {
+            "source_id": report["source_artifacts"][0]["source_id"],
+            "structural_probe_document": {"raw_json": '{"streams": []}'},
+            "coverage_probe_document": {"raw_json": '{"packets": []}'},
+            "stream_coverage": [],
+            "subtitle_track_candidates": [],
+        }
+    ]
+    report_path = tmp_path / "plans" / "reports" / report["report_id"] / "plan-report.json"
+    assert json.loads(report_path.read_text(encoding="utf-8")) == report

@@ -12,6 +12,8 @@ from video_content_pipeline.environment import assert_project_venv, assert_runti
 from video_content_pipeline.external_tools import PinnedExternalTool, identify_external_tool
 from video_content_pipeline.inspection import (
     InspectionError,
+    PlanInspectionEvidence,
+    ProbeCaptureError,
     capture_probe_documents,
     inspect_documents,
 )
@@ -29,6 +31,7 @@ from video_content_pipeline.planning import (
     revalidate_report,
 )
 from video_content_pipeline.source import (
+    SourceArtifact,
     SourceIntakeError,
     calculate_disk_headroom,
     ensure_disk_headroom,
@@ -143,8 +146,29 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
         return _blocked_local_report(error, planned_increment, plans_root)
     ffprobe = _configured_tool(project_root, "ffprobe")
     ffmpeg = _configured_tool(project_root, "ffmpeg")
-    documents = capture_probe_documents(ffprobe, artifact, artifact.media_path.parent / "evidence")
-    inspection = inspect_documents(*documents)
+    inspection_evidence: tuple[PlanInspectionEvidence, ...] = ()
+    try:
+        documents = capture_probe_documents(
+            ffprobe, artifact, artifact.media_path.parent / "evidence"
+        )
+        inspection_evidence = (
+            PlanInspectionEvidence.from_documents(artifact.source_id, *documents),
+        )
+        inspection = inspect_documents(*documents)
+    except InspectionError as error:
+        if isinstance(error, ProbeCaptureError):
+            inspection_evidence = (
+                PlanInspectionEvidence.from_capture_error(artifact.source_id, error),
+            )
+        return _blocked_local_report(
+            error,
+            planned_increment,
+            plans_root,
+            source_artifacts=(artifact,),
+            tools=(ffprobe, ffmpeg),
+            inspection_evidence=inspection_evidence,
+        )
+    inspection_evidence = (PlanInspectionEvidence.from_inspection(artifact.source_id, inspection),)
     media_coverages = [
         coverage.coverage
         for coverage in inspection.coverage_by_stream.values()
@@ -160,6 +184,7 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
             diagnostics=(
                 PlanningDiagnostic("coverage_indeterminate", "Source coverage is not complete."),
             ),
+            inspection_evidence=inspection_evidence,
         )
         persist_plan_report(blocked, plans_root)
         return {"status": "blocked", "report": blocked.as_json()}
@@ -176,23 +201,31 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
         planned_increment_bytes=planned_increment,
         configuration_fingerprint="phase-03-local-plan-v1",
         decode_estimate=estimate_full_decode(duration.as_fraction(), profile),
+        inspection_evidence=inspection_evidence,
     )
     persist_plan_report(awaiting_decode, plans_root)
     return {"status": "awaiting_decode_confirmation", "report": awaiting_decode.as_json()}
 
 
 def _blocked_local_report(
-    error: SourceIntakeError, planned_increment: int, plans_root: Path
+    error: SourceIntakeError | InspectionError,
+    planned_increment: int,
+    plans_root: Path,
+    *,
+    source_artifacts: tuple[SourceArtifact, ...] = (),
+    tools: tuple[PinnedExternalTool, ...] = (),
+    inspection_evidence: tuple[PlanInspectionEvidence, ...] = (),
 ) -> dict[str, object]:
-    """Retain a local-source failure as a non-executable planning outcome."""
+    """Retain an intake or inspection failure as a non-executable planning outcome."""
 
     report = create_plan_report(
         state=PlanState.BLOCKED,
-        source_artifacts=(),
-        tools=(),
+        source_artifacts=source_artifacts,
+        tools=tools,
         planned_increment_bytes=planned_increment,
         configuration_fingerprint="phase-03-local-plan-v1",
         diagnostics=(PlanningDiagnostic(error.reason, str(error)),),
+        inspection_evidence=inspection_evidence,
     )
     persist_plan_report(report, plans_root)
     return {"status": "blocked", "report": report.as_json()}
@@ -212,6 +245,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
             configuration_fingerprint=report.configuration_fingerprint,
             decode_estimate=report.decode_estimate,
             diagnostics=diagnostics,
+            inspection_evidence=report.inspection_evidence,
             parent_report_id=report.report_id,
         )
         persist_plan_report(stale, plans_root)
@@ -231,6 +265,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
             configuration_fingerprint=report.configuration_fingerprint,
             decode_estimate=report.decode_estimate,
             diagnostics=(PlanningDiagnostic(error.reason, str(error)),),
+            inspection_evidence=report.inspection_evidence,
             parent_report_id=report.report_id,
         )
         persist_plan_report(blocked, plans_root)
@@ -242,6 +277,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
         planned_increment_bytes=report.disk_headroom.increment_bytes,
         configuration_fingerprint=report.configuration_fingerprint,
         decode_estimate=report.decode_estimate,
+        inspection_evidence=report.inspection_evidence,
         parent_report_id=report.report_id,
     )
     persist_plan_report(ready, plans_root)

@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from pathlib import Path
 
+import pytest
+
+import video_content_pipeline.inspection as inspection
+from video_content_pipeline.external_tools import PinnedExternalTool
 from video_content_pipeline.inspection import (
+    ProbeCaptureError,
+    capture_probe_documents,
     derive_packet_coverages,
     enumerate_subtitle_track_candidates,
 )
 from video_content_pipeline.probe import ProbeDocument, project_probe_document
+from video_content_pipeline.source import SourceArtifact
 
 
 def test_packet_evidence_derives_exact_coverage_and_subtitle_metadata_only() -> None:
     document = ProbeDocument(
         raw_json=json.dumps(
             {
+                "format": {"format_name": "matroska,webm"},
                 "streams": [
                     {"index": 0, "codec_type": "video", "time_base": "1/1000"},
                     {
@@ -44,7 +54,52 @@ def test_packet_evidence_derives_exact_coverage_and_subtitle_metadata_only() -> 
     assert subtitle_tracks[0].as_json() == {
         "stream_index": 1,
         "language": "en",
-        "codec_name": "webvtt",
-        "origin": "unknown",
+        "container_format": "matroska,webm",
+        "origin": "embedded",
         "available": True,
     }
+
+
+def test_failed_coverage_probe_retains_partial_probe_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tool = PinnedExternalTool("ffprobe", tmp_path / "ffprobe", "test", "a" * 64)
+    artifact = SourceArtifact("source", "a" * 64, 0, tmp_path / "media")
+    responses = iter(
+        (
+            subprocess.CompletedProcess([], 0, stdout='{"streams": []}', stderr=""),
+            subprocess.CompletedProcess([], 1, stdout='{"packets": []}', stderr="failed"),
+        )
+    )
+
+    monkeypatch.setattr(inspection, "run_tool", lambda _arguments: next(responses))
+
+    with pytest.raises(ProbeCaptureError) as error:
+        capture_probe_documents(tool, artifact, tmp_path / "evidence")
+
+    assert error.value.structural_document == ProbeDocument('{"streams": []}')
+    assert error.value.coverage_document == ProbeDocument('{"packets": []}')
+    assert (tmp_path / "evidence" / "structural.ffprobe.json").read_text() == '{"streams": []}'
+    assert (tmp_path / "evidence" / "coverage.ffprobe.json").read_text() == '{"packets": []}'
+
+
+def test_probe_evidence_conflict_retains_the_new_structural_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tool = PinnedExternalTool("ffprobe", tmp_path / "ffprobe", "test", "a" * 64)
+    artifact = SourceArtifact("source", "a" * 64, 0, tmp_path / "media")
+    evidence_directory = tmp_path / "evidence"
+    evidence_directory.mkdir()
+    (evidence_directory / "structural.ffprobe.json").write_text('{"streams": ["old"]}')
+    monkeypatch.setattr(
+        inspection,
+        "run_tool",
+        lambda _arguments: subprocess.CompletedProcess([], 0, stdout='{"streams": []}', stderr=""),
+    )
+
+    with pytest.raises(ProbeCaptureError) as error:
+        capture_probe_documents(tool, artifact, evidence_directory)
+
+    assert error.value.reason == "probe_document_conflict"
+    assert error.value.structural_document == ProbeDocument('{"streams": []}')
+    assert error.value.coverage_document is None
