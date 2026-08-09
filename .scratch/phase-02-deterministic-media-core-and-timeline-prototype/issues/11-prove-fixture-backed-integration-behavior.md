@@ -27,6 +27,10 @@ mismatched artifacts fail with explicit assertions. The retained frame evidence
 proves `gap-video` coverage `[10, 13.9)` and its internal gap `[11, 13)`; the
 previous `[13, 14)` prose in the approved fixture proposal and Ticket 10 ledger
 was corrected to match the hash-pinned evidence without changing fixture bytes.
-The suite passed (`48 passed`), as did ruff, format, and `mypy src`. No fixture
-generation, deletion, FFmpeg, FFprobe, network access, user media, model, paid
-service, or media-facing CLI action occurred.
+The follow-up review fixed two gaps: the manifest now requires the exact
+canonical entry set, and SRT/VTT serialization retains source cue identifiers.
+The tests verify the retained VTT identifier, setting, multiline text, and
+one-millisecond interval across both round trips. The suite passed (`48
+passed`), as did ruff, format, and `mypy src`. No fixture generation, deletion,
+FFmpeg, FFprobe, network access, user media, model, paid service, or
+media-facing CLI action occurred.

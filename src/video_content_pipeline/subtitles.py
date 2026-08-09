@@ -672,7 +672,7 @@ def serialize_srt(cues: tuple[PresentationCue, ...]) -> str:
     """Serialize presentation cues as parseable outward-millisecond SRT."""
 
     blocks = tuple(
-        f"{ordinal}\n"
+        f"{_cue_identifier(cue, ordinal)}\n"
         f"{_format_timestamp(cue.serialization_envelope.start_milliseconds, ',')} --> "
         f"{_format_timestamp(cue.serialization_envelope.end_milliseconds, ',')}\n"
         f"{cue.text}"
@@ -685,7 +685,7 @@ def serialize_vtt(cues: tuple[PresentationCue, ...]) -> str:
     """Serialize presentation cues as parseable outward-millisecond WebVTT."""
 
     blocks = tuple(
-        f"{ordinal}\n"
+        f"{_cue_identifier(cue, ordinal)}\n"
         f"{_format_timestamp(cue.serialization_envelope.start_milliseconds, '.')} --> "
         f"{_format_timestamp(cue.serialization_envelope.end_milliseconds, '.')}"
         f"{(' ' + cue.timing_settings) if cue.timing_settings else ''}\n"
@@ -700,6 +700,12 @@ def _stable_presentation_order(
     cues: tuple[PresentationCue, ...],
 ) -> tuple[PresentationCue, ...]:
     return tuple(sorted(cues, key=_cue_order_key))
+
+
+def _cue_identifier(cue: PresentationCue, ordinal: int) -> str:
+    """Preserve a retained source identifier or assign a deterministic fallback."""
+
+    return cue.normalized_cue.raw_cue.identifier or str(ordinal)
 
 
 def _cue_order_key(cue: NormalizedCue | PresentationCue) -> tuple[ExactTime, ExactTime, int]:

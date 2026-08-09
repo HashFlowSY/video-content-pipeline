@@ -31,6 +31,22 @@ from video_content_pipeline.timeline import CollectionTimeline, TimelinePart
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures"
 MANIFEST_PATH = FIXTURE_ROOT / "phase-02-manifest.json"
+CANONICAL_FIXTURE_PATHS = frozenset(
+    {
+        "recipes/phase-02-fixtures-v1.json",
+        "media/phase-02-offset-av-aac.mkv",
+        "media/phase-02-gap-video.mkv",
+        "media/phase-02-aac-priming.m4a",
+        "subtitles/phase-02-rolling.srt",
+        "subtitles/phase-02-out-of-range.srt",
+        "subtitles/phase-02-roundtrip.vtt",
+        "evidence/ffmpeg-version.txt",
+        "evidence/ffprobe-version.txt",
+        "evidence/phase-02-offset-av-aac.ffprobe.json",
+        "evidence/phase-02-gap-video.ffprobe.json",
+        "evidence/phase-02-aac-priming.ffprobe.json",
+    }
+)
 
 
 def _manifest() -> dict[str, object]:
@@ -45,6 +61,7 @@ def _verify_fixture_manifest(fixture_root: Path, manifest: Mapping[str, object])
     assert len(entries) == 12, "Fixture manifest must retain exactly 12 canonical entries."
 
     paths: set[str] = set()
+    retained_entries: list[tuple[str, int, str]] = []
     for ordinal, entry in enumerate(entries):
         assert isinstance(entry, Mapping), f"Fixture manifest entry {ordinal} must be an object."
         path = entry.get("path")
@@ -63,7 +80,16 @@ def _verify_fixture_manifest(fixture_root: Path, manifest: Mapping[str, object])
             and len(sha256) == 64
             and all(character in "0123456789abcdef" for character in sha256)
         ), f"Fixture manifest entry {path} has an invalid SHA-256 digest."
+        retained_entries.append((path, byte_count, sha256))
 
+    missing_paths = CANONICAL_FIXTURE_PATHS - paths
+    unexpected_paths = paths - CANONICAL_FIXTURE_PATHS
+    assert not missing_paths and not unexpected_paths, (
+        "Fixture manifest canonical paths differ: "
+        f"missing={sorted(missing_paths)}, unexpected={sorted(unexpected_paths)}."
+    )
+
+    for path, byte_count, sha256 in retained_entries:
         artifact = fixture_root / path
         assert artifact.is_file(), f"Fixture artifact is missing: {path}"
         content = artifact.read_bytes()
@@ -149,18 +175,17 @@ def _coverage_from_frames(
 def test_fixture_manifest_verification_rejects_missing_and_mismatched_artifacts(
     tmp_path: Path,
 ) -> None:
-    missing_manifest = {
-        "entries": [
-            {
-                "path": "media/missing.mkv",
-                "byte_count": 1,
-                "sha256": "0" * 64,
-            }
-        ]
-        * 12
-    }
-    with pytest.raises(AssertionError, match="Fixture artifact is missing: media/missing.mkv"):
-        _verify_fixture_manifest(tmp_path, missing_manifest)
+    with pytest.raises(AssertionError, match="Fixture artifact is missing"):
+        _verify_fixture_manifest(tmp_path, _manifest())
+
+    missing_entry_manifest = copy.deepcopy(_manifest())
+    entries = missing_entry_manifest["entries"]
+    assert isinstance(entries, list)
+    final_entry = entries[-1]
+    assert isinstance(final_entry, dict)
+    final_entry["path"] = "evidence/replaced-entry.json"
+    with pytest.raises(AssertionError, match="Fixture manifest canonical paths differ"):
+        _verify_fixture_manifest(FIXTURE_ROOT, missing_entry_manifest)
 
     mismatched_manifest = copy.deepcopy(_manifest())
     entries = mismatched_manifest["entries"]
@@ -292,6 +317,8 @@ def test_retained_srt_and_vtt_fixture_tracks_round_trip_against_coverage(
     )
     vtt_track = parse_vtt(vtt_source, part_id="offset-video", track_id="vtt", coverage=coverage)
     assert vtt_track.valid
+    assert vtt_track.raw_cues[0].identifier == "cue-1"
+    assert vtt_track.raw_cues[0].interval == HalfOpenInterval(ExactTime(0), ExactTime(1, 1_000))
     presentation = presentation_output(vtt_track).cues
     srt_round_trip = parse_srt(
         serialize_srt(presentation),
@@ -310,4 +337,12 @@ def test_retained_srt_and_vtt_fixture_tracks_round_trip_against_coverage(
     assert vtt_round_trip.valid
     assert [cue.text for cue in srt_round_trip.raw_cues] == ["Line one\nLine two", "Second cue"]
     assert [cue.text for cue in vtt_round_trip.raw_cues] == ["Line one\nLine two", "Second cue"]
+    assert srt_round_trip.raw_cues[0].identifier == "cue-1"
+    assert vtt_round_trip.raw_cues[0].identifier == "cue-1"
+    assert srt_round_trip.raw_cues[0].interval == HalfOpenInterval(
+        ExactTime(0), ExactTime(1, 1_000)
+    )
+    assert vtt_round_trip.raw_cues[0].interval == HalfOpenInterval(
+        ExactTime(0), ExactTime(1, 1_000)
+    )
     assert vtt_round_trip.raw_cues[0].timing_settings == "align:start"

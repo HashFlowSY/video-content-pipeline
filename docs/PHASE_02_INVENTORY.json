@@ -227,12 +227,13 @@
       "commands": [
         "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q tests/integration/test_fixture_backed_core.py",
         "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; ruff format tests/integration/test_fixture_backed_core.py; ruff format --check tests/integration/test_fixture_backed_core.py; ruff check tests/integration/test_fixture_backed_core.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; ruff format src/video_content_pipeline/subtitles.py tests/integration/test_fixture_backed_core.py; pytest -q tests/unit/test_subtitles.py tests/integration/test_fixture_backed_core.py; ruff check src/video_content_pipeline/subtitles.py tests/integration/test_fixture_backed_core.py; ruff format --check src/video_content_pipeline/subtitles.py tests/integration/test_fixture_backed_core.py; mypy src",
         "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q; ruff check src tests; ruff format --check src tests; mypy src"
       ],
       "results": {
-        "fixture_manifest": "Verified all 12 retained artifacts for relative path uniqueness, byte count, and exact lowercase SHA-256 before interpreting evidence; missing and mismatched artifacts fail visibly.",
-        "fixture_behavior": "Projected retained offset AV, gap-video, and AAC-priming ProbeDocuments; derived gap-video coverage [10, 13.9) with internal gap [11, 13); preserved negative audio PTS; proved compact collection mapping and SRT/VTT round trips.",
-        "pytest_integration": "4 passed",
+        "fixture_manifest": "Verified the exact canonical set of 12 retained paths, relative-path uniqueness, byte count, and exact lowercase SHA-256 before interpreting evidence; missing entries, artifacts, and mismatched artifacts fail visibly.",
+        "fixture_behavior": "Projected retained offset AV, gap-video, and AAC-priming ProbeDocuments; derived gap-video coverage [10, 13.9) with internal gap [11, 13); preserved negative audio PTS; proved compact collection mapping and SRT/VTT round trips that retain the VTT identifier, setting, multiline text, and one-millisecond interval.",
+        "pytest_integration": "4 passed; follow-up subtitle and integration suite 21 passed",
         "pytest_full": "48 passed",
         "ruff_check": "passed",
         "ruff_format_check": "18 files already formatted",
@@ -1854,13 +1855,26 @@
       "kind": "file",
       "action": "created",
       "purpose": "Ticket 11 read-only proof of fixture hash validation, ProbeDocument projection, decoded coverage, coordinate mapping, and subtitle round trips",
-      "size_bytes": 12605,
-      "sha256": "61c69bda02de91684752fbb8c85632c8e6a47845e92df33cc90174a782b79e54",
+      "size_bytes": 14368,
+      "sha256": "9399c8396d04f47b9214435ddd27efbfd1fb7988a5edd34cfc06b4b101dd8198",
       "stage": "PHASE-02",
       "used_by": ["integration_testing", "fixture_manifest", "probe_evidence", "coverage_evidence", "subtitle_evidence"],
       "rebuildable": true,
       "deletion_class": "keep_for_audit",
       "deletion_consequence": "The retained-fixture integration proof would be lost."
+    },
+    {
+      "path": "src/video_content_pipeline/subtitles.py",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Preserve retained subtitle cue identifiers during deterministic SRT and VTT serialization",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["subtitle_evidence", "subtitle_export", "integration_testing"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "Round-trip serialization could lose retained source identifiers."
     },
     {
       "path": "plans/PHASE-02/09-FIXTURE-CORPUS-PROPOSAL.md",
