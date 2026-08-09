@@ -5,7 +5,9 @@ from dataclasses import FrozenInstanceError
 from video_content_pipeline.coverage import DecodedInterval, StreamCoverage, derive_stream_coverage
 from video_content_pipeline.subtitles import (
     NormalizedCue,
+    PresentationCorrection,
     PresentationCue,
+    PresentationDiagnostic,
     RawCue,
     SubtitleTrack,
     SubtitleTrackStatus,
@@ -14,6 +16,7 @@ from video_content_pipeline.subtitles import (
     parse_srt,
     parse_vtt,
     presentation_cues,
+    presentation_output,
     serialize_srt,
     serialize_vtt,
 )
@@ -264,3 +267,71 @@ def test_multi_cue_exports_keep_stable_overlap_order_and_parse_as_separate_cues(
     assert [cue.text for cue in srt_result.raw_cues] == ["first short", "first overlap", "later"]
     assert [cue.text for cue in vtt_result.raw_cues] == ["first short", "first overlap", "later"]
     assert srt_result.raw_cues[0].interval.overlaps(srt_result.raw_cues[1].interval)
+
+
+def test_presentation_output_removes_only_proven_rolling_suffix_prefix_overlap() -> None:
+    track = parse_srt(
+        "1\n00:00:00,000 --> 00:00:02,000\nwe need\n\n"
+        "2\n00:00:01,000 --> 00:00:03,000\nneed to act\n",
+        part_id="part-a",
+        track_id="captions",
+        coverage=_coverage(),
+    )
+
+    output = presentation_output(track)
+
+    assert [cue.text for cue in output.cues] == ["we need", " to act"]
+    assert output.diagnostics == ()
+    assert output.corrections == (
+        PresentationCorrection(
+            reason="proven_rolling_overlap",
+            source_ordinal=1,
+            source_token_range=(0, 1),
+            compared_to_source_ordinal=0,
+        ),
+    )
+    assert output.cues[1].source_token_indexes == (1, 2, 3, 4)
+    assert presentation_cues(track) == output.cues
+
+
+def test_presentation_output_omits_only_exact_duplicate_text_with_exact_endpoints() -> None:
+    track = parse_srt(
+        "1\n00:00:00,000 --> 00:00:01,000\nagain\n\n2\n00:00:00,000 --> 00:00:01,000\nagain\n",
+        part_id="part-a",
+        track_id="captions",
+        coverage=_coverage(),
+    )
+
+    output = presentation_output(track)
+
+    assert [cue.text for cue in output.cues] == ["again"]
+    assert output.corrections == (
+        PresentationCorrection(
+            reason="exact_duplicate_omitted",
+            source_ordinal=1,
+            source_token_range=(0, 1),
+            compared_to_source_ordinal=0,
+        ),
+    )
+    assert output.diagnostics == ()
+
+
+def test_presentation_output_retains_real_repetition_with_possible_duplicate_evidence() -> None:
+    track = parse_srt(
+        "1\n00:00:00,000 --> 00:00:01,000\nagain\n\n2\n00:00:02,000 --> 00:00:03,000\nagain\n",
+        part_id="part-a",
+        track_id="captions",
+        coverage=_coverage(),
+    )
+
+    output = presentation_output(track)
+
+    assert [cue.text for cue in output.cues] == ["again", "again"]
+    assert output.corrections == ()
+    assert output.diagnostics == (
+        PresentationDiagnostic(
+            reason="possible_duplicate",
+            source_ordinal=1,
+            compared_to_source_ordinal=0,
+        ),
+    )

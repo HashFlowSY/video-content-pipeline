@@ -30,7 +30,7 @@
 - [ ] Write failing unit tests for `PresentationCue`, stable overlap ordering,
   and outward millisecond serialization; implement derived cue and export
   behavior without rewriting source evidence.
-- [ ] Write failing unit tests for exact rolling accumulation, exact duplicate
+- [x] Write failing unit tests for exact rolling accumulation, exact duplicate
   deletion, real spoken repetition, and `possible_duplicate`; implement only
   the approved local-proof de-duplication and correction provenance.
 - [ ] Submit a concrete FFmpeg fixture recipe, expected paths, expected size,

@@ -131,17 +131,69 @@ class SerializationEnvelope:
 
 
 @dataclass(frozen=True)
+class PresentationCorrection:
+    """A presentation-only token omission with exact source provenance."""
+
+    reason: Literal["proven_rolling_overlap", "exact_duplicate_omitted"]
+    source_ordinal: int
+    source_token_range: tuple[int, int]
+    compared_to_source_ordinal: int
+
+    def __post_init__(self) -> None:
+        start, end = self.source_token_range
+        if start < 0 or start >= end:
+            raise SubtitleValidationError(
+                "Presentation correction must identify a non-empty token range."
+            )
+
+
+@dataclass(frozen=True)
+class PresentationDiagnostic:
+    """A retained ambiguity that did not authorize presentation token removal."""
+
+    reason: Literal["possible_duplicate"]
+    source_ordinal: int
+    compared_to_source_ordinal: int
+
+
+@dataclass(frozen=True)
 class PresentationCue:
     """Immutable display evidence derived from one lossless normalized cue."""
 
     normalized_cue: NormalizedCue
     source_token_indexes: tuple[int, ...]
+    corrections: tuple[PresentationCorrection, ...] = ()
 
     def __post_init__(self) -> None:
         expected_indexes = tuple(range(len(self.normalized_cue.tokens)))
-        if self.source_token_indexes != expected_indexes:
+        if self.source_token_indexes == expected_indexes:
+            if self.corrections:
+                raise SubtitleValidationError(
+                    "Unchanged presentation cues cannot carry token corrections."
+                )
+            return
+        if tuple(sorted(set(self.source_token_indexes))) != self.source_token_indexes or any(
+            index not in expected_indexes for index in self.source_token_indexes
+        ):
             raise SubtitleValidationError(
-                "Presentation cues must retain every source token before deduplication."
+                "Presentation cue source-token indexes must be ordered, unique, and in range."
+            )
+        omitted_indexes = set(expected_indexes) - set(self.source_token_indexes)
+        corrected_indexes: set[int] = set()
+        for correction in self.corrections:
+            if correction.source_ordinal != self.source_ordinal:
+                raise SubtitleValidationError(
+                    "Presentation correction must belong to its presentation cue."
+                )
+            start, end = correction.source_token_range
+            if end > len(expected_indexes):
+                raise SubtitleValidationError(
+                    "Presentation correction token range is outside its source cue."
+                )
+            corrected_indexes.update(range(start, end))
+        if omitted_indexes != corrected_indexes:
+            raise SubtitleValidationError(
+                "Presentation cue token omissions must be covered by correction provenance."
             )
 
     @property
@@ -177,6 +229,15 @@ class PresentationCue:
         """Return retained WebVTT timing settings for format-preserving export."""
 
         return self.normalized_cue.raw_cue.timing_settings
+
+
+@dataclass(frozen=True)
+class PresentationOutput:
+    """Presentation cues plus all display-only corrections and ambiguities."""
+
+    cues: tuple[PresentationCue, ...]
+    corrections: tuple[PresentationCorrection, ...] = ()
+    diagnostics: tuple[PresentationDiagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -544,11 +605,66 @@ def accept_subtitle_track(
 def presentation_cues(track: SubtitleTrack) -> tuple[PresentationCue, ...]:
     """Produce stable ordered presentation cues from atomically accepted evidence."""
 
+    return presentation_output(track).cues
+
+
+def presentation_output(track: SubtitleTrack) -> PresentationOutput:
+    """Apply only exact local rolling-display corrections to accepted cue evidence."""
+
     if not track.valid:
         raise SubtitleValidationError("Presentation output requires an accepted subtitle track.")
-    return tuple(
-        PresentationCue(cue, tuple(range(len(cue.tokens))))
-        for cue in sorted(track.normalized_cues, key=_cue_order_key)
+    ordered = tuple(sorted(track.normalized_cues, key=_cue_order_key))
+    visible_indexes = {cue.source_ordinal: tuple(range(len(cue.tokens))) for cue in ordered}
+    cue_corrections: dict[int, list[PresentationCorrection]] = {
+        cue.source_ordinal: [] for cue in ordered
+    }
+    corrections: list[PresentationCorrection] = []
+    diagnostics: list[PresentationDiagnostic] = []
+    omitted_cues: set[int] = set()
+
+    for earlier, later in zip(ordered, ordered[1:]):
+        if earlier.part_id != later.part_id or earlier.track_id != later.track_id:
+            continue
+        if _is_exact_duplicate(earlier, later):
+            correction = PresentationCorrection(
+                reason="exact_duplicate_omitted",
+                source_ordinal=later.source_ordinal,
+                source_token_range=(0, len(later.tokens)),
+                compared_to_source_ordinal=earlier.source_ordinal,
+            )
+            corrections.append(correction)
+            omitted_cues.add(later.source_ordinal)
+            continue
+        omission_end = _rolling_omission_end(earlier, later)
+        if omission_end is not None:
+            correction = PresentationCorrection(
+                reason="proven_rolling_overlap",
+                source_ordinal=later.source_ordinal,
+                source_token_range=(0, omission_end),
+                compared_to_source_ordinal=earlier.source_ordinal,
+            )
+            visible_indexes[later.source_ordinal] = tuple(range(omission_end, len(later.tokens)))
+            cue_corrections[later.source_ordinal].append(correction)
+            corrections.append(correction)
+        elif _has_exact_token_overlap(earlier, later):
+            diagnostics.append(
+                PresentationDiagnostic(
+                    reason="possible_duplicate",
+                    source_ordinal=later.source_ordinal,
+                    compared_to_source_ordinal=earlier.source_ordinal,
+                )
+            )
+
+    return PresentationOutput(
+        cues=tuple(
+            PresentationCue(
+                cue, visible_indexes[cue.source_ordinal], tuple(cue_corrections[cue.source_ordinal])
+            )
+            for cue in ordered
+            if cue.source_ordinal not in omitted_cues
+        ),
+        corrections=tuple(corrections),
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -588,6 +704,50 @@ def _stable_presentation_order(
 
 def _cue_order_key(cue: NormalizedCue | PresentationCue) -> tuple[ExactTime, ExactTime, int]:
     return cue.interval.start, cue.interval.end, cue.source_ordinal
+
+
+def _is_exact_duplicate(earlier: NormalizedCue, later: NormalizedCue) -> bool:
+    return (
+        earlier.text == later.text
+        and earlier.interval.start == later.interval.start
+        and earlier.interval.end == later.interval.end
+    )
+
+
+def _rolling_omission_end(earlier: NormalizedCue, later: NormalizedCue) -> int | None:
+    """Return the later-source range owned by an exactly proven rolling overlap."""
+
+    if not _intervals_overlap_or_touch(earlier.interval, later.interval):
+        return None
+    overlap_length = _contiguous_suffix_prefix_length(earlier.tokens, later.tokens)
+    if overlap_length == 0 or overlap_length == len(later.tokens):
+        return None
+    if not any(not token.isspace() for token in later.tokens[:overlap_length]):
+        return None
+    return overlap_length
+
+
+def _intervals_overlap_or_touch(earlier: HalfOpenInterval, later: HalfOpenInterval) -> bool:
+    return earlier.overlaps(later) or earlier.end == later.start or later.end == earlier.start
+
+
+def _contiguous_suffix_prefix_length(
+    earlier_tokens: tuple[str, ...], later_tokens: tuple[str, ...]
+) -> int:
+    for length in range(min(len(earlier_tokens), len(later_tokens)), 0, -1):
+        if earlier_tokens[-length:] == later_tokens[:length]:
+            return length
+    return 0
+
+
+def _has_exact_token_overlap(earlier: NormalizedCue, later: NormalizedCue) -> bool:
+    for earlier_start in range(len(earlier.tokens)):
+        for later_start in range(len(later.tokens)):
+            if earlier.tokens[earlier_start] != later.tokens[later_start]:
+                continue
+            if not earlier.tokens[earlier_start].isspace():
+                return True
+    return False
 
 
 def _floor_milliseconds(time: ExactTime) -> int:
