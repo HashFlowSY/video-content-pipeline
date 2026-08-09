@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "phase-03-default-v1",
+      "optimistic_realtime_factor": "8",
+      "likely_realtime_factor": "3",
+      "conservative_realtime_factor": "1",
+      "confidence": "low",
+      "purpose": "Initial decode-validation planning only; replace with matching measured project history when available."
+    }
+  ]
+}
