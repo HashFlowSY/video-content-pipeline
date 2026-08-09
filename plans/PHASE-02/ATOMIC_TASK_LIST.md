@@ -36,7 +36,7 @@
 - [x] Submit a concrete FFmpeg fixture recipe, expected paths, expected size,
   and retention record for user approval; receive explicit fixture-generation
   approval before creating or executing it.
-- [ ] After explicit fixture approval, generate retained synthetic media and
+- [x] After explicit fixture approval, generate retained synthetic media and
   expected ProbeDocuments under `tests/fixtures/`; hash and inventory every
   generated artifact without deleting any prior output.
 - [ ] Write and run fixture-backed integration tests for FFprobe projection,
