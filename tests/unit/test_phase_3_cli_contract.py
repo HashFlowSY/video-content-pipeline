@@ -14,6 +14,7 @@ from video_content_pipeline.planning import (
     PlanState,
     ThreePointEstimate,
     create_plan_report,
+    load_plan_report,
     persist_plan_report,
 )
 from video_content_pipeline.probe import ProbeDocument
@@ -34,6 +35,106 @@ def test_phase_3_cli_exposes_local_url_collection_decode_and_confirmation_forms(
     assert collection.collect is True
     assert decode.target == "decode" and decode.report_id == "report-id"
     assert confirm.target == "confirm" and confirm.report_id == "report-id"
+
+
+def test_public_url_cli_persists_only_redacted_authorization_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+
+    exit_code = cli.main(
+        [
+            "plan",
+            "https://example.test/watch/1?token=secret#fragment",
+            "--url-mode",
+            "filtered",
+            "--json",
+        ]
+    )
+
+    assert exit_code == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "blocked"
+    assert result["report"]["url_authorizations"] == [
+        {
+            "mode": "filtered",
+            "provenance": {
+                "scheme": "https",
+                "host": "example.test",
+                "path": "/watch/1",
+                "transport_integrity_verified": True,
+            },
+        }
+    ]
+    report_path = _report_path(tmp_path, result["report"])
+    assert "secret" not in report_path.read_text(encoding="utf-8")
+    assert (
+        load_plan_report(report_path).as_json()["url_authorizations"]
+        == result["report"]["url_authorizations"]
+    )
+
+
+def test_manual_collection_cli_preserves_input_order_and_closes_on_endsignal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+    submitted = iter(
+        [
+            "https://example.test/part-two?signature=secret",
+            "https://example.test/part-one#fragment",
+            "结束",
+        ]
+    )
+
+    def read_line(_prompt: str) -> str:
+        return next(submitted)
+
+    monkeypatch.setattr(cli, "_read_collection_line", read_line)
+
+    exit_code = cli.main(["plan", "--collect", "--url-mode", "direct", "--json"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["status"] == "blocked"
+    assert [entry["provenance"]["path"] for entry in result["report"]["url_authorizations"]] == [
+        "/part-two",
+        "/part-one",
+    ]
+    assert "presentation order" in captured.err
+    report_path = _report_path(tmp_path, result["report"])
+    assert "secret" not in report_path.read_text(encoding="utf-8")
+
+
+def test_manual_collection_cli_persists_a_blocked_report_for_duplicate_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+    submitted = iter(
+        ["https://example.test/part?token=secret", "https://example.test/part?token=secret"]
+    )
+    monkeypatch.setattr(cli, "_read_collection_line", lambda _prompt: next(submitted))
+
+    exit_code = cli.main(["plan", "--collect", "--url-mode", "direct", "--json"])
+
+    assert exit_code == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "blocked"
+    assert result["report"]["diagnostics"][0]["reason"] == "duplicate_url"
+    assert len(result["report"]["url_authorizations"]) == 1
+    assert "secret" not in _report_path(tmp_path, result["report"]).read_text(encoding="utf-8")
+
+
+def _prepare_phase_3_cli(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> None:
+    monkeypatch.setattr(cli, "assert_runtime_policy", lambda: None)
+    monkeypatch.setattr(cli, "assert_project_venv", lambda: object())
+    monkeypatch.setattr(cli, "_project_root", lambda: project_root)
+
+
+def _report_path(project_root: Path, report: dict[str, object]) -> Path:
+    report_id = report["report_id"]
+    assert isinstance(report_id, str)
+    return project_root / "plans" / "reports" / report_id / "plan-report.json"
 
 
 def test_local_non_regular_input_returns_a_retained_blocked_report(tmp_path: Path) -> None:

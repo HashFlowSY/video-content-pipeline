@@ -11,6 +11,13 @@ from video_content_pipeline.url_policy import (
 )
 
 
+def test_access_mode_is_runtime_mandatory() -> None:
+    with pytest.raises(URLPolicyError) as error:
+        authorize_public_url("https://example.test/media", None)  # type: ignore[arg-type]
+
+    assert error.value.reason == "url_mode_invalid"
+
+
 def test_https_authorization_redacts_query_and_fragment() -> None:
     authorization = authorize_public_url(
         "https://example.test/watch/1?token=secret#fragment", URLAccessMode.FILTERED
@@ -30,6 +37,14 @@ def test_http_needs_explicit_authorization() -> None:
         authorize_public_url("http://example.test/media", URLAccessMode.DIRECT)
 
     assert error.value.reason == "insecure_http_not_authorized"
+
+
+def test_explicitly_authorized_http_records_unverified_transport() -> None:
+    authorization = authorize_public_url(
+        "http://example.test/media", URLAccessMode.DIRECT, allow_insecure_http=True
+    )
+
+    assert authorization.provenance.transport_integrity_verified is False
 
 
 def test_new_host_and_https_downgrade_are_not_implicit() -> None:
@@ -62,3 +77,13 @@ def test_manual_collection_rejects_duplicate_raw_url() -> None:
         collection.append("https://example.test/part-1")
 
     assert error.value.reason == "duplicate_url"
+
+
+def test_manual_collection_consumes_insecure_http_authorization_per_entry() -> None:
+    collection = ManualCollectionSession(mode=URLAccessMode.DIRECT, allow_insecure_http=True)
+    collection.append("http://example.test/part-1")
+
+    with pytest.raises(URLPolicyError) as error:
+        collection.append("http://example.test/part-2")
+
+    assert error.value.reason == "insecure_http_not_authorized"

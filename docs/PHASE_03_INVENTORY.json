@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase": 3,
   "status": "in_progress",
-  "recorded_at": "2026-08-09T13:43:41Z",
+  "recorded_at": "2026-08-09T14:01:47Z",
   "project_root": "/Users/shangyang/Desktop/workspace/projects/video-content-pipeline",
   "summary": {
     "phase_3_boundary_adopted": true,
@@ -101,6 +101,15 @@
       "command": "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
       "purpose": "Ticket 04 offline RunPlan revalidation and immutable-evidence verification",
       "result": "93 passed in 0.26s; Ruff check and format check passed; strict Mypy passed",
+      "network_requests": 0,
+      "user_media_accessed": false,
+      "ffmpeg_executed": false,
+      "ffprobe_executed": false
+    },
+    {
+      "command": "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline UV_INSTALL_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tools/uv UV_CACHE_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/cache/uv UV_PYTHON_INSTALL_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/runtime/python UV_PROJECT_ENVIRONMENT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/.venv PIP_CACHE_DIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/cache/pip TMPDIR=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q && python -m ruff check src tests && python -m ruff format --check src tests && python -m mypy src",
+      "purpose": "Ticket 05 final project-local environment verification",
+      "result": "99 passed in 0.29s; Ruff check and format check passed; strict Mypy passed",
       "network_requests": 0,
       "user_media_accessed": false,
       "ffmpeg_executed": false,

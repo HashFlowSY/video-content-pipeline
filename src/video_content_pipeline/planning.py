@@ -26,6 +26,7 @@ from video_content_pipeline.source import (
     calculate_disk_headroom,
     sha256_file,
 )
+from video_content_pipeline.url_policy import URLAuthorizationEvidence
 
 
 class PlanningError(ValueError):
@@ -117,6 +118,7 @@ class PlanReport:
     configuration_fingerprint: str
     decode_estimate: ThreePointEstimate | None
     diagnostics: tuple[PlanningDiagnostic, ...]
+    url_authorizations: tuple[URLAuthorizationEvidence, ...] = ()
     inspection_evidence: tuple[PlanInspectionEvidence, ...] = ()
     parent_report_id: str | None = None
 
@@ -133,6 +135,9 @@ class PlanReport:
                 "required_bytes": self.disk_headroom.required_bytes,
             },
             "configuration_fingerprint": self.configuration_fingerprint,
+            "url_authorizations": [
+                authorization.as_json() for authorization in self.url_authorizations
+            ],
             "decode_estimate": self.decode_estimate.as_json() if self.decode_estimate else None,
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
             "inspection_evidence": [evidence.as_json() for evidence in self.inspection_evidence],
@@ -150,6 +155,7 @@ class RunPlan:
     tools: tuple[PinnedExternalTool, ...]
     disk_headroom: DiskHeadroom
     configuration_fingerprint: str
+    url_authorizations: tuple[URLAuthorizationEvidence, ...] = ()
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -163,6 +169,9 @@ class RunPlan:
                 "required_bytes": self.disk_headroom.required_bytes,
             },
             "configuration_fingerprint": self.configuration_fingerprint,
+            "url_authorizations": [
+                authorization.as_json() for authorization in self.url_authorizations
+            ],
         }
 
 
@@ -307,6 +316,7 @@ def create_plan_report(
     configuration_fingerprint: str,
     decode_estimate: ThreePointEstimate | None = None,
     diagnostics: tuple[PlanningDiagnostic, ...] = (),
+    url_authorizations: tuple[URLAuthorizationEvidence, ...] = (),
     inspection_evidence: tuple[PlanInspectionEvidence, ...] = (),
     parent_report_id: str | None = None,
 ) -> PlanReport:
@@ -322,6 +332,7 @@ def create_plan_report(
         configuration_fingerprint=configuration_fingerprint,
         decode_estimate=decode_estimate,
         diagnostics=diagnostics,
+        url_authorizations=url_authorizations,
         inspection_evidence=inspection_evidence,
         parent_report_id=parent_report_id,
     )
@@ -411,8 +422,9 @@ def load_plan_report(path: Path) -> PlanReport:
             )
         )
         diagnostic_values = decoded.get("diagnostics", [])
+        authorization_values = decoded.get("url_authorizations", [])
         inspection_values = decoded.get("inspection_evidence", [])
-        if not isinstance(diagnostic_values, list):
+        if not isinstance(diagnostic_values, list) or not isinstance(authorization_values, list):
             raise TypeError
         if not isinstance(inspection_values, list):
             raise TypeError
@@ -421,6 +433,10 @@ def load_plan_report(path: Path) -> PlanReport:
                 reason=_required_string(value, "reason"), message=_required_string(value, "message")
             )
             for value in diagnostic_values
+        )
+        url_authorizations = tuple(
+            URLAuthorizationEvidence.from_json(authorization)
+            for authorization in authorization_values
         )
         inspection_evidence = tuple(
             PlanInspectionEvidence.from_json(evidence) for evidence in inspection_values
@@ -439,6 +455,7 @@ def load_plan_report(path: Path) -> PlanReport:
             configuration_fingerprint=_required_string(decoded, "configuration_fingerprint"),
             decode_estimate=estimate,
             diagnostics=diagnostics,
+            url_authorizations=url_authorizations,
             inspection_evidence=inspection_evidence,
             parent_report_id=decoded.get("parent_report_id")
             if isinstance(decoded.get("parent_report_id"), str)
@@ -555,6 +572,7 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
             configuration_fingerprint=report.configuration_fingerprint,
             decode_estimate=report.decode_estimate,
             diagnostics=diagnostics,
+            url_authorizations=report.url_authorizations,
             inspection_evidence=report.inspection_evidence,
             parent_report_id=report.report_id,
         )
@@ -573,6 +591,7 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
         tools=report.tools,
         disk_headroom=report.disk_headroom,
         configuration_fingerprint=report.configuration_fingerprint,
+        url_authorizations=report.url_authorizations,
     )
     _write_json_once(plans_root / plan.plan_id / "run-plan.json", plan.as_json())
     return plan

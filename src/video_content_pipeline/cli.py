@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -42,7 +43,14 @@ from video_content_pipeline.source import (
     snapshot_local_source,
     validate_local_source_candidate,
 )
-from video_content_pipeline.url_policy import URLAccessMode, URLPolicyError, authorize_public_url
+from video_content_pipeline.url_policy import (
+    COLLECTION_CLOSURE_SIGNAL,
+    ManualCollectionSession,
+    URLAccessMode,
+    URLAuthorization,
+    URLPolicyError,
+    authorize_public_url,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -96,7 +104,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = _project_root()
     plans_root = project_root / "plans"
     if arguments.target == "decode":
         if not arguments.report_id:
@@ -109,8 +117,25 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
         plan = confirm_run_plan(report, project_root, plans_root)
         return {"status": "confirmed", "plan": plan.as_json()}
     if arguments.collect:
-        return _blocked_url_report(
-            "manual_collection_requires_interactive_transport", project_root, plans_root
+        if arguments.target:
+            return _blocked_url_report(
+                "collection_target_incompatible",
+                "Manual collection accepts URLs only through its session.",
+                plans_root,
+                (),
+            )
+        if arguments.url_mode is None:
+            return _blocked_url_report(
+                "url_mode_missing",
+                "A manual collection requires an explicit --url-mode.",
+                plans_root,
+                (),
+            )
+        return _plan_manual_collection(
+            URLAccessMode(arguments.url_mode),
+            arguments.allow_insecure_http,
+            plans_root,
+            arguments.json,
         )
     if not arguments.target:
         raise PlanningError(
@@ -118,15 +143,26 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
         )
     if arguments.target.startswith(("http://", "https://")):
         if arguments.url_mode is None:
-            raise URLPolicyError(
-                "url_mode_missing", "A public URL requires an explicit --url-mode."
+            return _blocked_url_report(
+                "url_mode_missing",
+                "A public URL requires an explicit --url-mode.",
+                plans_root,
+                (),
             )
-        authorize_public_url(
-            arguments.target,
-            URLAccessMode(arguments.url_mode),
-            allow_insecure_http=arguments.allow_insecure_http,
+        try:
+            authorization = authorize_public_url(
+                arguments.target,
+                URLAccessMode(arguments.url_mode),
+                allow_insecure_http=arguments.allow_insecure_http,
+            )
+        except URLPolicyError as error:
+            return _blocked_url_report(error.reason, str(error), plans_root, ())
+        return _blocked_url_report(
+            "url_acquisition_pending",
+            "URL policy accepted; acquisition remains intentionally disabled.",
+            plans_root,
+            (authorization,),
         )
-        return _blocked_url_report("url_acquisition_pending", project_root, plans_root)
     return _plan_local_file(Path(arguments.target), project_root, plans_root)
 
 
@@ -270,6 +306,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
             configuration_fingerprint=report.configuration_fingerprint,
             decode_estimate=report.decode_estimate,
             diagnostics=diagnostics,
+            url_authorizations=report.url_authorizations,
             inspection_evidence=report.inspection_evidence,
             parent_report_id=report.report_id,
         )
@@ -293,6 +330,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
             configuration_fingerprint=report.configuration_fingerprint,
             decode_estimate=report.decode_estimate,
             diagnostics=(PlanningDiagnostic(error.reason, str(error)),),
+            url_authorizations=report.url_authorizations,
             inspection_evidence=report.inspection_evidence,
             parent_report_id=report.report_id,
         )
@@ -305,6 +343,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
         planned_increment_bytes=report.disk_headroom.increment_bytes,
         configuration_fingerprint=report.configuration_fingerprint,
         decode_estimate=report.decode_estimate,
+        url_authorizations=report.url_authorizations,
         inspection_evidence=report.inspection_evidence,
         parent_report_id=report.report_id,
     )
@@ -312,21 +351,70 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
     return {"status": "ready_for_confirmation", "report": ready.as_json()}
 
 
-def _blocked_url_report(reason: str, project_root: Path, plans_root: Path) -> dict[str, object]:
+def _plan_manual_collection(
+    mode: URLAccessMode,
+    allow_insecure_http: bool,
+    plans_root: Path,
+    json_output: bool,
+) -> dict[str, object]:
+    session = ManualCollectionSession(mode=mode, allow_insecure_http=allow_insecure_http)
+    try:
+        entries = _collect_manual_urls(session, json_output=json_output)
+    except URLPolicyError as error:
+        return _blocked_url_report(error.reason, str(error), plans_root, session.entries)
+    return _blocked_url_report(
+        "collection_acquisition_pending",
+        "URL policy accepted; acquisition remains intentionally disabled.",
+        plans_root,
+        entries,
+    )
+
+
+def _collect_manual_urls(
+    session: ManualCollectionSession, *, json_output: bool
+) -> tuple[URLAuthorization, ...]:
+    prompt = (
+        "Submit public URLs in presentation order; enter 结束 when the collection is complete: "
+    )
+    while True:
+        try:
+            if json_output:
+                print(prompt, end="", file=sys.stderr)
+            submitted = _read_collection_line("" if json_output else prompt)
+        except EOFError as error:
+            raise URLPolicyError(
+                "collection_input_ended", "Manual collection ended before its 结束 closure signal."
+            ) from error
+        if submitted == COLLECTION_CLOSURE_SIGNAL:
+            return session.close(submitted)
+        session.append(submitted)
+
+
+def _read_collection_line(prompt: str) -> str:
+    return input(prompt)
+
+
+def _blocked_url_report(
+    reason: str,
+    message: str,
+    plans_root: Path,
+    authorizations: tuple[URLAuthorization, ...],
+) -> dict[str, object]:
     report = create_plan_report(
         state=PlanState.BLOCKED,
         source_artifacts=(),
         tools=(),
         planned_increment_bytes=0,
         configuration_fingerprint="phase-03-url-policy-v1",
-        diagnostics=(
-            PlanningDiagnostic(
-                reason, "URL policy accepted; acquisition remains intentionally disabled."
-            ),
-        ),
+        diagnostics=(PlanningDiagnostic(reason, message),),
+        url_authorizations=tuple(authorization.evidence for authorization in authorizations),
     )
     persist_plan_report(report, plans_root)
     return {"status": "blocked", "report": report.as_json()}
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 
 def _configured_tool(project_root: Path, tool_id: str) -> PinnedExternalTool:
