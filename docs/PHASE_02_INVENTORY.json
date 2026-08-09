@@ -16,7 +16,7 @@
     "models_downloaded": false,
     "paid_apis_used": false,
     "ffmpeg_or_ffprobe_executed": false,
-    "notes": "Phase 2 governance and execution records include the approved Ticket 01 envelope and completed Ticket 02 exact-time, Ticket 03 probe-projection, Ticket 04 decoded-interval coverage, Ticket 05 compact collection-timeline, Ticket 06 atomic subtitle evidence, Ticket 07 presentation export, and Ticket 08 proven rolling-caption de-duplication work. Ticket 09's concrete fixture-corpus proposal awaits explicit fixture-generation approval. No media tool, fixture, package, download, model, paid API, or user-media action has occurred."
+    "notes": "Phase 2 governance and execution records include the approved Ticket 01 envelope and completed Ticket 02 exact-time, Ticket 03 probe-projection, Ticket 04 decoded-interval coverage, Ticket 05 compact collection-timeline, Ticket 06 atomic subtitle evidence, Ticket 07 presentation export, and Ticket 08 proven rolling-caption de-duplication work. Ticket 09's fixture-corpus proposal is explicitly approved and Ticket 10 is unblocked. No media tool, fixture, package, download, model, paid API, or user-media action has occurred."
   },
   "execution_records": [
     {
@@ -1391,6 +1391,45 @@
       "rebuildable": true,
       "deletion_class": "keep_for_audit",
       "deletion_consequence": "The Ticket 08 completion record would be lost."
+    },
+    {
+      "path": ".scratch/phase-02-deterministic-media-core-and-timeline-prototype/issues/09-approve-synthetic-fixture-corpus.md",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Record explicit approval and resolve the Ticket 09 fixture-generation gate",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["issue_tracking", "fixture_toolchain", "implementation_authorization"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The explicit fixture-generation approval would be lost."
+    },
+    {
+      "path": "plans/PHASE-02/ATOMIC_TASK_LIST.md",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Record completion of the Ticket 09 approval gate",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["implementation_authorization", "issue_tracking"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The Phase 2 fixture approval state would be incomplete."
+    },
+    {
+      "path": "docs/PHASE_02_INVENTORY.json",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Record explicit approval of Ticket 09 and Ticket 10 unblocking",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["phase_2_inventory", "implementation_authorization", "fixture_toolchain"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The approved fixture-generation gate transition would be missing."
     }
   ]
 }
