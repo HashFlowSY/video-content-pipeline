@@ -16,7 +16,7 @@
     "models_downloaded": false,
     "paid_apis_used": false,
     "ffmpeg_or_ffprobe_executed": false,
-    "notes": "Phase 2 governance and execution records include the approved Ticket 01 envelope and completed Ticket 02 exact-time, Ticket 03 probe-projection, Ticket 04 decoded-interval coverage, and Ticket 05 compact collection-timeline unit work. No media tool, fixture, package, download, model, paid API, or user-media action has occurred."
+    "notes": "Phase 2 governance and execution records include the approved Ticket 01 envelope and completed Ticket 02 exact-time, Ticket 03 probe-projection, Ticket 04 decoded-interval coverage, Ticket 05 compact collection-timeline, Ticket 06 atomic subtitle evidence, and Ticket 07 presentation export work. No media tool, fixture, package, download, model, paid API, or user-media action has occurred."
   },
   "execution_records": [
     {
@@ -113,6 +113,56 @@
       "resource_bounds": {
         "memory": "less than 256 MiB",
         "additional_disk": "less than 10 MiB of project-local tooling caches",
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "user_media_accessed": false
+      }
+    },
+    {
+      "ticket": "06",
+      "status": "passed",
+      "commands": [
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q tests/unit/test_subtitles.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; ruff check src/video_content_pipeline/subtitles.py tests/unit/test_subtitles.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; ruff format --check src/video_content_pipeline/subtitles.py tests/unit/test_subtitles.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; mypy src",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q"
+      ],
+      "results": {
+        "pytest_subtitles": "10 passed",
+        "ruff_check": "passed",
+        "ruff_format_check": "passed",
+        "mypy": "passed; no issues in 9 source files",
+        "pytest_full": "37 passed"
+      },
+      "resource_bounds": {
+        "memory": "less than 256 MiB",
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "user_media_accessed": false
+      }
+    },
+    {
+      "ticket": "07",
+      "status": "passed",
+      "commands": [
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q tests/unit/test_subtitles.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; ruff check src/video_content_pipeline/subtitles.py tests/unit/test_subtitles.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; ruff format --check src/video_content_pipeline/subtitles.py tests/unit/test_subtitles.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; mypy src",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q"
+      ],
+      "results": {
+        "tdd_red": "expected absent-interface and multi-cue block-separator failures",
+        "pytest_subtitles": "14 passed",
+        "ruff_check": "passed",
+        "ruff_format_check": "passed",
+        "mypy": "passed; no issues in 9 source files",
+        "pytest_full": "41 passed",
+        "code_review": "standards and specification review passed after fixes"
+      },
+      "resource_bounds": {
+        "memory": "less than 256 MiB",
         "network_or_downloads": false,
         "ffmpeg_or_ffprobe_executed": false,
         "user_media_accessed": false
@@ -1146,6 +1196,84 @@
       "rebuildable": true,
       "deletion_class": "keep_for_audit",
       "deletion_consequence": "The Ticket 05 completion record would be lost."
+    },
+    {
+      "path": "src/video_content_pipeline/subtitles.py",
+      "kind": "file",
+      "action": "created",
+      "purpose": "Ticket 06 atomic subtitle parsing plus Ticket 07 immutable presentation and outward-millisecond export",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["subtitle_validation", "subtitle_evidence", "subtitle_presentation", "subtitle_export"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The atomic subtitle evidence implementation would be lost."
+    },
+    {
+      "path": "tests/unit/test_subtitles.py",
+      "kind": "file",
+      "action": "created",
+      "purpose": "Ticket 06 atomic-evidence and Ticket 07 presentation/export TDD coverage",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["phase_2_testing", "subtitle_validation", "subtitle_presentation", "subtitle_export"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The deterministic Ticket 06 behavior evidence would be lost."
+    },
+    {
+      "path": "plans/PHASE-02/06-EXECUTION-ENVELOPE.md",
+      "kind": "file",
+      "action": "created",
+      "purpose": "Record the Ticket 06 implementation, command, resource, and retention boundary",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["implementation_authorization", "subtitle_validation"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The Ticket 06 authorization and execution evidence would be lost."
+    },
+    {
+      "path": ".scratch/phase-02-deterministic-media-core-and-timeline-prototype/issues/06-accept-atomic-subtitle-tracks.md",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Record the completed Ticket 06 implementation and verification result",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["issue_tracking", "subtitle_validation"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The Ticket 06 completion record would be lost."
+    },
+    {
+      "path": "plans/PHASE-02/07-EXECUTION-ENVELOPE.md",
+      "kind": "file",
+      "action": "created",
+      "purpose": "Record the approved Ticket 07 implementation, command, resource, and retention boundary",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["implementation_authorization", "subtitle_presentation", "subtitle_export"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The Ticket 07 authorization and execution evidence would be lost."
+    },
+    {
+      "path": ".scratch/phase-02-deterministic-media-core-and-timeline-prototype/issues/07-produce-ordered-presentation-cue-exports.md",
+      "kind": "file",
+      "action": "modified",
+      "purpose": "Record the completed Ticket 07 implementation and verification result",
+      "size_bytes": null,
+      "sha256": null,
+      "stage": "PHASE-02",
+      "used_by": ["issue_tracking", "subtitle_presentation", "subtitle_export"],
+      "rebuildable": true,
+      "deletion_class": "keep_for_audit",
+      "deletion_consequence": "The Ticket 07 completion record would be lost."
     }
   ]
 }
