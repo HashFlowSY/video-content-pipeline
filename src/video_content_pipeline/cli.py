@@ -30,6 +30,7 @@ from video_content_pipeline.planning import (
     load_plan_report,
     perform_full_decode_validation,
     persist_plan_report,
+    planning_configuration_fingerprint,
     record_decode_measurement,
     revalidate_report,
 )
@@ -130,10 +131,11 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
 
 
 def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) -> dict[str, object]:
+    configuration_fingerprint = planning_configuration_fingerprint(project_root)
     try:
         candidate = validate_local_source_candidate(source_path)
     except SourceIntakeError as error:
-        return _blocked_local_report(error, 0, plans_root)
+        return _blocked_local_report(error, 0, plans_root, configuration_fingerprint)
     planned_increment = 0
 
     def check_snapshot_headroom(byte_count: int) -> None:
@@ -146,7 +148,9 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
             candidate, project_root / "input", before_copy=check_snapshot_headroom
         )
     except SourceIntakeError as error:
-        return _blocked_local_report(error, planned_increment, plans_root)
+        return _blocked_local_report(
+            error, planned_increment, plans_root, configuration_fingerprint
+        )
     ffprobe = _configured_tool(project_root, "ffprobe")
     ffmpeg = _configured_tool(project_root, "ffmpeg")
     inspection_evidence: tuple[PlanInspectionEvidence, ...] = ()
@@ -167,6 +171,7 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
             error,
             planned_increment,
             plans_root,
+            configuration_fingerprint,
             source_artifacts=(artifact,),
             tools=(ffprobe, ffmpeg),
             inspection_evidence=inspection_evidence,
@@ -183,7 +188,7 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
             source_artifacts=(artifact,),
             tools=(ffprobe, ffmpeg),
             planned_increment_bytes=planned_increment,
-            configuration_fingerprint="phase-03-local-plan-v1",
+            configuration_fingerprint=configuration_fingerprint,
             diagnostics=(
                 PlanningDiagnostic("coverage_indeterminate", "Source coverage is not complete."),
             ),
@@ -204,6 +209,7 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
             error,
             planned_increment,
             plans_root,
+            configuration_fingerprint,
             source_artifacts=(artifact,),
             tools=(ffprobe, ffmpeg),
             inspection_evidence=inspection_evidence,
@@ -213,7 +219,7 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
         source_artifacts=(artifact,),
         tools=(ffprobe, ffmpeg),
         planned_increment_bytes=planned_increment,
-        configuration_fingerprint="phase-03-local-plan-v1",
+        configuration_fingerprint=configuration_fingerprint,
         decode_estimate=estimate_full_decode(
             duration.as_fraction(),
             profile,
@@ -229,6 +235,7 @@ def _blocked_local_report(
     error: SourceIntakeError | InspectionError | PlanningError,
     planned_increment: int,
     plans_root: Path,
+    configuration_fingerprint: str,
     *,
     source_artifacts: tuple[SourceArtifact, ...] = (),
     tools: tuple[PinnedExternalTool, ...] = (),
@@ -241,7 +248,7 @@ def _blocked_local_report(
         source_artifacts=source_artifacts,
         tools=tools,
         planned_increment_bytes=planned_increment,
-        configuration_fingerprint="phase-03-local-plan-v1",
+        configuration_fingerprint=configuration_fingerprint,
         diagnostics=(PlanningDiagnostic(error.reason, str(error)),),
         inspection_evidence=inspection_evidence,
     )

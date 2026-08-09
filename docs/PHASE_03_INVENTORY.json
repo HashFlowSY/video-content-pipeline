@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase": 3,
   "status": "in_progress",
-  "recorded_at": "2026-08-09T13:26:08Z",
+  "recorded_at": "2026-08-09T13:43:41Z",
   "project_root": "/Users/shangyang/Desktop/workspace/projects/video-content-pipeline",
   "summary": {
     "phase_3_boundary_adopted": true,
@@ -58,7 +58,10 @@
   "external_reads": [
     "/Users/shangyang/.agents/skills/grill-with-docs/SKILL.md",
     "/Users/shangyang/.agents/skills/grilling/SKILL.md",
-    "/Users/shangyang/.agents/skills/domain-modeling/SKILL.md"
+    "/Users/shangyang/.agents/skills/domain-modeling/SKILL.md",
+    "/Users/shangyang/.agents/skills/implement/SKILL.md",
+    "/Users/shangyang/.agents/skills/tdd/SKILL.md",
+    "/Users/shangyang/.agents/skills/code-review/SKILL.md"
   ],
   "execution_records": [
     {
@@ -89,6 +92,15 @@
       "command": "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q && python -m ruff check src tests && python -m ruff format --check src tests && python -m mypy src",
       "purpose": "Ticket 03 offline decode-estimate and confirmation verification",
       "result": "87 passed in 0.25s; Ruff check and format check passed; strict Mypy passed",
+      "network_requests": 0,
+      "user_media_accessed": false,
+      "ffmpeg_executed": false,
+      "ffprobe_executed": false
+    },
+    {
+      "command": "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
+      "purpose": "Ticket 04 offline RunPlan revalidation and immutable-evidence verification",
+      "result": "93 passed in 0.26s; Ruff check and format check passed; strict Mypy passed",
       "network_requests": 0,
       "user_media_accessed": false,
       "ffmpeg_executed": false,

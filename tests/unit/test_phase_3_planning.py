@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections import namedtuple
 from fractions import Fraction
 from pathlib import Path
 
 import pytest
 
+import video_content_pipeline.planning as planning
 from video_content_pipeline.coverage import StreamCoverage
 from video_content_pipeline.external_tools import PinnedExternalTool
 from video_content_pipeline.inspection import PlanInspectionEvidence, SubtitleTrackCandidate
@@ -22,7 +24,9 @@ from video_content_pipeline.planning import (
     load_plan_report,
     perform_full_decode_validation,
     persist_plan_report,
+    planning_configuration_fingerprint,
     record_decode_measurement,
+    revalidate_report,
 )
 from video_content_pipeline.probe import ProbeDocument
 from video_content_pipeline.source import SourceArtifact, sha256_file
@@ -45,6 +49,16 @@ def _inspection(artifact: SourceArtifact) -> PlanInspectionEvidence:
         coverage_by_stream=(),
         subtitle_tracks=(),
     )
+
+
+def _write_planning_configuration(project_root: Path) -> str:
+    config_root = project_root / "config"
+    config_root.mkdir()
+    (config_root / "decode-throughput-profiles.json").write_text(
+        '{"profiles": []}\n', encoding="utf-8"
+    )
+    (config_root / "tools.json").write_text('{"tools": []}\n', encoding="utf-8")
+    return planning_configuration_fingerprint(project_root)
 
 
 def test_low_confidence_profile_estimate_has_ordered_three_points() -> None:
@@ -83,12 +97,13 @@ def test_matching_observed_decode_history_replaces_the_low_confidence_profile(
 
 def test_report_and_plan_are_persisted_under_separate_ids(tmp_path: Path) -> None:
     artifact = _artifact(tmp_path)
+    configuration_fingerprint = _write_planning_configuration(tmp_path)
     report = create_plan_report(
         state=PlanState.READY_FOR_CONFIRMATION,
         source_artifacts=(artifact,),
         tools=(),
         planned_increment_bytes=artifact.byte_count,
-        configuration_fingerprint="config-v1",
+        configuration_fingerprint=configuration_fingerprint,
         inspection_evidence=(_inspection(artifact),),
     )
 
@@ -100,6 +115,150 @@ def test_report_and_plan_are_persisted_under_separate_ids(tmp_path: Path) -> Non
     assert loaded == report
     assert (tmp_path / "plans" / plan.plan_id / "run-plan.json").is_file()
     assert plan.report_id == report.report_id
+    assert plan.tools == report.tools
+    assert plan.disk_headroom == report.disk_headroom
+
+
+def test_confirmation_rejects_a_changed_planning_configuration(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+    configuration_fingerprint = _write_planning_configuration(tmp_path)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=configuration_fingerprint,
+        inspection_evidence=(_inspection(artifact),),
+    )
+    (tmp_path / "config" / "tools.json").write_text('{"tools": ["changed"]}\n', encoding="utf-8")
+
+    diagnostics = revalidate_report(report, tmp_path)
+
+    assert [diagnostic.reason for diagnostic in diagnostics] == ["planning_configuration_changed"]
+    with pytest.raises(PlanningError, match="planning_configuration_changed") as error:
+        confirm_run_plan(report, tmp_path, tmp_path / "plans")
+    assert error.value.reason == "report_stale"
+
+
+def test_confirmation_rejects_a_changed_source_artifact(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=_write_planning_configuration(tmp_path),
+        inspection_evidence=(_inspection(artifact),),
+    )
+    artifact.media_path.write_bytes(b"changed media")
+
+    diagnostics = revalidate_report(report, tmp_path)
+
+    assert [diagnostic.reason for diagnostic in diagnostics] == ["source_artifact_changed"]
+    with pytest.raises(PlanningError, match="source_artifact_changed"):
+        confirm_run_plan(report, tmp_path, tmp_path / "plans")
+
+
+def test_stale_confirmation_retains_a_child_report_and_expires_its_parent(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=_write_planning_configuration(tmp_path),
+        inspection_evidence=(_inspection(artifact),),
+    )
+    plans_root = tmp_path / "plans"
+    report_path = persist_plan_report(report, plans_root)
+    persisted_report = report_path.read_text(encoding="utf-8")
+    artifact.media_path.write_bytes(b"changed media")
+
+    with pytest.raises(PlanningError, match="source_artifact_changed"):
+        confirm_run_plan(report, tmp_path, plans_root)
+
+    stale_paths = list((plans_root / "reports").glob("*/plan-report.json"))
+    stale_paths.remove(report_path)
+    assert len(stale_paths) == 1
+    stale = load_plan_report(stale_paths[0])
+    assert stale.state == PlanState.BLOCKED
+    assert stale.parent_report_id == report.report_id
+    assert [diagnostic.reason for diagnostic in stale.diagnostics] == ["source_artifact_changed"]
+    assert report_path.read_text(encoding="utf-8") == persisted_report
+
+    artifact.media_path.write_bytes(b"media")
+    with pytest.raises(PlanningError) as error:
+        confirm_run_plan(report, tmp_path, plans_root)
+    assert error.value.reason == "report_superseded"
+
+
+def test_confirmation_treats_an_unreadable_source_artifact_as_stale(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+    directory_artifact = SourceArtifact(
+        artifact.source_id,
+        artifact.sha256,
+        artifact.byte_count,
+        tmp_path / "input",
+    )
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(directory_artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=_write_planning_configuration(tmp_path),
+        inspection_evidence=(_inspection(directory_artifact),),
+    )
+
+    diagnostics = revalidate_report(report, tmp_path)
+
+    assert [diagnostic.reason for diagnostic in diagnostics] == ["source_artifact_unavailable"]
+
+
+def test_confirmation_rejects_changed_pinned_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact = _artifact(tmp_path)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(PinnedExternalTool("ffmpeg", tmp_path / "ffmpeg", "test", "f" * 64),),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=_write_planning_configuration(tmp_path),
+        inspection_evidence=(_inspection(artifact),),
+    )
+
+    def changed_tool(*_args: object) -> None:
+        raise ValueError("Pinned tool identity changed.")
+
+    monkeypatch.setattr(planning, "revalidate_external_tool", changed_tool)
+
+    diagnostics = revalidate_report(report, tmp_path)
+
+    assert [diagnostic.reason for diagnostic in diagnostics] == ["tool_identity_changed"]
+    with pytest.raises(PlanningError, match="tool_identity_changed"):
+        confirm_run_plan(report, tmp_path, tmp_path / "plans")
+
+
+def test_confirmation_rejects_insufficient_current_disk_headroom(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact = _artifact(tmp_path)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=_write_planning_configuration(tmp_path),
+        inspection_evidence=(_inspection(artifact),),
+    )
+    disk_usage = namedtuple("DiskUsage", "total used free")
+    monkeypatch.setattr(planning.shutil, "disk_usage", lambda _path: disk_usage(10, 9, 1))
+
+    diagnostics = revalidate_report(report, tmp_path)
+
+    assert [diagnostic.reason for diagnostic in diagnostics] == ["disk_headroom_insufficient"]
+    with pytest.raises(PlanningError, match="disk_headroom_insufficient"):
+        confirm_run_plan(report, tmp_path, tmp_path / "plans")
 
 
 def test_report_retains_probe_documents_coverage_and_subtitle_metadata(tmp_path: Path) -> None:

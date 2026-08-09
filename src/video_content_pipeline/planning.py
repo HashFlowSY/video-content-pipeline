@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import shutil
+import stat
 import time
 import uuid
 from dataclasses import dataclass
@@ -41,6 +42,18 @@ class PlanState(StrEnum):
     BLOCKED = "blocked"
     AWAITING_DECODE_CONFIRMATION = "awaiting_decode_confirmation"
     READY_FOR_CONFIRMATION = "ready_for_confirmation"
+
+
+_REVALIDATION_DIAGNOSTIC_REASONS = frozenset(
+    {
+        "planning_configuration_changed",
+        "source_artifact_missing",
+        "source_artifact_changed",
+        "source_artifact_unavailable",
+        "tool_identity_changed",
+        "disk_headroom_insufficient",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -134,6 +147,8 @@ class RunPlan:
     plan_id: str
     report_id: str
     source_artifacts: tuple[SourceArtifact, ...]
+    tools: tuple[PinnedExternalTool, ...]
+    disk_headroom: DiskHeadroom
     configuration_fingerprint: str
 
     def as_json(self) -> dict[str, object]:
@@ -141,6 +156,12 @@ class RunPlan:
             "plan_id": self.plan_id,
             "report_id": self.report_id,
             "source_artifacts": [artifact.as_json() for artifact in self.source_artifacts],
+            "tools": [tool.as_json() for tool in self.tools],
+            "disk_headroom": {
+                "increment_bytes": self.disk_headroom.increment_bytes,
+                "reserve_bytes": self.disk_headroom.reserve_bytes,
+                "required_bytes": self.disk_headroom.required_bytes,
+            },
             "configuration_fingerprint": self.configuration_fingerprint,
         }
 
@@ -306,6 +327,33 @@ def create_plan_report(
     )
 
 
+def planning_configuration_fingerprint(project_root: Path) -> str:
+    """Hash every project-owned configuration input that affects Phase 3 plans."""
+
+    evidence: list[dict[str, object]] = []
+    for relative_path in (
+        Path("config/decode-throughput-profiles.json"),
+        Path("config/tools.json"),
+    ):
+        path = project_root / relative_path
+        item: dict[str, object] = {"path": relative_path.as_posix()}
+        try:
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                item["state"] = "not_regular_file"
+            else:
+                digest, byte_count = sha256_file(path)
+                item["sha256"] = digest
+                item["byte_count"] = byte_count
+        except FileNotFoundError:
+            item["state"] = "missing"
+        except OSError:
+            item["state"] = "unreadable"
+        evidence.append(item)
+    payload = json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def persist_plan_report(report: PlanReport, plans_root: Path) -> Path:
     """Write a report once beneath its stable report-ID directory."""
 
@@ -443,12 +491,27 @@ def revalidate_report(report: PlanReport, project_root: Path) -> tuple[PlanningD
     """Compare report evidence with current artifact, tool, and disk state."""
 
     diagnostics: list[PlanningDiagnostic] = []
+    if planning_configuration_fingerprint(project_root) != report.configuration_fingerprint:
+        diagnostics.append(
+            PlanningDiagnostic(
+                "planning_configuration_changed",
+                "Planning configuration no longer matches the report.",
+            )
+        )
     for artifact in report.source_artifacts:
         try:
             actual_hash, actual_size = sha256_file(artifact.media_path)
         except FileNotFoundError:
             diagnostics.append(
                 PlanningDiagnostic("source_artifact_missing", str(artifact.media_path))
+            )
+            continue
+        except OSError:
+            diagnostics.append(
+                PlanningDiagnostic(
+                    "source_artifact_unavailable",
+                    "A SourceArtifact can no longer be read for hash revalidation.",
+                )
             )
             continue
         if actual_hash != artifact.sha256 or actual_size != artifact.byte_count:
@@ -478,10 +541,28 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
         raise PlanningError(
             "report_not_ready", "Only a decode-validated report can create a RunPlan."
         )
+    if _has_stale_confirmation_child(report.report_id, plans_root):
+        raise PlanningError(
+            "report_superseded", "A stale confirmation already requires a new planning attempt."
+        )
     diagnostics = revalidate_report(report, project_root)
     if diagnostics:
+        stale = create_plan_report(
+            state=PlanState.BLOCKED,
+            source_artifacts=report.source_artifacts,
+            tools=report.tools,
+            planned_increment_bytes=report.disk_headroom.increment_bytes,
+            configuration_fingerprint=report.configuration_fingerprint,
+            decode_estimate=report.decode_estimate,
+            diagnostics=diagnostics,
+            inspection_evidence=report.inspection_evidence,
+            parent_report_id=report.report_id,
+        )
+        persist_plan_report(stale, plans_root)
         raise PlanningError(
-            "report_stale", "; ".join(diagnostic.reason for diagnostic in diagnostics)
+            "report_stale",
+            f"{'; '.join(diagnostic.reason for diagnostic in diagnostics)}; "
+            f"stale report: {stale.report_id}",
         )
     payload = json.dumps(report.as_json(), sort_keys=True, separators=(",", ":")).encode("utf-8")
     plan_id = hashlib.sha256(payload).hexdigest()[:24]
@@ -489,6 +570,8 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
         plan_id=plan_id,
         report_id=report.report_id,
         source_artifacts=report.source_artifacts,
+        tools=report.tools,
+        disk_headroom=report.disk_headroom,
         configuration_fingerprint=report.configuration_fingerprint,
     )
     _write_json_once(plans_root / plan.plan_id / "run-plan.json", plan.as_json())
@@ -522,6 +605,27 @@ def _write_json_once(path: Path, payload: dict[str, object]) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(encoded, encoding="utf-8")
+
+
+def _has_stale_confirmation_child(report_id: str, plans_root: Path) -> bool:
+    reports_root = plans_root / "reports"
+    if not reports_root.is_dir():
+        return False
+    for path in reports_root.glob("*/plan-report.json"):
+        try:
+            child = load_plan_report(path)
+        except PlanningError:
+            continue
+        if (
+            child.parent_report_id == report_id
+            and child.state == PlanState.BLOCKED
+            and any(
+                diagnostic.reason in _REVALIDATION_DIAGNOSTIC_REASONS
+                for diagnostic in child.diagnostics
+            )
+        ):
+            return True
+    return False
 
 
 def _required_string(value: object, key: str) -> str:
