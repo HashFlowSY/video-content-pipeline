@@ -1,8 +1,8 @@
 # 11 -- Prove fixture-backed integration behavior
 
 Category: enhancement
-Status: ready-for-agent
-Labels: enhancement, ready-for-agent
+Status: resolved
+Labels: enhancement
 
 **What to build:** Read-only integration proof that the retained synthetic
 fixtures pass through raw probe evidence, typed projection, coverage,
@@ -11,9 +11,22 @@ requires.
 
 **Blocked by:** 10 -- Generate retained fixture evidence.
 
-- [ ] Integration tests verify fixture hashes before interpreting retained
+- [x] Integration tests verify fixture hashes before interpreting retained
   media evidence and fail visibly on a missing or mismatched artifact.
-- [ ] Tests cover probe projection, `StreamCoverage`, Part-relative and
+- [x] Tests cover probe projection, `StreamCoverage`, Part-relative and
   collection virtual mapping, and parseable SRT/VTT round trips.
-- [ ] Tests never regenerate fixtures, access user media, use network state, or
+- [x] Tests never regenerate fixtures, access user media, use network state, or
   delete fixture, cache, or failed-output evidence.
+
+## Comments
+
+2026-08-09: Added read-only fixture-backed integration coverage. Every test
+verifies all 12 canonical manifest entries for relative path, byte count, and
+SHA-256 before reading ProbeDocuments or subtitle evidence; missing and
+mismatched artifacts fail with explicit assertions. The retained frame evidence
+proves `gap-video` coverage `[10, 13.9)` and its internal gap `[11, 13)`; the
+previous `[13, 14)` prose in the approved fixture proposal and Ticket 10 ledger
+was corrected to match the hash-pinned evidence without changing fixture bytes.
+The suite passed (`48 passed`), as did ruff, format, and `mypy src`. No fixture
+generation, deletion, FFmpeg, FFprobe, network access, user media, model, paid
+service, or media-facing CLI action occurred.

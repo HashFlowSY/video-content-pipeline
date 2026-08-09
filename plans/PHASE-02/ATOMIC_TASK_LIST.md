@@ -39,9 +39,9 @@
 - [x] After explicit fixture approval, generate retained synthetic media and
   expected ProbeDocuments under `tests/fixtures/`; hash and inventory every
   generated artifact without deleting any prior output.
-- [ ] Write and run fixture-backed integration tests for FFprobe projection,
+- [x] Write and run fixture-backed integration tests for FFprobe projection,
   stream coverage, coordinate mapping, and SRT/VTT output.
-- [ ] Run the approved unit, integration, lint, type-check, and environment-gate
+- [x] Run the approved unit, integration, lint, type-check, and environment-gate
   commands; record all commands, paths, versions, test results, and resources
   in the Phase 2 inventory.
 - [ ] Publish a Phase 2 completion report and update project status only when
