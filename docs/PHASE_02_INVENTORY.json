@@ -1878,19 +1878,6 @@
       "deletion_consequence": "Round-trip serialization could lose retained source identifiers."
     },
     {
-      "path": "plans/PHASE-02/09-FIXTURE-CORPUS-PROPOSAL.md",
-      "kind": "file",
-      "action": "modified",
-      "purpose": "Correct gap-video expected coverage to the hash-pinned raw frame evidence retained by Ticket 10",
-      "size_bytes": null,
-      "sha256": null,
-      "stage": "PHASE-02",
-      "used_by": ["fixture_planning", "coverage_evidence", "integration_testing"],
-      "rebuildable": true,
-      "deletion_class": "keep_for_audit",
-      "deletion_consequence": "The approved fixture plan would disagree with retained evidence."
-    },
-    {
       "path": "plans/PHASE-02/ATOMIC_TASK_LIST.md",
       "kind": "file",
       "action": "modified",
