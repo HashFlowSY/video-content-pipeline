@@ -2,13 +2,14 @@
 
 This repository contains a local, auditable video-content processing pipeline.
 Phase 1, project initialization and reproducible runtime, is complete. Phase
-2, the deterministic media core and timeline prototype, is complete.
+2, the deterministic media core and timeline prototype, is complete. Phase 3,
+source intake, planning, and resource estimation, is complete and verified
+offline.
 
-Phase 2 is limited to deterministic media and timeline behavior: structured
-FFprobe parsing, rational time calculations, subtitle parsing and
-normalization, virtual-timeline logic, conservative de-duplication, and
-FFmpeg-generated synthetic fixtures. It does not access user media, download
-models, call paid services, or implement ASR, OCR, or source ingestion.
+Phase 3 is limited to explicitly authorized local-file and public-URL intake,
+source snapshotting, inspection, immutable planning, and pre-confirmed decode
+validation. It does not implement ASR, OCR, subtitle-text processing, model
+downloads, paid services, processing runs, or production validation.
 
 ## Local Runtime
 
@@ -36,7 +37,8 @@ project.
 
 See `project-state.json` for the machine-readable status,
 `docs/PHASE_01_COMPLETION_REPORT.md` for the Phase 1 audit,
-`docs/PHASE_02_COMPLETION_REPORT.md` for the Phase 2 audit, and
-`docs/PHASED_EXECUTION_PLAN.md` for the adopted scope. Phase 2 used only
-project-owned synthetic fixtures; it did not process user media or validate
-production behavior.
+`docs/PHASE_02_COMPLETION_REPORT.md` for the Phase 2 audit,
+`docs/PHASE_03_SPECIFICATION.md` for the adopted Phase 3 boundary,
+`docs/PHASE_03_COMPLETION_REPORT.md` for its verification record, and
+`docs/PHASED_EXECUTION_PLAN.md` for the overall scope. The project remains in
+engineering development and is not production-validated.

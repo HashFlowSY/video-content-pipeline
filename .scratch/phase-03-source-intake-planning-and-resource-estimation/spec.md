@@ -1,8 +1,8 @@
 # Phase 3: Source Intake, Planning, and Resource Estimation
 
 Type: enhancement
-Status: ready-for-agent
-Labels: enhancement, ready-for-agent
+Status: resolved
+Labels: enhancement
 Phase: 3
 Published: 2026-08-09
 
@@ -196,10 +196,20 @@ level prior art for focused regression coverage.
   terms.
 - The main test seam is recorded here as the synthesis of the already adopted
   Phase 3 approach. It does not require another user interview.
-- The current implementation has reached local SourceArtifact, tool identity,
-  inspection, estimate, PlanReport, and initial CLI behavior. A synthetic
-  fixture has produced a report awaiting Decode preflight confirmation. Full
-  decode and final Plan confirmation remain deliberately user-gated.
+- The implementation is complete and verified through the local-source, URL,
+  collection, inspection, estimate, decode-confirmation, and final-plan CLI
+  contracts. A retained synthetic fixture has produced a report awaiting its
+  own Decode preflight confirmation; that report remains user-gated and is not
+  required to establish the implemented Phase 3 capability.
 - The Phase 3 inventory is the source of truth for created, modified, read,
   and retained evidence. The project remains in engineering development and
   must not be marked `production_validated`.
+
+## Comments
+
+2026-08-10: Phase 3 completed and verified. All seven child tickets are
+resolved. The final project-local gate recorded 111 passing tests, passing
+Ruff and format checks, and strict Mypy with no issues. Verification remained
+offline and used controlled external-tool substitutes or retained synthetic
+fixtures only; no user media, live URL, model, paid API, or production
+validation was used.

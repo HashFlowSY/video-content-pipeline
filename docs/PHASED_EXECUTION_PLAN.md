@@ -4,7 +4,7 @@
 
 日期：`2026-08-02`
 
-当前项目阶段：`deterministic_media_core_and_timeline_prototype / completed`
+当前项目阶段：`source_intake_planning_and_resource_estimation / completed`
 
 开发完成后的目标阶段：`real_world_testing`
 
