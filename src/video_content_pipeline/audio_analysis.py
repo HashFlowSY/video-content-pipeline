@@ -25,6 +25,7 @@ from video_content_pipeline.planning import (
     PlanReport,
     PlanState,
     RunPlan,
+    inspection_evidence_fingerprints,
     load_plan_report,
     load_run_plan,
 )
@@ -393,6 +394,7 @@ def analyze_audio(
             raise AudioAnalysisError(
                 "run_plan_not_confirmed", "RunPlan evidence does not match a confirmed PlanReport."
             )
+        _revalidate_confirmed_inspection_evidence(confirmed_report, plan)
         expected_subtitle_id = _validated_report_id(subtitle_report_id)
         subtitle_path = _subtitle_report_path(
             project_root, plan.source_artifacts, expected_subtitle_id
@@ -806,6 +808,18 @@ def _matches_confirmed_plan(confirmed_report: PlanReport, plan: RunPlan) -> bool
         and confirmed_report.configuration_fingerprint == plan.configuration_fingerprint
         and confirmed_report.url_authorizations == plan.url_authorizations
     )
+
+
+def _revalidate_confirmed_inspection_evidence(confirmed_report: PlanReport, plan: RunPlan) -> None:
+    """Reject mutable PlanReport inspection drift before Phase 5 can use it."""
+
+    expected = plan.inspection_evidence_fingerprints
+    actual = inspection_evidence_fingerprints(confirmed_report.inspection_evidence)
+    if not expected or actual != expected:
+        raise AudioAnalysisError(
+            "inspection_evidence_changed",
+            "PlanReport inspection evidence no longer matches the confirmed RunPlan.",
+        )
 
 
 _CANDIDATE_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")

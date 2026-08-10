@@ -117,6 +117,8 @@ def test_report_and_plan_are_persisted_under_separate_ids(tmp_path: Path) -> Non
     assert plan.report_id == report.report_id
     assert plan.tools == report.tools
     assert plan.disk_headroom == report.disk_headroom
+    assert plan.inspection_evidence_fingerprints[0][0] == artifact.source_id
+    assert len(plan.inspection_evidence_fingerprints[0][1]) == 64
 
 
 def test_confirmation_rejects_a_changed_planning_configuration(tmp_path: Path) -> None:

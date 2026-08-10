@@ -15,6 +15,7 @@ from video_content_pipeline.planning import (
     PlanState,
     RunPlan,
     create_plan_report,
+    inspection_evidence_fingerprints,
     persist_plan_report,
 )
 from video_content_pipeline.probe import ProbeDocument
@@ -83,6 +84,7 @@ def _confirmed_plan(
         tools=(),
         disk_headroom=calculate_disk_headroom(0),
         configuration_fingerprint=plan_report.configuration_fingerprint,
+        inspection_evidence_fingerprints=inspection_evidence_fingerprints((evidence,)),
     )
     plan_path = project_root / "plans" / plan.plan_id / "run-plan.json"
     plan_path.parent.mkdir(parents=True)
@@ -1260,8 +1262,8 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
     assert selection_drift["formal_evidence"] == []
     assert selection_drift["diagnostics"] == [
         {
-            "reason": "analysis_audio_stream_selection_changed",
-            "message": "Analysis audio stream evidence changed after the prior report.",
+            "reason": "inspection_evidence_changed",
+            "message": "PlanReport inspection evidence no longer matches the confirmed RunPlan.",
         }
     ]
 

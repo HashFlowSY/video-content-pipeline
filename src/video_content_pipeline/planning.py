@@ -156,6 +156,7 @@ class RunPlan:
     disk_headroom: DiskHeadroom
     configuration_fingerprint: str
     url_authorizations: tuple[URLAuthorizationEvidence, ...] = ()
+    inspection_evidence_fingerprints: tuple[tuple[str, str], ...] = ()
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -171,6 +172,10 @@ class RunPlan:
             "configuration_fingerprint": self.configuration_fingerprint,
             "url_authorizations": [
                 authorization.as_json() for authorization in self.url_authorizations
+            ],
+            "inspection_evidence_fingerprints": [
+                {"source_id": source_id, "sha256": sha256}
+                for source_id, sha256 in self.inspection_evidence_fingerprints
             ],
         }
 
@@ -518,6 +523,9 @@ def load_run_plan(path: Path) -> RunPlan:
                 URLAuthorizationEvidence.from_json(value)
                 for value in decoded.get("url_authorizations", [])
             ),
+            inspection_evidence_fingerprints=_inspection_evidence_fingerprints_from_json(
+                decoded.get("inspection_evidence_fingerprints", [])
+            ),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise PlanningError("run_plan_not_confirmed", "RunPlan has an invalid schema.") from error
@@ -650,6 +658,9 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
         disk_headroom=report.disk_headroom,
         configuration_fingerprint=report.configuration_fingerprint,
         url_authorizations=report.url_authorizations,
+        inspection_evidence_fingerprints=inspection_evidence_fingerprints(
+            report.inspection_evidence
+        ),
     )
     _write_json_once(plans_root / plan.plan_id / "run-plan.json", plan.as_json())
     return plan
@@ -670,6 +681,35 @@ def _validate_inspection_evidence(
             "inspection_evidence_invalid",
             "Each SourceArtifact needs one matching retained inspection evidence record.",
         )
+
+
+def inspection_evidence_fingerprints(
+    inspection_evidence: tuple[PlanInspectionEvidence, ...],
+) -> tuple[tuple[str, str], ...]:
+    """Hash each retained inspection record in its confirmed Part order."""
+
+    return tuple(
+        (
+            evidence.source_id,
+            hashlib.sha256(
+                json.dumps(evidence.as_json(), sort_keys=True, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            ).hexdigest(),
+        )
+        for evidence in inspection_evidence
+    )
+
+
+def _inspection_evidence_fingerprints_from_json(value: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, list):
+        raise TypeError
+    fingerprints = tuple(
+        (_required_string(item, "source_id"), _required_string(item, "sha256")) for item in value
+    )
+    if len({source_id for source_id, _ in fingerprints}) != len(fingerprints):
+        raise ValueError
+    return fingerprints
 
 
 def _write_json_once(path: Path, payload: dict[str, object]) -> None:
