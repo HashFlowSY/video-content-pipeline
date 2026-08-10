@@ -29,10 +29,10 @@ from video_content_pipeline.subtitles import (
     FormatProjectionLoss,
     SubtitleTrack,
     accept_subtitle_track,
-    presentation_output,
-    serialize_srt,
+    readable_output,
+    serialize_source_srt,
+    serialize_source_vtt,
     serialize_vtt,
-    source_presentation_cues,
     source_srt_projection_losses,
 )
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
@@ -549,11 +549,10 @@ def _write_candidate_artifacts(raw_payload: Path, track: SubtitleTrack) -> Candi
     source_srt_path = prefix.with_name(f"{prefix.name}.source.srt")
     readable_vtt_path = prefix.with_name(f"{prefix.name}.readable.vtt")
     readable_corrections_path = prefix.with_name(f"{prefix.name}.readable.corrections.json")
-    source_cues = source_presentation_cues(track)
-    readable = presentation_output(track)
+    readable = readable_output(track)
     projection_losses = source_srt_projection_losses(track)
-    _write_text_once(source_vtt_path, serialize_vtt(source_cues))
-    _write_text_once(source_srt_path, serialize_srt(source_cues))
+    _write_text_once(source_vtt_path, serialize_source_vtt(track))
+    _write_text_once(source_srt_path, serialize_source_srt(track))
     _write_text_once(readable_vtt_path, serialize_vtt(readable.cues))
     _write_json_once(
         readable_corrections_path,

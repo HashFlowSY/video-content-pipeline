@@ -270,7 +270,7 @@ class FormatProjectionLoss:
     """A source-preserving layout setting omitted by an SRT compatibility export."""
 
     reason: Literal["format_projection_loss"]
-    source_ordinal: int
+    source_ordinal: int | None
     setting: str
 
     def as_json(self) -> dict[str, object]:
@@ -652,6 +652,20 @@ def presentation_cues(track: SubtitleTrack) -> tuple[PresentationCue, ...]:
 def presentation_output(track: SubtitleTrack) -> PresentationOutput:
     """Apply only exact local rolling-display corrections to accepted cue evidence."""
 
+    return _presentation_output(track, omit_exact_duplicates=True, remove_markup=False)
+
+
+def readable_output(track: SubtitleTrack) -> PresentationOutput:
+    """Derive Phase 4 readable cues without deleting exact duplicate source cues."""
+
+    return _presentation_output(track, omit_exact_duplicates=False, remove_markup=True)
+
+
+def _presentation_output(
+    track: SubtitleTrack, *, omit_exact_duplicates: bool, remove_markup: bool
+) -> PresentationOutput:
+    """Derive one presentation policy while retaining source-provenance evidence."""
+
     if not track.valid:
         raise SubtitleValidationError("Presentation output requires an accepted subtitle track.")
     ordered = tuple(sorted(track.normalized_cues, key=_cue_order_key))
@@ -667,14 +681,23 @@ def presentation_output(track: SubtitleTrack) -> PresentationOutput:
         if earlier.part_id != later.part_id or earlier.track_id != later.track_id:
             continue
         if _is_exact_duplicate(earlier, later):
-            correction = PresentationCorrection(
-                reason="exact_duplicate_omitted",
-                source_ordinal=later.source_ordinal,
-                source_token_range=(0, len(later.tokens)),
-                compared_to_source_ordinal=earlier.source_ordinal,
-            )
-            corrections.append(correction)
-            omitted_cues.add(later.source_ordinal)
+            if omit_exact_duplicates:
+                correction = PresentationCorrection(
+                    reason="exact_duplicate_omitted",
+                    source_ordinal=later.source_ordinal,
+                    source_token_range=(0, len(later.tokens)),
+                    compared_to_source_ordinal=earlier.source_ordinal,
+                )
+                corrections.append(correction)
+                omitted_cues.add(later.source_ordinal)
+            else:
+                diagnostics.append(
+                    PresentationDiagnostic(
+                        reason="possible_duplicate",
+                        source_ordinal=later.source_ordinal,
+                        compared_to_source_ordinal=earlier.source_ordinal,
+                    )
+                )
             continue
         omission_end = _rolling_omission_end(earlier, later)
         if omission_end is not None:
@@ -703,6 +726,12 @@ def presentation_output(track: SubtitleTrack) -> PresentationOutput:
         for cue in ordered
         if cue.source_ordinal not in omitted_cues
     )
+    if not remove_markup:
+        return PresentationOutput(
+            cues=base_cues,
+            corrections=tuple(corrections),
+            diagnostics=tuple(diagnostics),
+        )
     readable_cues, markup_corrections, markup_diagnostics = _remove_approved_markup(base_cues)
     return PresentationOutput(
         cues=readable_cues,
@@ -717,8 +746,8 @@ def source_presentation_cues(track: SubtitleTrack) -> tuple[PresentationCue, ...
     if not track.valid:
         raise SubtitleValidationError("Source export requires an accepted subtitle track.")
     return tuple(
-        PresentationCue(cue, tuple(range(len(cue.tokens))))
-        for cue in sorted(track.normalized_cues, key=_cue_order_key)
+        PresentationCue(normalized, tuple(range(len(normalized.tokens))))
+        for normalized in (_normalized_cue(cue) for cue in track.raw_cues)
     )
 
 
@@ -727,13 +756,41 @@ def source_srt_projection_losses(track: SubtitleTrack) -> tuple[FormatProjection
 
     if not track.valid:
         raise SubtitleValidationError("Source export requires an accepted subtitle track.")
-    return tuple(
+    losses: list[FormatProjectionLoss] = []
+    if track.source_format == "vtt":
+        source_without_bom = track.raw_source.lstrip("\ufeff")
+        header, _, body = (
+            source_without_bom.replace("\r\n", "\n").replace("\r", "\n").partition("\n")
+        )
+        if header != "WEBVTT":
+            losses.append(FormatProjectionLoss("format_projection_loss", None, header))
+        losses.extend(
+            FormatProjectionLoss("format_projection_loss", None, block)
+            for block in _blocks(body)
+            if _VTT_DIRECTIVE.match(block.split("\n", 1)[0])
+        )
+    losses.extend(
         FormatProjectionLoss(
             "format_projection_loss", cue.source_ordinal, cue.raw_cue.timing_settings
         )
-        for cue in sorted(track.normalized_cues, key=_cue_order_key)
+        for cue in track.normalized_cues
         if cue.raw_cue.timing_settings
     )
+    return tuple(losses)
+
+
+def serialize_source_srt(track: SubtitleTrack) -> str:
+    """Serialize accepted source cues in their original order for SRT compatibility."""
+
+    return _serialize_srt(source_presentation_cues(track), stable_order=False)
+
+
+def serialize_source_vtt(track: SubtitleTrack) -> str:
+    """Preserve WebVTT source documents or project SRT source cues to WebVTT."""
+
+    if track.source_format == "vtt":
+        return track.raw_source.replace("\r\n", "\n").replace("\r", "\n")
+    return _serialize_vtt(source_presentation_cues(track), stable_order=False)
 
 
 def _remove_approved_markup(
@@ -823,12 +880,16 @@ def _token_range_for_characters(tokens: tuple[str, ...], start: int, end: int) -
 def serialize_srt(cues: tuple[PresentationCue, ...]) -> str:
     """Serialize presentation cues as parseable outward-millisecond SRT."""
 
+    return _serialize_srt(cues, stable_order=True)
+
+
+def _serialize_srt(cues: tuple[PresentationCue, ...], *, stable_order: bool) -> str:
     blocks = tuple(
         f"{_cue_identifier(cue, ordinal)}\n"
         f"{_format_timestamp(cue.serialization_envelope.start_milliseconds, ',')} --> "
         f"{_format_timestamp(cue.serialization_envelope.end_milliseconds, ',')}\n"
         f"{cue.text}"
-        for ordinal, cue in enumerate(_stable_presentation_order(cues), start=1)
+        for ordinal, cue in enumerate(_serialization_order(cues, stable_order), start=1)
     )
     return "\n\n".join(blocks) + ("\n" if blocks else "")
 
@@ -836,13 +897,17 @@ def serialize_srt(cues: tuple[PresentationCue, ...]) -> str:
 def serialize_vtt(cues: tuple[PresentationCue, ...]) -> str:
     """Serialize presentation cues as parseable outward-millisecond WebVTT."""
 
+    return _serialize_vtt(cues, stable_order=True)
+
+
+def _serialize_vtt(cues: tuple[PresentationCue, ...], *, stable_order: bool) -> str:
     blocks = tuple(
         f"{_cue_identifier(cue, ordinal)}\n"
         f"{_format_timestamp(cue.serialization_envelope.start_milliseconds, '.')} --> "
         f"{_format_timestamp(cue.serialization_envelope.end_milliseconds, '.')}"
         f"{(' ' + cue.timing_settings) if cue.timing_settings else ''}\n"
         f"{cue.text}"
-        for ordinal, cue in enumerate(_stable_presentation_order(cues), start=1)
+        for ordinal, cue in enumerate(_serialization_order(cues, stable_order), start=1)
     )
     body = "\n\n".join(blocks)
     return f"WEBVTT\n\n{body}" + ("\n" if blocks else "")
@@ -852,6 +917,12 @@ def _stable_presentation_order(
     cues: tuple[PresentationCue, ...],
 ) -> tuple[PresentationCue, ...]:
     return tuple(sorted(cues, key=_cue_order_key))
+
+
+def _serialization_order(
+    cues: tuple[PresentationCue, ...], stable_order: bool
+) -> tuple[PresentationCue, ...]:
+    return _stable_presentation_order(cues) if stable_order else cues
 
 
 def _cue_identifier(cue: PresentationCue, ordinal: int) -> str:

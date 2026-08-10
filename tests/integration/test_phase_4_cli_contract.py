@@ -192,7 +192,11 @@ def test_subtitles_writes_lossless_source_exports_and_traceable_readable_view(
         tmp_path,
         monkeypatch,
         payload=(
-            b"WEBVTT\n\n"
+            b"WEBVTT - source label\n\n"
+            b"STYLE\n"
+            b"::cue { color: lime; }\n\n"
+            b"REGION\n"
+            b"id:top\n\n"
             b"cue-a\n"
             b"00:00:00.000 --> 00:00:01.000 line:80%\n"
             b"<b>Hello</b> need\n\n"
@@ -206,7 +210,11 @@ def test_subtitles_writes_lossless_source_exports_and_traceable_readable_view(
     candidate = json.loads(capsys.readouterr().out)["report"]["candidates"][0]
 
     assert Path(candidate["source_vtt_path"]).read_text(encoding="utf-8") == (
-        "WEBVTT\n\n"
+        "WEBVTT - source label\n\n"
+        "STYLE\n"
+        "::cue { color: lime; }\n\n"
+        "REGION\n"
+        "id:top\n\n"
         "cue-a\n"
         "00:00:00.000 --> 00:00:01.000 line:80%\n"
         "<b>Hello</b> need\n\n"
@@ -225,9 +233,24 @@ def test_subtitles_writes_lossless_source_exports_and_traceable_readable_view(
     assert candidate["format_projection_losses"] == [
         {
             "reason": "format_projection_loss",
+            "source_ordinal": None,
+            "setting": "WEBVTT - source label",
+        },
+        {
+            "reason": "format_projection_loss",
+            "source_ordinal": None,
+            "setting": "STYLE\n::cue { color: lime; }",
+        },
+        {
+            "reason": "format_projection_loss",
+            "source_ordinal": None,
+            "setting": "REGION\nid:top",
+        },
+        {
+            "reason": "format_projection_loss",
             "source_ordinal": 0,
             "setting": "line:80%",
-        }
+        },
     ]
     assert Path(candidate["readable_vtt_path"]).read_text(encoding="utf-8") == (
         "WEBVTT\n\n"
@@ -291,6 +314,27 @@ def test_subtitles_converts_mov_text_to_a_retained_srt_payload(
     assert candidate["state"] == "valid"
     assert candidate["source_format"] == "srt"
     assert extraction_calls[0][-5:] == ("-c:s", "srt", "-f", "srt", candidate["raw_payload_path"])
+
+
+def test_subtitles_preserves_original_cue_order_in_source_exports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _configure_cli(
+        tmp_path,
+        monkeypatch,
+        payload=(
+            b"1\n00:00:02,000 --> 00:00:03,000\nsecond in source\n\n"
+            b"2\n00:00:00,000 --> 00:00:01,000\nfirst in source\n"
+        ),
+    )
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    candidate = json.loads(capsys.readouterr().out)["report"]["candidates"][0]
+
+    for export_path in (candidate["source_vtt_path"], candidate["source_srt_path"]):
+        export = Path(export_path).read_text(encoding="utf-8")
+        assert export.index("second in source") < export.index("first in source")
 
 
 def test_subtitles_rejects_a_drifted_plan_without_reading_subtitle_bytes(

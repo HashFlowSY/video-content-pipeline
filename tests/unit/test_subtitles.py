@@ -17,6 +17,7 @@ from video_content_pipeline.subtitles import (
     parse_vtt,
     presentation_cues,
     presentation_output,
+    readable_output,
     serialize_srt,
     serialize_vtt,
 )
@@ -294,7 +295,7 @@ def test_presentation_output_removes_only_proven_rolling_suffix_prefix_overlap()
     assert presentation_cues(track) == output.cues
 
 
-def test_presentation_output_omits_only_exact_duplicate_text_with_exact_endpoints() -> None:
+def test_presentation_output_omits_exact_duplicate_text_with_exact_endpoints() -> None:
     track = parse_srt(
         "1\n00:00:00,000 --> 00:00:01,000\nagain\n\n2\n00:00:00,000 --> 00:00:01,000\nagain\n",
         part_id="part-a",
@@ -313,7 +314,27 @@ def test_presentation_output_omits_only_exact_duplicate_text_with_exact_endpoint
             compared_to_source_ordinal=0,
         ),
     )
-    assert output.diagnostics == ()
+
+
+def test_readable_output_retains_exact_duplicate_text_with_diagnostic() -> None:
+    track = parse_srt(
+        "1\n00:00:00,000 --> 00:00:01,000\nagain\n\n2\n00:00:00,000 --> 00:00:01,000\nagain\n",
+        part_id="part-a",
+        track_id="captions",
+        coverage=_coverage(),
+    )
+
+    output = readable_output(track)
+
+    assert [cue.text for cue in output.cues] == ["again", "again"]
+    assert output.corrections == ()
+    assert output.diagnostics == (
+        PresentationDiagnostic(
+            reason="possible_duplicate",
+            source_ordinal=1,
+            compared_to_source_ordinal=0,
+        ),
+    )
 
 
 def test_presentation_output_retains_real_repetition_with_possible_duplicate_evidence() -> None:
@@ -337,7 +358,7 @@ def test_presentation_output_retains_real_repetition_with_possible_duplicate_evi
     )
 
 
-def test_presentation_output_removes_only_closed_whitelisted_markup() -> None:
+def test_readable_output_removes_only_closed_whitelisted_markup() -> None:
     track = parse_srt(
         "1\n00:00:00,000 --> 00:00:01,000\n<b>bold</b> <c.green>kept</c.green> <i>open\n",
         part_id="part-a",
@@ -345,7 +366,7 @@ def test_presentation_output_removes_only_closed_whitelisted_markup() -> None:
         coverage=_coverage(),
     )
 
-    output = presentation_output(track)
+    output = readable_output(track)
 
     assert output.cues[0].text == "bold <c.green>kept</c.green> <i>open"
     assert output.corrections == (

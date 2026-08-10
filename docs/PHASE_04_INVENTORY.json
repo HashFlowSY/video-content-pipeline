@@ -70,6 +70,11 @@
       "command": "pytest -q; ruff check src tests; ruff format --check src tests; mypy src",
       "result": "119 passed; all static checks passed",
       "mode": "project-local venv after require-project-venv.sh; controlled localhost proxy only for existing offline acquisition tests"
+    },
+    {
+      "command": "pytest -q; ruff check src tests; ruff format --check src tests; mypy src",
+      "result": "121 passed; all static checks passed after code-review remediation",
+      "mode": "project-local venv after require-project-venv.sh; controlled localhost proxy only for existing offline acquisition tests"
     }
   ],
   "retention": "All Phase 4 design and implementation records are retained. No source media, model, dependency, cache, or temporary file is deleted by this implementation task. Tests use controlled FFmpeg substitutes only."
