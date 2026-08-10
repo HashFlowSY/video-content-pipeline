@@ -514,6 +514,12 @@ def test_subtitles_retains_a_partial_failed_extraction_as_an_incomplete_candidat
     assert response["status"] == "blocked"
     candidate = response["report"]["candidates"][0]
     assert candidate["state"] == "incomplete"
+    part_report = response["report"]["part_reports"][0]
+    assert part_report["state"] == "subtitle_unavailable_requires_asr_plan"
+    assert part_report["asr_planning_handoff"] == {
+        "reason": "subtitle_unavailable_requires_asr_plan",
+        "message": "No valid embedded subtitle track remains for this Part.",
+    }
     raw_payload = Path(candidate["raw_payload_path"])
     assert raw_payload.read_bytes() == b"partial subtitle bytes"
     assert sha256_file(raw_payload) == (

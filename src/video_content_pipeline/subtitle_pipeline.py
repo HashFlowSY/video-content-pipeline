@@ -65,7 +65,6 @@ class CandidateReportState(StrEnum):
     COMPLETED = "completed"
     AWAITING_SUBTITLE_SELECTION = "awaiting_subtitle_selection"
     PARTIAL = "partial"
-    SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN = "subtitle_unavailable_requires_asr_plan"
 
 
 class SubtitlePartState(StrEnum):
@@ -655,8 +654,6 @@ def _report_state(
         and SubtitlePartState.SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN in states
     ):
         return CandidateReportState.PARTIAL
-    if states == {SubtitlePartState.SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN}:
-        return CandidateReportState.SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN
     if SubtitlePartState.COMPLETED in states:
         return CandidateReportState.COMPLETED
     return CandidateReportState.BLOCKED
@@ -805,8 +802,8 @@ def _unresolved_ambiguous_source_ids(
 
 
 def _requires_asr_planning(candidates: list[SubtitleCandidate]) -> bool:
-    return bool(candidates) and all(
-        candidate.state in {CandidateState.UNAVAILABLE, CandidateState.INVALID}
+    return not any(
+        candidate.state in {CandidateState.VALID, CandidateState.ENCODING_AMBIGUOUS}
         for candidate in candidates
     )
 
@@ -830,8 +827,17 @@ def _collection_cue_intervals(
 def _interval_duration(
     intervals: tuple[HalfOpenInterval, ...] | list[HalfOpenInterval],
 ) -> ExactTime:
+    duration = ExactTime(0)
+    for interval in _union_intervals(intervals):
+        duration += interval.end - interval.start
+    return duration
+
+
+def _union_intervals(
+    intervals: tuple[HalfOpenInterval, ...] | list[HalfOpenInterval],
+) -> tuple[HalfOpenInterval, ...]:
     if not intervals:
-        return ExactTime(0)
+        return ()
     ordered = sorted(intervals, key=lambda interval: (interval.start, interval.end))
     merged: list[HalfOpenInterval] = [ordered[0]]
     for interval in ordered[1:]:
@@ -840,10 +846,7 @@ def _interval_duration(
             merged[-1] = HalfOpenInterval(previous.start, max(previous.end, interval.end))
         else:
             merged.append(interval)
-    duration = ExactTime(0)
-    for interval in merged:
-        duration += interval.end - interval.start
-    return duration
+    return tuple(merged)
 
 
 def _parse_decoders(values: tuple[str, ...]) -> dict[tuple[str, int], str]:
@@ -1665,15 +1668,7 @@ def _playback_coverage(
         )
     if not intervals:
         return None
-    ordered = sorted(intervals, key=lambda interval: (interval.start, interval.end))
-    merged = [ordered[0]]
-    for interval in ordered[1:]:
-        previous = merged[-1]
-        if interval.start <= previous.end:
-            merged[-1] = HalfOpenInterval(previous.start, max(previous.end, interval.end))
-        else:
-            merged.append(interval)
-    return tuple(merged)
+    return _union_intervals(intervals)
 
 
 def _relative_coverage(

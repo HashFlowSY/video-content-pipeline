@@ -26,3 +26,10 @@ Parts returns `partial`; unavailable Parts retain their source diagnostics and
 only a `subtitle_unavailable_requires_asr_plan` handoff, with no generated cue,
 silence marker, ASR estimate, model action, or RunBundle. Offline verification
 passed: 135 tests, Ruff, formatter check, and strict Mypy.
+
+Review follow-up: a Part now receives the ASR-planning handoff whenever no
+valid track remains after allowed processing, including no candidate or a
+retained failed extraction. Reports with only unavailable Parts remain
+collection-level `blocked`, keeping `subtitle_unavailable_requires_asr_plan`
+strictly Part-scoped. Shared interval-union logic now calculates both playback
+and caption coverage.
