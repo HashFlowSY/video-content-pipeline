@@ -365,6 +365,10 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
                         "telemetry": False,
                         "dependency_plan": "models/plans/controlled-vad.md",
                         "resource_estimate": {"high_bytes": 1024},
+                        "execution_controls": {
+                            "resource_measurement": {"peak_bytes": 512},
+                            "unload_evidence": {"state": "released", "resident_bytes": 0},
+                        },
                         "controlled_adapter": {
                             "adapter_version": "fixture-adapter-v1",
                             "raw_output": {"native_segments": []},
@@ -403,6 +407,10 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
                         "telemetry": False,
                         "dependency_plan": "models/plans/controlled-vad.md",
                         "resource_estimate": {"high_bytes": 1024},
+                        "execution_controls": {
+                            "resource_measurement": {"peak_bytes": 512},
+                            "unload_evidence": {"state": "released", "resident_bytes": 0},
+                        },
                         "controlled_adapter": {
                             "adapter_version": "fixture-adapter-v1",
                             "raw_output": {"native_segments": []},
@@ -461,6 +469,27 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
     assert candidates["drifted-vad"]["calibration"]["profile"] is None
     assert report["formal_evidence"] == []
 
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    controlled_vad = next(
+        candidate
+        for candidate in registry["candidates"]
+        if candidate["candidate_id"] == "controlled-vad"
+    )
+    controlled_vad["resource_estimate"] = {
+        "high_bytes": audio_analysis._MAX_MODEL_RESOURCE_BYTES + 1
+    }
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+    assert cli.main(["analyze-audio", plan.plan_id, subtitle_report.report_id, "--json"]) == 0
+    resource_paused = json.loads(capsys.readouterr().out)["report"]
+
+    assert resource_paused["state"] == "blocked"
+    assert resource_paused["diagnostics"][0]["reason"] == "resource_envelope_exceeded"
+    assert resource_paused["partial_analysis"] == {
+        "missing_stage": "vad",
+        "required_decision": {"reason": "resource_envelope_exceeded"},
+    }
+
 
 def test_analyze_audio_rejects_an_incomplete_controlled_adapter_projection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -492,6 +521,10 @@ def test_analyze_audio_rejects_an_incomplete_controlled_adapter_projection(
                         "telemetry": False,
                         "dependency_plan": "models/plans/controlled-vad.md",
                         "resource_estimate": {"high_bytes": 1024},
+                        "execution_controls": {
+                            "resource_measurement": {"peak_bytes": 512},
+                            "unload_evidence": {"state": "released", "resident_bytes": 0},
+                        },
                         "controlled_adapter": {
                             "adapter_version": "fixture-adapter-v1",
                             "raw_output": {"native_segments": []},
@@ -740,6 +773,10 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
                         "telemetry": False,
                         "dependency_plan": "models/plans/controlled-vad.md",
                         "resource_estimate": {"high_bytes": 1024},
+                        "execution_controls": {
+                            "resource_measurement": {"peak_bytes": 512},
+                            "unload_evidence": {"state": "released", "resident_bytes": 0},
+                        },
                         "controlled_adapter": {
                             "adapter_version": "fixture-adapter-v1",
                             "raw_output": {"native_segments": []},
@@ -769,6 +806,10 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
                         "telemetry": False,
                         "dependency_plan": "models/plans/controlled-vad.md",
                         "resource_estimate": {"high_bytes": 1024},
+                        "execution_controls": {
+                            "resource_measurement": {"peak_bytes": 512},
+                            "unload_evidence": {"state": "released", "resident_bytes": 0},
+                        },
                         "controlled_adapter": {
                             "adapter_version": "fixture-adapter-v1",
                             "raw_output": {"native_cues": []},
@@ -798,6 +839,10 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
                         "telemetry": False,
                         "dependency_plan": "models/plans/controlled-vad.md",
                         "resource_estimate": {"high_bytes": 1024},
+                        "execution_controls": {
+                            "resource_measurement": {"peak_bytes": 512},
+                            "unload_evidence": {"state": "released", "resident_bytes": 0},
+                        },
                         "controlled_adapter": {
                             "adapter_version": "fixture-adapter-v1",
                             "raw_output": {"native_turns": []},
@@ -843,6 +888,10 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
             "message": "A calibrated diarization candidate requires explicit user selection.",
         }
     ]
+    assert unselected_report["partial_analysis"] == {
+        "missing_stage": "diarization",
+        "required_decision": {"reason": "diarization_model_selection_required"},
+    }
 
     assert (
         cli.main(
@@ -861,7 +910,7 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
     report = json.loads(capsys.readouterr().out)["report"]
 
     assert report["diagnostics"] == []
-    assert report["state"] == "partial"
+    assert report["state"] == "complete"
     assert (
         report["input_evidence"]["resumed_from_report"]["path"] == unselected_report["report_path"]
     )
@@ -1012,3 +1061,106 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
     ]
     assert source_candidate_path.read_bytes() == source_candidate_before
     assert not (tmp_path / "outputs").exists()
+
+    assert [stage["capability"] for stage in report["stage_execution"]] == [
+        "vad",
+        "forced_alignment",
+        "diarization",
+    ]
+    assert all(stage["state"] == "completed" for stage in report["stage_execution"])
+    assert all(Path(stage["output"]["path"]).is_file() for stage in report["stage_execution"])
+    assert all(
+        Path(stage["resource_measurement"]["path"]).is_file() for stage in report["stage_execution"]
+    )
+    assert all(
+        Path(stage["unload_evidence"]["path"]).is_file() for stage in report["stage_execution"]
+    )
+    assert report["partial_analysis"] is None
+
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    alignment_candidate = next(
+        candidate
+        for candidate in registry["candidates"]
+        if candidate["capability"] == "forced_alignment"
+    )
+    alignment_candidate["resource_estimate"] = {
+        "high_bytes": audio_analysis._MAX_MODEL_RESOURCE_BYTES + 1
+    }
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+    assert (
+        cli.main(
+            [
+                "analyze-audio",
+                plan.plan_id,
+                subtitle_report.report_id,
+                "--audio-stream",
+                f"{plan.source_artifacts[0].source_id}=2",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    resource_paused = json.loads(capsys.readouterr().out)["report"]
+    assert resource_paused["state"] == "partial"
+    assert [entry["capability"] for entry in resource_paused["formal_evidence"]] == ["vad"]
+    assert resource_paused["partial_analysis"] == {
+        "missing_stage": "forced_alignment",
+        "required_decision": {"reason": "resource_envelope_exceeded"},
+    }
+
+    alignment_candidate["resource_estimate"] = {"high_bytes": 1024}
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    assert (
+        cli.main(
+            [
+                "resume-audio-analysis",
+                resource_paused["report_id"],
+                "--decision",
+                "resource_configuration_changed",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    resource_resumed = json.loads(capsys.readouterr().out)["report"]
+    assert (
+        resource_resumed["input_evidence"]["resumed_from_report"]["path"]
+        == resource_paused["report_path"]
+    )
+    assert resource_resumed["input_evidence"]["resumption_decision"] == (
+        "resource_configuration_changed"
+    )
+    assert [entry["capability"] for entry in resource_resumed["formal_evidence"]] == [
+        "vad",
+        "forced_alignment",
+    ]
+    assert resource_resumed["formal_evidence"][0] == resource_paused["formal_evidence"][0]
+    assert resource_resumed["stage_execution"][0] == resource_paused["stage_execution"][0]
+
+    vad_candidate = next(
+        candidate for candidate in registry["candidates"] if candidate["capability"] == "vad"
+    )
+    vad_candidate["execution_controls"].pop("unload_evidence")
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+    assert (
+        cli.main(
+            [
+                "analyze-audio",
+                plan.plan_id,
+                subtitle_report.report_id,
+                "--audio-stream",
+                f"{plan.source_artifacts[0].source_id}=2",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    release_paused = json.loads(capsys.readouterr().out)["report"]
+    assert release_paused["state"] == "partial"
+    assert [entry["capability"] for entry in release_paused["formal_evidence"]] == ["vad"]
+    assert release_paused["partial_analysis"] == {
+        "missing_stage": "forced_alignment",
+        "required_decision": {"reason": "model_release_unverified"},
+    }

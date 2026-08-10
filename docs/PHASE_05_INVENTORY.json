@@ -199,6 +199,34 @@
         "user_media_accessed": false,
         "outputs_written": false
       }
+    },
+    {
+      "ticket": "07",
+      "status": "passed",
+      "commands": [
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && pytest -q tests/integration/test_phase_5_cli_contract.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && ruff check src/video_content_pipeline/audio_analysis.py src/video_content_pipeline/cli.py tests/integration/test_phase_5_cli_contract.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && ruff format --check src/video_content_pipeline/audio_analysis.py src/video_content_pipeline/cli.py tests/integration/test_phase_5_cli_contract.py",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && mypy src",
+        "export VCP_PROJECT_ROOT=/Users/shangyang/Desktop/workspace/projects/video-content-pipeline; export UV_INSTALL_DIR=$VCP_PROJECT_ROOT/tools/uv; export UV_CACHE_DIR=$VCP_PROJECT_ROOT/cache/uv; export UV_PYTHON_INSTALL_DIR=$VCP_PROJECT_ROOT/runtime/python; export UV_PROJECT_ENVIRONMENT=$VCP_PROJECT_ROOT/.venv; export PIP_CACHE_DIR=$VCP_PROJECT_ROOT/cache/python; export TMPDIR=$VCP_PROJECT_ROOT/tmp; source .venv/bin/activate && scripts/require-project-venv.sh && pytest -q"
+      ],
+      "results": {
+        "tdd_red": "expected missing stage_execution report contract",
+        "pytest_cli_contract": "8 passed; verified serial VAD/alignment/diarization records, resource pause, release pause, and explicit resource-configuration resume",
+        "ruff_check": "passed",
+        "ruff_format_check": "passed",
+        "mypy": "passed; no issues in 17 source files",
+        "pytest_full": "150 passed",
+        "code_review": "fixed VAD resource pause, complete-state reporting, retained-stage resume, audit command fidelity, and stage-record naming"
+      },
+      "resource_bounds": {
+        "memory": "less than 256 MiB",
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
     }
   ],
   "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted."

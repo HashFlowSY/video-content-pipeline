@@ -96,8 +96,10 @@ def _parser() -> argparse.ArgumentParser:
     analyze_audio_command.add_argument("--json", action="store_true")
     resume_audio_command = subcommands.add_parser("resume-audio-analysis")
     resume_audio_command.add_argument("report_id")
+    resume_audio_command.add_argument("--diarization-candidate", metavar="CANDIDATE_ID")
     resume_audio_command.add_argument(
-        "--diarization-candidate", required=True, metavar="CANDIDATE_ID"
+        "--decision",
+        choices=("model_release_verified", "resource_configuration_changed"),
     )
     resume_audio_command.add_argument(
         "--role-metadata", action="append", default=[], metavar="PART_ID=CLUSTER_ID=ROLE"
@@ -170,6 +172,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.diarization_candidate,
             _project_root(),
             tuple(arguments.role_metadata),
+            arguments.decision,
         )
         print(json.dumps(result, sort_keys=True))
         return 0
