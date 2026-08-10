@@ -384,6 +384,360 @@ The offline verification boundary that uses project-owned synthetic sources and
 controlled downloader substitutes, never user media or real network sources.
 _Avoid_: live integration fixture, production validation, URL smoke test
 
+**Phase 5 offline engineering boundary**:
+The initial Phase 5 scope for forced alignment, voice activity detection, and
+speaker diarization contracts and synthetic verification; model downloads and
+real-media prototypes remain separately authorized.
+_Avoid_: implicit model acquisition, real-media Phase 5 validation, model-ready pipeline
+
+**Phase 5 analysis partition**:
+Voice activity detection and speaker diarization apply to every Part in a
+confirmed RunPlan, while forced alignment applies only to a Part with a Primary
+subtitle track; neither analysis creates or substitutes an ASR transcript.
+_Avoid_: subtitle-only audio analysis, VAD transcript, automatic ASR fallback
+
+**Adopted alignment timing view**:
+An immutable derivative of a Source subtitle artifact that retains its exact
+text and records only the cue times accepted from AlignmentCandidates; it never
+rewrites the Phase 4 source or readable candidate artifacts.
+_Avoid_: updated source subtitle, overwritten candidate artifact, corrected transcript
+
+**Cue-level alignment adoption**:
+The independent acceptance or rejection of an AlignmentCandidate for one cue.
+The resulting Adopted alignment timing view is valid only after its complete
+mixed sequence passes global monotonicity, playback-coverage, and duration
+reasonableness gates.
+_Avoid_: track-only alignment decision, independently published cue time, partial global validation
+
+**Alignment-untrusted Part**:
+A Part whose proposed Adopted alignment timing view fails a global validity
+gate. All candidate times from that alignment attempt are rejected, its
+original cue times remain authoritative, and its retained diagnostics identify
+the failed gate without selective automatic rollback.
+_Avoid_: best-effort candidate subset, silently repaired alignment, adopted partial view
+
+**Alignment failure fingerprint**:
+The exact combination of a SourceArtifact identity, Primary subtitle track,
+alignment model and rules identity, and failed global gate. Its second retained
+occurrence blocks further equivalent attempts as `alignment_diagnosis_required`.
+_Avoid_: generic retry count, cross-configuration failure, transient warning
+
+**Alignment failure diagnosis**:
+A structured explanation of a repeated Alignment failure fingerprint based only
+on retained subtitle, candidate-time, model-output, VAD, and gate evidence. It
+may conclude `root_cause_inconclusive` and never reruns a model, downloads an
+asset, or reads new media evidence.
+_Avoid_: diagnostic retry, hidden media probe, inferred root cause
+
+**Alignment calibration requirement**:
+The condition that an alignment model may retain candidate times but cannot
+produce an Adopted alignment timing view until its confidence threshold has
+been validated in an offline calibration profile.
+_Avoid_: universal confidence threshold, uncalibrated adoption, score-only proof
+
+**Alignment calibration profile**:
+The retained offline evidence that validates an alignment adoption threshold for
+one exact model asset hash, inference backend and version, quantization or
+precision, device class, and alignment rules fingerprint. Any identity change
+invalidates its adoption eligibility.
+_Avoid_: model-name calibration, portable threshold, configuration-agnostic score
+
+**Synthetic alignment calibration**:
+An Alignment calibration profile evaluated only against project-owned synthetic
+media. It permits adopted timing views only in synthetic verification and never
+qualifies real-source time adoption.
+_Avoid_: production calibration, real-media acceptance, field-quality proof
+
+**Voice activity interval**:
+An audio-evidence interval classified only as `speech_likely`, `non_speech`, or
+`indeterminate`. It contains no transcript claim; subtitle coverage is compared
+against it separately to derive an uncovered-speech risk.
+_Avoid_: VAD transcript, silent caption gap, caption-completeness score
+
+**Audio-coverage-constrained VAD**:
+Voice activity intervals expressed as RawPtsTime half-open intervals wholly
+within usable audio DecodedIntervals. Audio coverage gaps, missing usable audio,
+and undecidable ranges remain `indeterminate`, never `non_speech`.
+_Avoid_: container-duration silence, video-derived silence, inferred quiet interval
+
+**VAD calibration requirement**:
+The condition that a VAD model may retain candidate segments and scores but
+cannot classify a formal Voice activity interval as `speech_likely` or
+`non_speech`, nor derive uncovered-speech risk, until a model-specific
+calibration profile validates its thresholds.
+_Avoid_: uncalibrated speech flag, score-only silence claim, implicit ASR trigger
+
+**Uncovered-speech risk evidence**:
+Every non-empty intersection of a calibrated `speech_likely` Voice activity
+interval and absence of Primary subtitle coverage. A versioned, calibrated
+duration threshold may elevate a continuous interval to a material risk or ASR
+planning recommendation but never suppresses the retained evidence.
+_Avoid_: discarded short speech, VAD transcript, automatic ASR run
+
+**Audio-state-indeterminate risk**:
+An overlap between absent Primary subtitle coverage and an `indeterminate` Voice
+activity interval. It reports unresolved audio evidence without claiming
+uncovered speech, silence, or an ASR recommendation.
+_Avoid_: uncertain speech, inferred silence, ASR trigger
+
+**Part-local speaker label**:
+An anonymous diarization label stable only within one Part, such as
+`part-03:speaker-01`. It carries no cross-Part, cross-run, or real-person
+identity claim.
+_Avoid_: global speaker identity, voiceprint identity, inferred person name
+
+**SpeakerTurn**:
+One independently retained diarization interval with a Part-local speaker
+label, RawPtsTime half-open boundaries, and confidence evidence. Overlapping
+turns remain separate evidence and are never forced into a single speaker,
+trimmed, or merged.
+_Avoid_: exclusive speaking floor, serialized dialogue, merged overlap
+
+**Role candidate**:
+A non-identity label such as host, guest, or questioner supported only by
+referenced subtitle text or explicit user metadata. It remains a candidate and
+cannot be inferred from voice characteristics or diarization labels alone.
+_Avoid_: voice-inferred role, gendered label, speaker identity
+
+**Diarization calibration requirement**:
+The condition that a speaker-diarization model may retain raw clustering
+candidates and scores but cannot publish formal SpeakerTurns, stable Part-local
+labels, or Role candidates until a model-specific calibration profile validates
+its execution configuration.
+_Avoid_: uncalibrated speaker turn, provisional identity, raw-cluster role
+
+**Diarization calibration profile**:
+The retained calibration evidence for one exact diarization model asset hash,
+inference backend and version, quantization or precision, device class, and
+rules fingerprint. A synthetic-only profile qualifies only synthetic
+verification and is invalidated by any bound-identity change.
+_Avoid_: portable speaker threshold, model-name-only profile, real-source proof
+
+**Phase 5 heavy-analysis sequence**:
+The serial execution order VAD, full-audio forced alignment, then speaker
+diarization. Each stage retains its output, resource measurement, and model
+unload evidence before the next model may load.
+_Avoid_: parallel model loading, VAD-clipped alignment, unrecorded unload
+
+**Model-release-unverified pause**:
+The user-decision state entered when a completed heavy-analysis stage lacks
+credible model-unload evidence. It retains completed artifacts and diagnostics,
+blocks later model loads, and performs no cleanup, retry, or recovery action
+until the user explicitly chooses one.
+_Avoid_: forced cleanup, automatic retry, continued model loading
+
+**Resource-envelope-exceeded pause**:
+The user-decision state entered before a heavy-analysis model starts when its
+high resource estimate exceeds the 24 GB envelope. It retains the estimate and
+candidate configurations but does not automatically change batch size,
+precision, or model.
+_Avoid_: automatic quantization downgrade, implicit model substitution, over-limit execution
+
+**Phase 5 processing authorization**:
+The authority to run Phase 5 heavy analysis only after exact revalidation of
+SourceArtifact hashes, audio coverage evidence, Primary subtitle track and
+candidate report, selected model assets, and rules and calibration profiles.
+Any drift requires a new plan rather than continuation on stale evidence.
+_Avoid_: stale analysis run, warning-only drift, mutable prior plan
+
+**Explicit model acquisition approval**:
+The user's per-model authorization to acquire one proposed immutable model
+asset. The preceding acquisition plan must identify official source, license,
+revision, hash, bytes, project-local path, offline runtime, resource estimate,
+and credential-isolation evidence; without approval it authorizes no download.
+_Avoid_: phase-wide download consent, model-name approval, implied retry download
+
+**Audio analysis workspace**:
+The immutable project-owned evidence area for one Phase 5 analysis attempt. It
+retains raw model outputs, calibration and gate results, VAD, alignment and
+diarization candidates, and diagnostics; it is not an output directory and
+Phase 9 may only promote verified artifacts from it.
+_Avoid_: RunBundle, disposable model cache, publish-time regeneration
+
+**Partial audio analysis report**:
+The immutable report for an Audio analysis workspace where one or more later
+stages paused or blocked after an earlier stage produced independently valid
+evidence. It retains valid completed-stage artifacts and identifies missing
+stages and the user decision required to continue.
+_Avoid_: all-or-nothing attempt, discarded valid analysis, hidden incomplete stage
+
+**Long-silence evidence**:
+A continuous calibrated `non_speech` Voice activity interval exceeding a
+versioned, calibrated duration threshold. `indeterminate` audio, coverage gaps,
+and absent subtitles cannot contribute to or join a long-silence interval.
+_Avoid_: caption gap silence, inferred audio gap, stitched quiet period
+
+**Audio analysis clock**:
+The RawPtsTime authority for every Voice activity interval, SpeakerTurn,
+uncovered-speech risk, and Long-silence evidence. PartRelativeTime and
+CollectionVirtualTime are derived views only; no Part boundary, coverage gap,
+or negative PTS is scaled, filled, or clamped.
+_Avoid_: normalized audio timeline, continuous collection PTS, zero-clamped time
+
+**Audio analysis report**:
+The immutable machine-readable outcome of one `vcp analyze-audio` attempt from
+a confirmed RunPlan and retained subtitle candidate report. It states completed,
+partial, blocked, or user-decision states; any resume explicitly references the
+report and a user decision.
+_Avoid_: mutable run status, interactive shell session, implicit resume
+
+**Model-acquisition-required result**:
+The per-capability result emitted when `vcp analyze-audio` lacks an explicitly
+approved, identity-pinned model asset that can run offline. It proposes no
+model, downloads no asset, and runs no substitute implementation.
+_Avoid_: automatic model fallback, background acquisition, implicit runtime dependency
+
+**Forced-alignment candidate**:
+A model proposed for evaluation against the Phase 5 forced-alignment capability
+contract. `Qwen3-ForcedAligner-0.6B` is one candidate only; it is neither a
+mandatory dependency nor an approved acquisition.
+_Avoid_: required Qwen dependency, default download, selected aligner
+
+**Phase 5 capability contract**:
+The model-independent interface and evidence obligations for one of forced
+alignment, VAD, or speaker diarization. A model is selected only by passing the
+same license, offline-runtime, resource, privacy, and calibration gates as its
+alternatives.
+_Avoid_: vendor-specific pipeline, model-name API, implicit preferred model
+
+**Phase 5 model eligibility**:
+The pre-acquisition candidate-matrix result `eligible`, `blocked`, or
+`unsupported`. An eligible model has official source and acceptable license,
+fixed revision and hash, fully offline runtime, no runtime credential or
+telemetry path, a project-local dependency plan, and evidence of fitting the
+24 GB envelope.
+_Avoid_: downloadable candidate, unreviewed dependency, provisional eligibility
+
+**Credential-gated model candidate**:
+A candidate whose initial acquisition requires an account token, acceptance of
+remote platform terms, or browser credentials. It is `blocked` even when its
+installed runtime can later operate offline.
+_Avoid_: manually authenticated project download, offline-after-login exception, credential prompt
+
+**VAD candidate**:
+A model proposed for evaluation against the Phase 5 VAD capability contract.
+Silero VAD is one candidate only; it is neither a mandatory dependency nor an
+approved acquisition, and its runtime dependencies and calibration remain
+separate eligibility gates.
+_Avoid_: required Silero dependency, default VAD download, selected VAD
+
+**Diarization capability vacancy**:
+The state in which no speaker-diarization candidate satisfies Phase 5 model
+eligibility. The capability reports `model_acquisition_required` and does not
+substitute a credential-gated or otherwise ineligible implementation.
+_Avoid_: pyannote exception, implicit diarization fallback, missing-model retry
+
+**Phase 5 offline verification boundary**:
+The engineering-verification scope using only retained synthetic media, fixed
+candidate-output fixtures, and controlled model-adapter substitutes. It excludes
+model runtime installation, model downloads, real-model invocation, and user
+media access.
+_Avoid_: model smoke test, hidden dependency install, real-media validation
+
+**Model-output projection**:
+The versioned structured interpretation of one retained raw model output. Phase
+5 gates read only the projection, while the raw output, projection, and adapter
+version are independently hash-recorded for audit.
+_Avoid_: normalized raw output, unversioned parser result, opaque gate input
+
+**Model-output-invalid result**:
+The capability result when a retained raw model output cannot be completely
+projected into its versioned contract. It produces no formal audio, alignment,
+or diarization evidence and never uses default values, field guesses, or a
+partial projection.
+_Avoid_: best-effort parser, inferred field, partial formal result
+
+**Alignment text-contract violation**:
+The result when an aligner output does anything other than propose start and end
+times for existing Primary subtitle cue identities: it adds, removes, merges,
+splits, or changes cue text. It produces neither an AlignmentCandidate nor an
+independent transcript.
+_Avoid_: aligner transcript, corrected cue text, alignment-based ASR
+
+**Order-preserving alignment view**:
+An Adopted alignment timing view that retains original cue `source_ordinal`
+order while permitting valid overlapping intervals. It does not clip, force
+non-overlap, or reorder cues to create a serialized timeline.
+_Avoid_: de-overlapped subtitles, reordered alignment, exclusive cue sequence
+
+**Alignment-candidate-rejected cue**:
+A cue whose retained AlignmentCandidate has low calibrated confidence, lacks
+confidence evidence, or falls outside usable audio coverage. Its original time
+is used in the proposed view without interpolation or guessed timing.
+_Avoid_: repaired cue time, interpolated alignment, discarded candidate evidence
+
+**Language-aware alignment duration rule**:
+A versioned rule in an Alignment calibration profile that evaluates cue-text
+length against candidate duration for its supported language behavior. No
+global character-count or word-count threshold substitutes for a missing rule.
+_Avoid_: universal reading speed, language-blind duration gate, guessed language threshold
+
+**Analysis audio stream**:
+The one explicitly selected usable audio stream in a Part used by all Phase 5
+audio analysis. If retained planning evidence cannot prove a unique selection,
+the Part pauses as `awaiting_audio_stream_selection`; streams are never mixed,
+merged, or selected by index default.
+_Avoid_: mixed analysis audio, default audio stream, all-track VAD
+
+**Analysis audio selection record**:
+The immutable user choice `part-id=stream-index` bound to that audio stream's
+codec, language and disposition metadata, and coverage-evidence hashes. Any
+bound-evidence drift invalidates the selection and requires a new choice.
+_Avoid_: persistent bare stream index, stale audio selection, mutable preference
+
+**Analysis audio derivative**:
+The hash-recorded deterministic audio representation of one Analysis audio
+stream supplied to a Phase 5 model. A versioned preprocessing profile explicitly
+defines sample rate, channel transformation, loudness treatment, and chunking;
+no implicit resampling, downmixing, or normalization is permitted.
+_Avoid_: library-default waveform, untracked downmix, mutable model input
+
+**Analysis audio derivation toolchain**:
+The revalidated pinned FFmpeg identity that creates an Analysis audio derivative
+from its selected SourceArtifact stream. Models receive only the retained
+derivative, never a direct library read of SourceArtifact bytes.
+_Avoid_: model-owned decoder, direct source read, unpinned audio loader
+
+**Derivative-to-source time mapping**:
+The exact versioned mapping from an Analysis audio derivative's sample and chunk
+coordinates to RawPtsTime. A model boundary without this mapping remains raw
+output and cannot become formal VAD, alignment, or diarization evidence.
+_Avoid_: float timestamp authority, guessed PTS offset, approximate audio clock
+
+**Complete VAD partition**:
+The partition of every known usable-audio coverage point into exactly one of
+`speech_likely`, `non_speech`, or `indeterminate`. Model omissions, rounded
+boundary gaps, and anomalous fragments become `indeterminate`, never implicit
+`non_speech`.
+_Avoid_: VAD gap as silence, partial audio-state map, default quiet interval
+
+**Diarization-VAD conflict**:
+The result when a raw diarization candidate overlaps calibrated `non_speech` or
+`indeterminate` audio. The raw candidate remains retained, but it cannot become
+a formal SpeakerTurn and is never trimmed or shifted to resolve the conflict.
+_Avoid_: VAD-overridden turn, clipped speaker interval, silent model arbitration
+
+**Alignment-VAD conflict**:
+The result when an otherwise eligible AlignmentCandidate overlaps calibrated
+`non_speech` audio. Its cue retains original time and the candidate is rejected;
+an overlap with `indeterminate` audio is a reported risk only, not automatic
+rejection.
+_Avoid_: VAD-repaired alignment, speech-assumed unknown interval, ignored silence conflict
+
+**Calibration evaluation record**:
+The deterministic, hash-recorded evaluation that creates a calibration profile
+from reference fixtures. It retains candidate output, expected result, chosen
+thresholds, false-accept and false-reject summaries, and evaluator version; it
+cannot be replaced by a manual calibration assertion.
+_Avoid_: declared calibration, unversioned benchmark, unrecorded threshold tuning
+
+**Calibration-failed result**:
+The retained outcome when a candidate fails its deterministic Calibration
+evaluation record. The pipeline does not automatically tune thresholds or retry;
+any changed threshold, rule, or candidate combination is a new explicitly
+authorized calibration experiment.
+_Avoid_: automatic threshold search, silent retune, repeated calibration retry
+
 **ProbeProjection**:
 The typed projection of a ProbeDocument used for decisions; unknown fields
 remain only in the raw document.
