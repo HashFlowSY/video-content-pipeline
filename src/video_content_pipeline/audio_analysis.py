@@ -343,6 +343,8 @@ def analyze_audio(
     resumption_decision: str | None = None,
     resumed_formal_evidence: tuple[dict[str, object], ...] = (),
     resumed_stage_execution: tuple[dict[str, object], ...] = (),
+    expected_analysis_audio_streams: tuple[dict[str, object], ...] = (),
+    resumed_release_verified: bool = False,
 ) -> dict[str, object]:
     """Run the controlled Phase 5 sequence without real model or media access."""
 
@@ -398,7 +400,11 @@ def analyze_audio(
         if registry_path.exists():
             model_registry_evidence = _input_evidence(registry_path)
         capabilities = _capabilities_from_registry(project_root, workspace_path)
-        _validate_resumed_stage_prefix(resumed_formal_evidence, resumed_stage_execution)
+        _validate_resumed_stage_prefix(
+            resumed_formal_evidence,
+            resumed_stage_execution,
+            allow_release_unverified=resumed_release_verified,
+        )
         resumed_by_capability = {
             evidence["capability"]: evidence for evidence in resumed_formal_evidence
         }
@@ -417,6 +423,7 @@ def analyze_audio(
             analysis_audio_streams = _select_audio_streams(
                 confirmed_report.inspection_evidence, requested_audio_streams
             )
+            _validate_resumed_audio_streams(expected_analysis_audio_streams, analysis_audio_streams)
             resumed_vad = resumed_by_capability.get("vad")
             if resumed_vad is not None:
                 _validate_resumed_candidate(resumed_vad, vad_candidate)
@@ -545,6 +552,8 @@ def analyze_audio(
                 _next_missing_stage(formal_evidence),
                 getattr(error, "reason", "audio_analysis_paused"),
             )
+        elif getattr(error, "reason", None) == "audio_stream_selection_required":
+            partial_analysis = _partial_analysis("vad", "audio_stream_selection_required")
         diagnostics = (
             PlanningDiagnostic(
                 getattr(error, "reason", "audio_analysis_input_invalid"),
@@ -557,7 +566,13 @@ def analyze_audio(
         plan_id=report_plan_id,
         subtitle_report_id=report_subtitle_id,
         state=(
-            AudioAnalysisReportState.BLOCKED
+            (
+                AudioAnalysisReportState.PARTIAL
+                if partial_analysis is not None
+                and partial_analysis.get("required_decision")
+                == {"reason": "audio_stream_selection_required"}
+                else AudioAnalysisReportState.BLOCKED
+            )
             if not formal_evidence
             else (
                 AudioAnalysisReportState.PARTIAL
@@ -590,6 +605,7 @@ def resume_audio_analysis(
     project_root: Path,
     requested_role_metadata: tuple[str, ...] = (),
     decision: str | None = None,
+    requested_audio_streams: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Resume a retained Phase 5 pause only with its explicit user decision."""
 
@@ -612,7 +628,12 @@ def resume_audio_analysis(
             "Only a retained Phase 5 pause can be resumed.",
         )
     pause_reason = _pause_reason(prior_document)
-    if pause_reason == "diarization_model_selection_required":
+    if pause_reason == "audio_stream_selection_required":
+        if not requested_audio_streams:
+            raise AudioAnalysisError(
+                "analysis_resume_invalid", "Audio stream selection resume requires --audio-stream."
+            )
+    elif pause_reason == "diarization_model_selection_required":
         if requested_diarization_candidate is None:
             raise AudioAnalysisError(
                 "analysis_resume_invalid", "Diarization resume requires a candidate selection."
@@ -654,11 +675,12 @@ def resume_audio_analysis(
                 )
             _retained_evidence_path(evidence, project_root)
     streams = prior_document.get("analysis_audio_streams")
-    if not isinstance(streams, list) or not streams:
+    if not isinstance(streams, list):
         raise AudioAnalysisError(
             "analysis_report_invalid", "Audio analysis stream evidence is invalid."
         )
-    requested_audio_streams: list[str] = []
+    resumed_audio_streams: list[str] = []
+    expected_analysis_audio_streams: list[dict[str, object]] = []
     for stream in streams:
         if not isinstance(stream, Mapping):
             raise AudioAnalysisError(
@@ -670,21 +692,43 @@ def resume_audio_analysis(
             raise AudioAnalysisError(
                 "analysis_report_invalid", "Audio analysis stream evidence is invalid."
             )
-        requested_audio_streams.append(f"{source_id}={stream_index}")
+        resumed_audio_streams.append(f"{source_id}={stream_index}")
+        expected_analysis_audio_streams.append(dict(stream))
+    if pause_reason == "audio_stream_selection_required":
+        if streams:
+            raise AudioAnalysisError(
+                "analysis_report_invalid",
+                "Audio selection pause unexpectedly retains a stream choice.",
+            )
+        resumed_audio_streams = list(requested_audio_streams)
+    elif requested_audio_streams:
+        raise AudioAnalysisError(
+            "analysis_resume_invalid",
+            "Audio stream selections are valid only for an audio selection pause.",
+        )
+    prior_resumption_decision = input_evidence.get("resumption_decision")
+    release_verified = (
+        pause_reason == "model_release_unverified"
+        or prior_resumption_decision == "model_release_verified"
+    )
     resumed_formal_evidence, resumed_stage_execution = _retained_resumed_stage_outputs(
-        prior_document, project_root
+        prior_document,
+        project_root,
+        allow_release_unverified=release_verified,
     )
     return analyze_audio(
         plan_id,
         subtitle_report_id,
         project_root,
-        tuple(requested_audio_streams),
+        tuple(resumed_audio_streams),
         requested_diarization_candidate,
         requested_role_metadata,
         _input_evidence(prior_path),
         decision,
         resumed_formal_evidence,
         resumed_stage_execution,
+        tuple(expected_analysis_audio_streams),
+        release_verified,
     )
 
 
@@ -710,6 +754,7 @@ def _pause_reason(report: Mapping[str, object]) -> str | None:
         return None
     for diagnostic in diagnostics:
         if isinstance(diagnostic, Mapping) and diagnostic.get("reason") in {
+            "audio_stream_selection_required",
             "diarization_model_selection_required",
             "model_release_unverified",
             "resource_envelope_exceeded",
@@ -1798,7 +1843,10 @@ def _next_missing_stage(formal_evidence: tuple[dict[str, object], ...]) -> str:
 
 
 def _retained_resumed_stage_outputs(
-    report: Mapping[str, object], project_root: Path
+    report: Mapping[str, object],
+    project_root: Path,
+    *,
+    allow_release_unverified: bool,
 ) -> tuple[tuple[dict[str, object], ...], tuple[dict[str, object], ...]]:
     formal_evidence = report.get("formal_evidence")
     stage_execution = report.get("stage_execution")
@@ -1813,10 +1861,19 @@ def _retained_resumed_stage_outputs(
             "analysis_report_invalid", "Audio analysis completed-stage evidence is invalid."
         )
     copied_formal = tuple(dict(item) for item in formal)
-    copied_stages = tuple(dict(item) for item in stages if item.get("state") == "completed")
-    _validate_resumed_stage_prefix(copied_formal, copied_stages)
+    copied_stages = tuple(
+        dict(item) for item in stages if item.get("state") in {"completed", "release_unverified"}
+    )
+    _validate_resumed_stage_prefix(
+        copied_formal,
+        copied_stages,
+        allow_release_unverified=allow_release_unverified,
+    )
     for stage in copied_stages:
-        for key in ("output", "resource_measurement", "unload_evidence"):
+        required_evidence: tuple[str, ...] = ("output", "resource_measurement")
+        if stage.get("state") == "completed":
+            required_evidence += ("unload_evidence",)
+        for key in required_evidence:
             evidence = stage.get(key)
             if not isinstance(evidence, Mapping):
                 raise AudioAnalysisError(
@@ -1827,14 +1884,21 @@ def _retained_resumed_stage_outputs(
 
 
 def _validate_resumed_stage_prefix(
-    formal_evidence: tuple[dict[str, object], ...], stage_execution: tuple[dict[str, object], ...]
+    formal_evidence: tuple[dict[str, object], ...],
+    stage_execution: tuple[dict[str, object], ...],
+    *,
+    allow_release_unverified: bool = False,
 ) -> None:
     capabilities = tuple(item.get("capability") for item in formal_evidence)
     stage_capabilities = tuple(item.get("capability") for item in stage_execution)
     if (
         capabilities != _CAPABILITIES[: len(capabilities)]
         or stage_capabilities != capabilities
-        or any(item.get("state") != "completed" for item in stage_execution)
+        or any(
+            item.get("state") not in {"completed", "release_unverified"}
+            or (item.get("state") == "release_unverified" and not allow_release_unverified)
+            for item in stage_execution
+        )
     ):
         raise AudioAnalysisError(
             "analysis_report_invalid", "Audio analysis completed stages are not a serial prefix."
@@ -1888,6 +1952,17 @@ def _select_audio_streams(
             "No retained Part has selected usable audio evidence.",
         )
     return tuple(selections)
+
+
+def _validate_resumed_audio_streams(
+    expected: tuple[dict[str, object], ...],
+    selected: tuple[AnalysisAudioStreamSelection, ...],
+) -> None:
+    if expected and tuple(selection.as_json() for selection in selected) != expected:
+        raise AudioAnalysisError(
+            "analysis_audio_stream_selection_changed",
+            "Analysis audio stream evidence changed after the prior report.",
+        )
 
 
 def _parse_audio_stream_requests(values: tuple[str, ...]) -> dict[str, int]:

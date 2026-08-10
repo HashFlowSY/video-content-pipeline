@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase": 5,
   "status": "ticketed_ready",
-  "recorded_at": "2026-08-10T05:23:13Z",
+  "recorded_at": "2026-08-10T19:54:36+0800",
   "project_root": "/Users/shangyang/Desktop/workspace/projects/video-content-pipeline",
   "summary": {
     "offline_engineering_boundary_confirmed": true,
@@ -218,6 +218,36 @@
         "mypy": "passed; no issues in 17 source files",
         "pytest_full": "150 passed",
         "code_review": "fixed VAD resource pause, complete-state reporting, retained-stage resume, audit command fidelity, and stage-record naming"
+      },
+      "resource_bounds": {
+        "memory": "less than 256 MiB",
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    },
+    {
+      "ticket": "08",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest tests/integration/test_phase_5_cli_contract.py -q",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest tests/unit/test_audio_analysis.py -q",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff format --check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m mypy src",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q"
+      ],
+      "results": {
+        "tdd_red": "audio stream selection evidence drift and model-release resume were accepted or blocked before their required CLI transitions existed",
+        "pytest_cli_contract": "8 passed; controlled offline contract covers missing and blocked capabilities, ambiguous stream selection and explicit resume, revalidation drift, calibration, VAD and diarization evidence, resource and release pauses, chained resumes, and partial reports",
+        "pytest_audio_analysis": "6 passed",
+        "ruff_check": "passed",
+        "ruff_format_check": "passed",
+        "mypy": "passed; no issues in 17 source files",
+        "pytest_full": "150 passed",
+        "code_review": "standards and specification reviews found no remaining issue after adding the resumable audio-stream selection contract"
       },
       "resource_bounds": {
         "memory": "less than 256 MiB",

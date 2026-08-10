@@ -33,7 +33,17 @@ from video_content_pipeline.subtitle_pipeline import (
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 
 
-def _confirmed_plan(project_root: Path, audio_coverage: StreamCoverage | None = None) -> RunPlan:
+def _confirmed_plan(
+    project_root: Path,
+    audio_coverage: StreamCoverage | None = None,
+    *,
+    audio_coverages: tuple[tuple[int, StreamCoverage], ...] = (),
+) -> RunPlan:
+    if audio_coverage is not None and audio_coverages:
+        raise ValueError("Specify one audio coverage form.")
+    coverage_by_stream = (
+        audio_coverages if audio_coverages else ((2, audio_coverage),) if audio_coverage else ()
+    )
     media_path = project_root / "input" / "source" / "synthetic-media"
     media_path.parent.mkdir(parents=True)
     media_path.write_bytes(b"phase-5-cli-contract-fixture")
@@ -46,16 +56,15 @@ def _confirmed_plan(project_root: Path, audio_coverage: StreamCoverage | None = 
         structural_document=ProbeDocument(
             json.dumps(
                 {
-                    "streams": (
-                        [{"index": 2, "codec_type": "audio", "time_base": "1/1"}]
-                        if audio_coverage is not None
-                        else []
-                    )
+                    "streams": [
+                        {"index": stream_index, "codec_type": "audio", "time_base": "1/1"}
+                        for stream_index, _coverage in coverage_by_stream
+                    ]
                 }
             )
         ),
         coverage_document=ProbeDocument('{"packets": []}'),
-        coverage_by_stream=((2, audio_coverage),) if audio_coverage is not None else (),
+        coverage_by_stream=coverage_by_stream,
         subtitle_tracks=(),
     )
     plan_report = create_plan_report(
@@ -561,7 +570,7 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
     )
     plan = _confirmed_plan(
         tmp_path,
-        audio_coverage,
+        audio_coverages=((2, audio_coverage), (3, audio_coverage)),
     )
     subtitle_report = _retained_subtitle_report(tmp_path, plan, (interval(0, 1),))
     source_candidate_path = Path(subtitle_report.candidates[0].source_candidate_path or "")
@@ -600,7 +609,8 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
                             json.dumps(
                                 {
                                     "streams": [
-                                        {"index": 2, "codec_type": "audio", "time_base": "1/1"}
+                                        {"index": 2, "codec_type": "audio", "time_base": "1/1"},
+                                        {"index": 3, "codec_type": "audio", "time_base": "1/1"},
                                     ]
                                 }
                             )
@@ -863,6 +873,35 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
         encoding="utf-8",
     )
     _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["analyze-audio", plan.plan_id, subtitle_report.report_id, "--json"]) == 0
+    stream_selection_paused = json.loads(capsys.readouterr().out)["report"]
+
+    assert stream_selection_paused["state"] == "partial"
+    assert stream_selection_paused["partial_analysis"] == {
+        "missing_stage": "vad",
+        "required_decision": {"reason": "audio_stream_selection_required"},
+    }
+    assert stream_selection_paused["analysis_audio_streams"] == []
+
+    assert (
+        cli.main(
+            [
+                "resume-audio-analysis",
+                stream_selection_paused["report_id"],
+                "--audio-stream",
+                f"{plan.source_artifacts[0].source_id}=2",
+                "--diarization-candidate",
+                "controlled-diarization",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    stream_selection_resumed = json.loads(capsys.readouterr().out)["report"]
+
+    assert stream_selection_resumed["state"] == "complete"
+    assert stream_selection_resumed["analysis_audio_streams"][0]["stream_index"] == 2
 
     assert (
         cli.main(
@@ -1164,3 +1203,78 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
         "missing_stage": "forced_alignment",
         "required_decision": {"reason": "model_release_unverified"},
     }
+
+    plan_report_path = tmp_path / "plans" / "reports" / plan.report_id / "plan-report.json"
+    original_plan_report = plan_report_path.read_bytes()
+    drifted_plan_report = json.loads(plan_report_path.read_text(encoding="utf-8"))
+    drifted_plan_report["inspection_evidence"][0]["stream_coverage"][0]["gaps"] = []
+    plan_report_path.write_text(
+        json.dumps(drifted_plan_report, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+
+    assert (
+        cli.main(
+            [
+                "resume-audio-analysis",
+                resource_paused["report_id"],
+                "--decision",
+                "resource_configuration_changed",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    selection_drift = json.loads(capsys.readouterr().out)["report"]
+
+    assert selection_drift["state"] == "blocked"
+    assert selection_drift["formal_evidence"] == []
+    assert selection_drift["diagnostics"] == [
+        {
+            "reason": "analysis_audio_stream_selection_changed",
+            "message": "Analysis audio stream evidence changed after the prior report.",
+        }
+    ]
+
+    plan_report_path.write_bytes(original_plan_report)
+    assert (
+        cli.main(
+            [
+                "resume-audio-analysis",
+                release_paused["report_id"],
+                "--decision",
+                "model_release_verified",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    release_resumed = json.loads(capsys.readouterr().out)["report"]
+
+    assert release_resumed["state"] == "partial"
+    assert [entry["capability"] for entry in release_resumed["formal_evidence"]] == [
+        "vad",
+        "forced_alignment",
+    ]
+    assert release_resumed["stage_execution"][0]["state"] == "release_unverified"
+    assert release_resumed["input_evidence"]["resumption_decision"] == "model_release_verified"
+
+    assert (
+        cli.main(
+            [
+                "resume-audio-analysis",
+                release_resumed["report_id"],
+                "--diarization-candidate",
+                "controlled-diarization",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    completed_after_release = json.loads(capsys.readouterr().out)["report"]
+
+    assert completed_after_release["state"] == "complete"
+    assert [entry["capability"] for entry in completed_after_release["formal_evidence"]] == [
+        "vad",
+        "forced_alignment",
+        "diarization",
+    ]
