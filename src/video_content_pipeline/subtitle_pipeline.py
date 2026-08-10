@@ -619,9 +619,12 @@ def _subtitle_packet_growth_estimate(
     for packet in packets:
         if not isinstance(packet, dict):
             continue
+        raw_stream_index = packet.get("stream_index")
+        if not isinstance(raw_stream_index, int | str) or isinstance(raw_stream_index, bool):
+            continue
         try:
-            stream_index = int(packet.get("stream_index"))
-        except (TypeError, ValueError):
+            stream_index = int(raw_stream_index)
+        except ValueError:
             continue
         if stream_index not in known_indexes:
             continue
