@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -264,3 +265,154 @@ def test_analyze_audio_reports_non_acquiring_registered_capability_states(
         "model_ineligible",
     ]
     assert response["report"]["guarantees"]["model_acquisition"] == "not_attempted"
+
+
+def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    subtitle_report = _retained_subtitle_report(tmp_path, plan)
+    fixture_path = tmp_path / "tests" / "fixtures" / "calibration" / "vad.json"
+    fixture_path.parent.mkdir(parents=True)
+    fixture_path.write_text('{"fixture":"synthetic-vad-v1"}\n', encoding="utf-8")
+    projection = {
+        "schema_version": 1,
+        "capability": "vad",
+        "model_identity": {
+            "asset_sha256": "a" * 64,
+            "backend": "controlled-offline-adapter",
+            "backend_version": "1.0.0",
+            "precision": "fixture",
+            "device_class": "fixture-cpu",
+            "rules_fingerprint": "vad-rules-v1",
+        },
+        "result": {"segments": []},
+    }
+    registry_path = tmp_path / "models" / "registry.json"
+    registry_path.parent.mkdir()
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "candidates": [
+                    {
+                        "candidate_id": "controlled-vad",
+                        "capability": "vad",
+                        "official_source": "https://example.invalid/controlled-vad",
+                        "license_approved": True,
+                        "revision": "fixture-r1",
+                        "asset_sha256": "a" * 64,
+                        "offline_runtime": True,
+                        "credential_required": False,
+                        "telemetry": False,
+                        "dependency_plan": "models/plans/controlled-vad.md",
+                        "resource_estimate": {"high_bytes": 1024},
+                        "controlled_adapter": {
+                            "adapter_version": "fixture-adapter-v1",
+                            "raw_output": {"native_segments": []},
+                            "projection": projection,
+                        },
+                        "calibration_evaluation": {
+                            "schema_version": 1,
+                            "reference_fixture": {
+                                "path": "tests/fixtures/calibration/vad.json",
+                                "sha256": sha256(fixture_path.read_bytes()).hexdigest(),
+                            },
+                            "expected_projection": projection,
+                            "thresholds": {"speech_score": "0.5"},
+                            "false_accepts": 0,
+                            "false_rejects": 0,
+                            "evaluator_version": "fixture-evaluator-v1",
+                        },
+                    },
+                    {
+                        "candidate_id": "credential-alignment",
+                        "capability": "forced_alignment",
+                        "credential_required": True,
+                    },
+                    {
+                        "candidate_id": "incomplete-diarization",
+                        "capability": "diarization",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["analyze-audio", plan.plan_id, subtitle_report.report_id, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+    candidates = {
+        candidate["candidate_id"]: candidate
+        for capability in report["capabilities"]
+        for candidate in capability["candidates"]
+    }
+
+    assert candidates["controlled-vad"]["state"] == "eligible"
+    assert candidates["controlled-vad"]["adapter"]["state"] == "projected"
+    assert candidates["controlled-vad"]["calibration"]["state"] == "qualified"
+    assert report["input_evidence"]["model_registry"]["sha256"] == sha256(
+        registry_path.read_bytes()
+    ).hexdigest()
+    assert Path(candidates["controlled-vad"]["adapter"]["raw_output"]["path"]).exists()
+    assert Path(candidates["controlled-vad"]["adapter"]["projection"]["path"]).exists()
+    assert Path(candidates["controlled-vad"]["calibration"]["record"]["path"]).exists()
+    profile = json.loads(
+        Path(candidates["controlled-vad"]["calibration"]["profile"]["path"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert profile["model_identity"] == projection["model_identity"]
+    assert candidates["credential-alignment"]["state"] == "blocked"
+    assert candidates["incomplete-diarization"]["state"] == "unsupported"
+    assert report["formal_evidence"] == []
+
+
+def test_analyze_audio_rejects_an_incomplete_controlled_adapter_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    subtitle_report = _retained_subtitle_report(tmp_path, plan)
+    registry_path = tmp_path / "models" / "registry.json"
+    registry_path.parent.mkdir()
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "candidates": [
+                    {
+                        "candidate_id": "invalid-vad-output",
+                        "capability": "vad",
+                        "official_source": "https://example.invalid/controlled-vad",
+                        "license_approved": True,
+                        "revision": "fixture-r1",
+                        "asset_sha256": "a" * 64,
+                        "offline_runtime": True,
+                        "credential_required": False,
+                        "telemetry": False,
+                        "dependency_plan": "models/plans/controlled-vad.md",
+                        "resource_estimate": {"high_bytes": 1024},
+                        "controlled_adapter": {
+                            "adapter_version": "fixture-adapter-v1",
+                            "raw_output": {"native_segments": []},
+                            "projection": {"schema_version": 1, "capability": "vad"},
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["analyze-audio", plan.plan_id, subtitle_report.report_id, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+    candidate = report["capabilities"][0]["candidates"][0]
+
+    assert candidate["state"] == "eligible"
+    assert candidate["adapter"]["state"] == "model_output_invalid"
+    assert Path(candidate["adapter"]["raw_output"]["path"]).exists()
+    assert candidate["adapter"]["projection"] is None
+    assert candidate["calibration"]["state"] == "not_evaluated"
+    assert report["formal_evidence"] == []
