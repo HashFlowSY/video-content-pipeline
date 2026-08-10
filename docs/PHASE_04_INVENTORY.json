@@ -100,6 +100,16 @@
       "command": "pytest -q; ruff check src tests; ruff format --check src tests; mypy src",
       "result": "135 passed; all static checks passed after partial-collection code review remediation",
       "mode": "project-local venv after require-project-venv.sh; controlled FFmpeg substitutes and controlled localhost proxy only for existing offline acquisition tests"
+    },
+    {
+      "command": "pytest -q tests/integration/test_phase_4_cli_contract.py -k no_embedded_track_is_usable",
+      "result": "1 passed; direct all-unavailable ASR handoff contract verified",
+      "mode": "project-local venv after require-project-venv.sh; controlled FFmpeg substitute only"
+    },
+    {
+      "command": "pytest -q; ruff check src tests; ruff format --check src tests; mypy src",
+      "result": "136 passed; all static checks passed after offline subtitle CLI contract review remediation",
+      "mode": "project-local venv after require-project-venv.sh; controlled FFmpeg substitutes and controlled localhost proxy only for existing offline acquisition tests"
     }
   ],
   "retention": "All Phase 4 design and implementation records are retained. No source media, model, dependency, cache, or temporary file is deleted by this implementation task. Tests use controlled FFmpeg substitutes only."

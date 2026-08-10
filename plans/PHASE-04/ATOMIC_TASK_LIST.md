@@ -1,13 +1,13 @@
 # Phase 4 Atomic Task List
 
-Status: `implementation_in_progress`; tasks 1 through 3 are complete.
+Status: `implementation_in_progress`; tasks 1 through 6 are complete.
 
 1. [x] Process one verified subtitle track end to end.
 2. [x] Produce common-format readable subtitles.
 3. [x] Resolve ambiguous subtitle-track selection explicitly.
-4. Preserve bounded subtitle-processing failures.
-5. Report partial collections and ASR handoff.
-6. Prove the subtitle CLI contract offline.
+4. [x] Preserve bounded subtitle-processing failures.
+5. [x] Report partial collections and ASR handoff.
+6. [x] Prove the subtitle CLI contract offline.
 
 These tickets are vertical slices, each TDD-first and independently verifiable.
 Ticket 1 is the initial frontier; tickets 2 and 3 depend only on it; ticket 4

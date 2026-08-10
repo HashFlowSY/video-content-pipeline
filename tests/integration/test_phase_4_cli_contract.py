@@ -238,6 +238,40 @@ def test_subtitles_reports_a_partial_collection_and_asr_planning_handoff(
     assert not (tmp_path / "outputs").exists()
 
 
+def test_subtitles_reports_only_an_asr_handoff_when_no_embedded_track_is_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path, subtitle_codecs=("hdmv_pgs_subtitle",))
+    extraction_calls = _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    response = json.loads(capsys.readouterr().out)
+
+    assert response["status"] == "blocked"
+    report = response["report"]
+    assert report["state"] == "blocked"
+    assert extraction_calls == []
+    candidate = report["candidates"][0]
+    assert candidate["state"] == "unavailable"
+    assert candidate["source_id"] == plan.source_artifacts[0].source_id
+    assert candidate["stream_index"] == 1
+    assert candidate["codec"] == "hdmv_pgs_subtitle"
+    assert candidate["diagnostic"]["reason"] == "subtitle_format_unsupported"
+    assert candidate["raw_payload_path"] is None
+    assert candidate["source_candidate_path"] is None
+    part_reports = report["part_reports"]
+    assert len(part_reports) == 1
+    assert part_reports[0]["state"] == "subtitle_unavailable_requires_asr_plan"
+    assert part_reports[0]["asr_planning_handoff"] == {
+        "reason": "subtitle_unavailable_requires_asr_plan",
+        "message": "No valid embedded subtitle track remains for this Part.",
+    }
+    report_path = Path(report["report_path"])
+    assert json.loads(report_path.read_text(encoding="utf-8")) == report
+    assert not (tmp_path / "outputs").exists()
+    assert not (tmp_path / "run-bundles").exists()
+
+
 def test_subtitles_rejects_an_unconfirmed_plan_without_reading_subtitle_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
