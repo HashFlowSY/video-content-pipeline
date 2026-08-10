@@ -612,6 +612,66 @@ def test_subtitles_requires_and_records_an_explicit_decoder_for_ambiguous_bytes(
     assert "café" in Path(resolved["source_vtt_path"]).read_text(encoding="utf-8")
 
 
+def test_subtitles_decodes_an_ambiguous_sibling_then_requires_track_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path, subtitle_codecs=("subrip", "subrip"))
+    _configure_cli(tmp_path, monkeypatch)
+
+    def mixed_extraction(arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        destination = Path(arguments[-1])
+        if arguments[arguments.index("-map") + 1] == "0:2":
+            destination.write_bytes(b"1\n00:00:00,000 --> 00:00:01,000\ncaf\xe9\n")
+        else:
+            destination.write_bytes(b"1\n00:00:00,000 --> 00:00:01,000\nutf8\n")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(subtitle_pipeline, "run_tool", mixed_extraction)
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    initial = json.loads(capsys.readouterr().out)
+    assert initial["status"] == "completed"
+    assert [candidate["state"] for candidate in initial["report"]["candidates"]] == [
+        "valid",
+        "encoding_ambiguous",
+    ]
+
+    source_id = plan.source_artifacts[0].source_id
+    decoder = f"{source_id}=2=cp1252"
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--resume",
+                initial["report"]["report_id"],
+                "--decoder",
+                decoder,
+                "--json",
+            ]
+        )
+        == 0
+    )
+    decoded = json.loads(capsys.readouterr().out)
+    assert decoded["status"] == "awaiting_subtitle_selection"
+    assert decoded["report"]["candidates"][1]["decoder"] == "cp1252"
+
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--resume",
+                decoded["report"]["report_id"],
+                "--select",
+                f"{source_id}=2",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["status"] == "completed"
+
+
 @pytest.mark.parametrize(
     ("failure", "reason"),
     [
@@ -639,7 +699,7 @@ def test_subtitles_retains_bounded_extraction_failures(
             destination.write_bytes(b"partial")
             raise KeyboardInterrupt
         with destination.open("wb") as payload:
-            payload.seek(subtitle_pipeline.SUBTITLE_MAX_PAYLOAD_BYTES + 1)
+            payload.seek(subtitle_pipeline.SUBTITLE_MAX_PAYLOAD_BYTES - 1)
             payload.write(b"x")
         return subprocess.CompletedProcess(arguments, 0, "", "")
 

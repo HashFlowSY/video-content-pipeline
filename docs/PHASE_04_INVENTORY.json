@@ -88,7 +88,7 @@
     },
     {
       "command": "python -m pytest -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
-      "result": "133 passed; all static checks passed for bounded subtitle-processing failures and review remediation",
+      "result": "134 passed; all static checks passed for bounded subtitle-processing failures and review remediation",
       "mode": "project-local venv after require-project-venv.sh; controlled localhost proxy only for existing offline acquisition tests"
     }
   ],

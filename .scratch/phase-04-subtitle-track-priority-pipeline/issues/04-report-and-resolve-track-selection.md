@@ -25,7 +25,9 @@ BOM-marked UTF-8/UTF-16 remain automatic; other encodings require an explicit
 --decoder part-id=stream-index=encoding choice, which can resume a retained
 ambiguous payload without re-extraction. Workspace disk preflight, 256 MiB
 payload limit, 300-second timeout, interruption, unsupported codecs, and
-revalidation drift all produce retained non-selectable diagnostics. Re-running
+revalidation drift all produce retained non-selectable diagnostics. Resume-time
+payload paths are restricted to regular files in the recorded attempt workspace.
+Re-running
 extraction creates a new immutable workspace attempt and leaves incomplete
 payload bytes untouched. Offline verification passed: 131 tests, Ruff,
 formatter check, and strict Mypy. The review follow-up added an FFmpeg

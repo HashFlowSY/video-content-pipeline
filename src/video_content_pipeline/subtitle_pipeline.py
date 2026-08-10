@@ -5,6 +5,7 @@ from __future__ import annotations
 import codecs
 import hashlib
 import json
+import stat
 import subprocess
 import uuid
 from collections.abc import Mapping
@@ -433,6 +434,7 @@ def resume_subtitles(
         if parent_report.state not in {
             CandidateReportState.AWAITING_SUBTITLE_SELECTION,
             CandidateReportState.BLOCKED,
+            CandidateReportState.COMPLETED,
         }:
             raise SubtitleReportError(
                 "subtitle_selection_not_pending",
@@ -446,6 +448,14 @@ def resume_subtitles(
             )
         _ensure_subtitle_headroom(plan, report, project_root)
         decoders = _parse_decoders(requested_decoders)
+        if parent_report.state is CandidateReportState.COMPLETED and not any(
+            candidate.state is CandidateState.ENCODING_AMBIGUOUS
+            for candidate in parent_report.candidates
+        ):
+            raise SubtitleReportError(
+                "subtitle_selection_not_pending",
+                "Only a report with an unresolved subtitle decision can be resumed.",
+            )
         decoder_diagnostics = _validate_decoder_targets(parent_report.candidates, decoders)
         if decoder_diagnostics:
             return _persist_blocked_report(project_root, plan_id, report_id, decoder_diagnostics)
@@ -453,13 +463,14 @@ def resume_subtitles(
             parent_report.candidates,
             decoders,
             report,
+            project_root,
         )
         selections = tuple(_parse_selection(value) for value in requested_selections)
-        diagnostics = _validate_selections(candidates, selections)
+        ambiguous_source_ids = _ambiguous_source_ids(list(candidates))
+        diagnostics = _validate_selections(candidates, selections) if selections else ()
         if diagnostics:
             return _persist_blocked_report(project_root, plan_id, report_id, diagnostics)
-        ambiguous_source_ids = _ambiguous_source_ids(list(candidates))
-        if ambiguous_source_ids and not selections:
+        if ambiguous_source_ids and not selections and not decoders:
             return _persist_blocked_report(
                 project_root,
                 plan_id,
@@ -548,12 +559,10 @@ def _parse_decoders(values: tuple[str, ...]) -> dict[tuple[str, int], str]:
             )
         part_id, separator, stream_text = source_id.rpartition("=")
         if not separator or not part_id or not stream_text:
-            # Also accept the compact part-id=stream-index:encoding spelling.
-            if ":" in decoder_value and separator:
-                stream_text, decoder_value = decoder_value.split(":", 1)
-                part_id = source_id
-            else:
-                part_id, separator, stream_text = source_id.rpartition(":")
+            raise SubtitleReportError(
+                "subtitle_decoder_invalid",
+                "Decoders must use part-id=stream-index=encoding.",
+            )
         try:
             stream_index = int(stream_text)
         except ValueError as error:
@@ -658,7 +667,10 @@ def _validate_decoder_targets(
                     f"Part {source_id} does not have subtitle stream {stream_index}.",
                 )
             )
-        elif candidate.state is not CandidateState.ENCODING_AMBIGUOUS:
+        elif candidate.state is not CandidateState.ENCODING_AMBIGUOUS and (
+            candidate.decoder != decoders[(source_id, stream_index)]
+            or _payload_decodes_automatically(candidate)
+        ):
             diagnostics.append(
                 PlanningDiagnostic(
                     "subtitle_decoder_not_required",
@@ -666,6 +678,16 @@ def _validate_decoder_targets(
                 )
             )
     return tuple(diagnostics)
+
+
+def _payload_decodes_automatically(candidate: SubtitleCandidate) -> bool:
+    if candidate.raw_payload_path is None:
+        return True
+    try:
+        _decode_payload(Path(candidate.raw_payload_path).read_bytes(), None)
+    except (_AmbiguousEncoding, OSError):
+        return False
+    return True
 
 
 def _ambiguous_source_ids(candidates: list[SubtitleCandidate]) -> tuple[str, ...]:
@@ -1026,7 +1048,7 @@ def _extract_candidate(
     payload_bytes = payload_evidence.byte_count
     assert isinstance(payload_hash, str)
     assert isinstance(payload_bytes, int)
-    if payload_bytes > SUBTITLE_MAX_PAYLOAD_BYTES:
+    if payload_bytes >= SUBTITLE_MAX_PAYLOAD_BYTES:
         return SubtitleCandidate(
             artifact.source_id,
             candidate.stream_index,
@@ -1181,6 +1203,7 @@ def _resolve_decoder_candidates(
     candidates: tuple[SubtitleCandidate, ...],
     decoders: dict[tuple[str, int], str],
     report: object,
+    project_root: Path,
 ) -> tuple[SubtitleCandidate, ...]:
     if not decoders:
         return candidates
@@ -1206,7 +1229,7 @@ def _resolve_decoder_candidates(
             )
             continue
         try:
-            payload_path = Path(candidate.raw_payload_path)
+            payload_path = _trusted_payload_path(project_root, candidate)
             payload = payload_path.read_bytes()
             payload_hash, payload_bytes = sha256_file(payload_path)
             if (
@@ -1282,6 +1305,42 @@ def _resolve_decoder_candidates(
                 )
             )
     return tuple(resolved)
+
+
+def _trusted_payload_path(project_root: Path, candidate: SubtitleCandidate) -> Path:
+    if (
+        candidate.raw_payload_path is None
+        or candidate.source_format is None
+        or candidate.attempt_id is None
+    ):
+        raise SubtitleReportError(
+            "subtitle_payload_unavailable", "The ambiguous subtitle payload was not retained."
+        )
+    attempt_id = _validated_report_id(candidate.attempt_id)
+    expected = (
+        project_root
+        / "work"
+        / candidate.source_id
+        / attempt_id
+        / f"stream-{candidate.stream_index}.payload.{candidate.source_format}"
+    )
+    if Path(candidate.raw_payload_path) != expected:
+        raise SubtitleReportError(
+            "subtitle_payload_path_invalid",
+            "The retained subtitle payload is outside its project-owned attempt workspace.",
+        )
+    try:
+        metadata = expected.lstat()
+    except OSError as error:
+        raise SubtitleReportError(
+            "subtitle_payload_unavailable", "The retained subtitle payload cannot be read."
+        ) from error
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise SubtitleReportError(
+            "subtitle_payload_path_invalid",
+            "The retained subtitle payload must be a regular project-owned file.",
+        )
+    return expected
 
 
 def _playback_coverage(
