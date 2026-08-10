@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from video_content_pipeline import __version__
 from video_content_pipeline.acquisition import URLAcquisitionError, acquire_public_source
+from video_content_pipeline.audio_analysis import analyze_audio
 from video_content_pipeline.environment import assert_project_venv, assert_runtime_policy
 from video_content_pipeline.external_tools import PinnedExternalTool, identify_external_tool
 from video_content_pipeline.inspection import (
@@ -82,6 +83,10 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PART_ID=STREAM_INDEX=ENCODING",
     )
     subtitles.add_argument("--json", action="store_true")
+    analyze_audio_command = subcommands.add_parser("analyze-audio")
+    analyze_audio_command.add_argument("plan_id")
+    analyze_audio_command.add_argument("subtitle_report_id")
+    analyze_audio_command.add_argument("--json", action="store_true")
     return parser
 
 
@@ -130,6 +135,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _project_root(),
                 tuple(arguments.decoders),
             )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "analyze-audio":
+        result = analyze_audio(arguments.plan_id, arguments.subtitle_report_id, _project_root())
         print(json.dumps(result, sort_keys=True))
         return 0
     raise AssertionError(f"Unhandled command: {arguments.command}")
