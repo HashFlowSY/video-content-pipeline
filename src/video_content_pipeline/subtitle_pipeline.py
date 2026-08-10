@@ -64,6 +64,17 @@ class CandidateReportState(StrEnum):
     BLOCKED = "blocked"
     COMPLETED = "completed"
     AWAITING_SUBTITLE_SELECTION = "awaiting_subtitle_selection"
+    PARTIAL = "partial"
+    SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN = "subtitle_unavailable_requires_asr_plan"
+
+
+class SubtitlePartState(StrEnum):
+    """The publication eligibility of one Part in a subtitle collection."""
+
+    COMPLETED = "completed"
+    AWAITING_SUBTITLE_SELECTION = "awaiting_subtitle_selection"
+    BLOCKED = "blocked"
+    SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN = "subtitle_unavailable_requires_asr_plan"
 
 
 SUBTITLE_MAX_PAYLOAD_BYTES = 256 * 1024**2
@@ -136,6 +147,62 @@ class CandidateArtifacts:
 
 
 @dataclass(frozen=True)
+class CaptionTimeCoverage:
+    """Exact displayed-caption coverage, never a claim of transcript completeness."""
+
+    covered_duration: ExactTime
+    playback_duration: ExactTime
+
+    def as_json(self) -> dict[str, dict[str, int]]:
+        ratio = self.covered_duration.as_fraction() / self.playback_duration.as_fraction()
+        return {
+            "covered_duration": _time_as_json(self.covered_duration),
+            "playback_duration": _time_as_json(self.playback_duration),
+            "ratio": _time_as_json(ExactTime(ratio.numerator, ratio.denominator)),
+        }
+
+
+@dataclass(frozen=True)
+class SubtitlePartReport:
+    """Retained subtitle outcome, collection span, and ASR handoff for one Part."""
+
+    source_id: str
+    state: SubtitlePartState
+    selected_stream_index: int | None
+    collection_virtual_time: HalfOpenInterval | None
+    caption_time_coverage: CaptionTimeCoverage | None
+    risks: tuple[PlanningDiagnostic, ...]
+    asr_planning_handoff: PlanningDiagnostic | None = None
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "source_id": self.source_id,
+            "state": self.state.value,
+            "selected_stream_index": self.selected_stream_index,
+            "collection_virtual_time": (
+                {
+                    "start": _time_as_json(self.collection_virtual_time.start),
+                    "end": _time_as_json(self.collection_virtual_time.end),
+                }
+                if self.collection_virtual_time is not None
+                else None
+            ),
+            "caption_time_coverage": (
+                self.caption_time_coverage.as_json()
+                if self.caption_time_coverage is not None
+                else None
+            ),
+            "audio_completeness": "not_verified",
+            "risks": [risk.as_json() for risk in self.risks],
+            "asr_planning_handoff": (
+                self.asr_planning_handoff.as_json()
+                if self.asr_planning_handoff is not None
+                else None
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class SubtitleCandidate:
     """One retained extraction and atomic validation outcome."""
 
@@ -159,6 +226,7 @@ class SubtitleCandidate:
     attempt_id: str | None = None
     codec: str | None = None
     decoder: str | None = None
+    raw_pts_cue_intervals: tuple[HalfOpenInterval, ...] = ()
 
     def as_json(self) -> dict[str, object]:
         result: dict[str, object] = {
@@ -181,6 +249,10 @@ class SubtitleCandidate:
             "format_projection_losses": [loss.as_json() for loss in self.format_projection_losses],
             "cue_count": self.cue_count,
             "coverage_start": self.coverage_start,
+            "raw_pts_cue_intervals": [
+                {"start": _time_as_json(interval.start), "end": _time_as_json(interval.end)}
+                for interval in self.raw_pts_cue_intervals
+            ],
         }
         if self.diagnostic is not None:
             result["diagnostic"] = self.diagnostic.as_json()
@@ -217,6 +289,10 @@ class SubtitleCandidate:
                 format_projection_losses=tuple(_projection_loss(loss) for loss in losses),
                 cue_count=_optional_nonnegative_int(value.get("cue_count")),
                 coverage_start=_optional_time(value.get("coverage_start")),
+                raw_pts_cue_intervals=tuple(
+                    _interval_from_json(interval, "Raw PTS cue interval")
+                    for interval in _optional_list(value.get("raw_pts_cue_intervals"))
+                ),
                 diagnostic=_planning_diagnostic(diagnostic) if diagnostic is not None else None,
             )
         except (TypeError, ValueError) as error:
@@ -249,6 +325,9 @@ class SubtitleCandidateReport:
     report_path: Path
     parent_report_id: str | None = None
     selections: tuple[SubtitleTrackSelection, ...] = ()
+    part_reports: tuple[SubtitlePartReport, ...] = ()
+    caption_time_coverage: CaptionTimeCoverage | None = None
+    risks: tuple[PlanningDiagnostic, ...] = ()
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -260,6 +339,14 @@ class SubtitleCandidateReport:
             "candidates": [candidate.as_json() for candidate in self.candidates],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
             "selections": [selection.as_json() for selection in self.selections],
+            "part_reports": [part_report.as_json() for part_report in self.part_reports],
+            "caption_time_coverage": (
+                self.caption_time_coverage.as_json()
+                if self.caption_time_coverage is not None
+                else None
+            ),
+            "audio_completeness": "not_verified",
+            "risks": [risk.as_json() for risk in self.risks],
             "report_path": self.report_path.as_posix(),
         }
 
@@ -275,11 +362,18 @@ class SubtitleCandidateReport:
             candidates = value.get("candidates")
             diagnostics = value.get("diagnostics")
             selections = value.get("selections", [])
-            if not all(isinstance(items, list) for items in (candidates, diagnostics, selections)):
+            part_reports = value.get("part_reports", [])
+            risks = value.get("risks", [])
+            if not all(
+                isinstance(items, list)
+                for items in (candidates, diagnostics, selections, part_reports, risks)
+            ):
                 raise ValueError("Candidate report collections must be lists")
             assert isinstance(candidates, list)
             assert isinstance(diagnostics, list)
             assert isinstance(selections, list)
+            assert isinstance(part_reports, list)
+            assert isinstance(risks, list)
             return cls(
                 report_id=_required_string(value, "report_id"),
                 plan_id=_required_string(value, "plan_id"),
@@ -294,6 +388,13 @@ class SubtitleCandidateReport:
                 report_path=report_path,
                 parent_report_id=_optional_string(value.get("parent_report_id")),
                 selections=tuple(_selection_from_json(selection) for selection in selections),
+                part_reports=tuple(
+                    _part_report_from_json(part_report) for part_report in part_reports
+                ),
+                caption_time_coverage=_caption_time_coverage_from_json(
+                    value.get("caption_time_coverage")
+                ),
+                risks=tuple(_planning_diagnostic(risk) for risk in risks),
             )
         except (TypeError, ValueError) as error:
             raise SubtitleReportError(
@@ -373,7 +474,10 @@ def process_subtitles(
         _write_json_once(report_path, candidate_report.as_json())
         return {"status": "blocked", "report": candidate_report.as_json()}
     ambiguous_source_ids = _ambiguous_source_ids(candidates)
-    state = _initial_report_state(candidates, ambiguous_source_ids)
+    part_reports, caption_time_coverage, risks = _collection_reporting(
+        plan, report, tuple(candidates), ()
+    )
+    state = _report_state(part_reports, ambiguous_source_ids)
     report_diagnostics = tuple(
         PlanningDiagnostic(
             "subtitle_selection_required",
@@ -390,6 +494,9 @@ def process_subtitles(
         tuple(candidates),
         report_diagnostics,
         report_path,
+        part_reports=part_reports,
+        caption_time_coverage=caption_time_coverage,
+        risks=risks,
     )
     _write_json_once(report_path, candidate_report.as_json())
     return {"status": state.value, "report": candidate_report.as_json()}
@@ -490,15 +597,11 @@ def resume_subtitles(
         )
 
     report_path = _report_path(project_root, plan.source_artifacts, report_id)
-    resumed_state = (
-        CandidateReportState.AWAITING_SUBTITLE_SELECTION
-        if _ambiguous_source_ids(list(candidates)) and not selections
-        else (
-            CandidateReportState.COMPLETED
-            if any(candidate.state is CandidateState.VALID for candidate in candidates)
-            else CandidateReportState.BLOCKED
-        )
+    ambiguous_source_ids = _unresolved_ambiguous_source_ids(candidates, selections)
+    part_reports, caption_time_coverage, risks = _collection_reporting(
+        plan, report, candidates, selections
     )
+    resumed_state = _report_state(part_reports, ambiguous_source_ids)
     resumed_report = SubtitleCandidateReport(
         report_id=report_id,
         plan_id=plan.plan_id,
@@ -511,7 +614,7 @@ def resume_subtitles(
                     "subtitle_selection_required",
                     f"Part {source_id} has multiple valid embedded subtitle tracks.",
                 )
-                for source_id in _ambiguous_source_ids(list(candidates))
+                for source_id in ambiguous_source_ids
             )
             if resumed_state is CandidateReportState.AWAITING_SUBTITLE_SELECTION
             else ()
@@ -519,6 +622,9 @@ def resume_subtitles(
         report_path=report_path,
         parent_report_id=parent_report.report_id,
         selections=selections,
+        part_reports=part_reports,
+        caption_time_coverage=caption_time_coverage,
+        risks=risks,
     )
     _write_json_once(report_path, resumed_report.as_json())
     return {"status": resumed_report.state.value, "report": resumed_report.as_json()}
@@ -538,14 +644,206 @@ def subtitle_rules_fingerprint(project_root: Path) -> str:
     return hashlib.sha256(raw_rules).hexdigest()
 
 
-def _initial_report_state(
-    candidates: list[SubtitleCandidate], ambiguous_source_ids: tuple[str, ...]
+def _report_state(
+    part_reports: tuple[SubtitlePartReport, ...], ambiguous_source_ids: tuple[str, ...]
 ) -> CandidateReportState:
     if ambiguous_source_ids:
         return CandidateReportState.AWAITING_SUBTITLE_SELECTION
-    if any(candidate.state is CandidateState.VALID for candidate in candidates):
+    states = {part_report.state for part_report in part_reports}
+    if (
+        SubtitlePartState.COMPLETED in states
+        and SubtitlePartState.SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN in states
+    ):
+        return CandidateReportState.PARTIAL
+    if states == {SubtitlePartState.SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN}:
+        return CandidateReportState.SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN
+    if SubtitlePartState.COMPLETED in states:
         return CandidateReportState.COMPLETED
     return CandidateReportState.BLOCKED
+
+
+def _collection_reporting(
+    plan: RunPlan,
+    report: object,
+    candidates: tuple[SubtitleCandidate, ...],
+    selections: tuple[SubtitleTrackSelection, ...],
+) -> tuple[
+    tuple[SubtitlePartReport, ...], CaptionTimeCoverage | None, tuple[PlanningDiagnostic, ...]
+]:
+    """Derive partial-collection truth from retained Part coverage and candidates."""
+
+    candidates_by_source: dict[str, list[SubtitleCandidate]] = {}
+    for candidate in candidates:
+        candidates_by_source.setdefault(candidate.source_id, []).append(candidate)
+    selections_by_source = {selection.source_id: selection.stream_index for selection in selections}
+    evidence_by_source = {
+        evidence.source_id: evidence for evidence in getattr(report, "inspection_evidence", ())
+    }
+    collection_start = ExactTime(0)
+    collection_cue_intervals: list[HalfOpenInterval] = []
+    playback_duration = ExactTime(0)
+    part_reports: list[SubtitlePartReport] = []
+
+    for artifact in plan.source_artifacts:
+        evidence = evidence_by_source.get(artifact.source_id)
+        coverage = _playback_coverage(evidence.coverage_by_stream) if evidence is not None else None
+        collection_interval: HalfOpenInterval | None = None
+        part_playback_duration: ExactTime | None = None
+        coverage_start: ExactTime | None = None
+        if coverage is not None:
+            coverage_start = coverage[0].start
+            part_duration = coverage[-1].end - coverage_start
+            collection_interval = HalfOpenInterval(
+                collection_start, collection_start + part_duration
+            )
+            collection_start += part_duration
+            part_playback_duration = _interval_duration(coverage)
+            playback_duration += part_playback_duration
+
+        source_candidates = candidates_by_source.get(artifact.source_id, [])
+        selected = _selected_candidate(
+            source_candidates, selections_by_source.get(artifact.source_id)
+        )
+        if selected is not None:
+            cue_intervals = _collection_cue_intervals(
+                selected.raw_pts_cue_intervals, coverage_start, collection_interval
+            )
+            collection_cue_intervals.extend(cue_intervals)
+            caption_coverage = (
+                CaptionTimeCoverage(_interval_duration(cue_intervals), part_playback_duration)
+                if part_playback_duration is not None
+                else None
+            )
+            part_reports.append(
+                SubtitlePartReport(
+                    artifact.source_id,
+                    SubtitlePartState.COMPLETED,
+                    selected.stream_index,
+                    collection_interval,
+                    caption_coverage,
+                    (),
+                )
+            )
+            continue
+
+        candidate_risks = tuple(
+            candidate.diagnostic
+            for candidate in source_candidates
+            if candidate.diagnostic is not None
+        )
+        if _requires_asr_planning(source_candidates):
+            handoff = PlanningDiagnostic(
+                "subtitle_unavailable_requires_asr_plan",
+                "No valid embedded subtitle track remains for this Part.",
+            )
+            state = SubtitlePartState.SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN
+        elif any(candidate.state is CandidateState.VALID for candidate in source_candidates):
+            handoff = None
+            state = SubtitlePartState.AWAITING_SUBTITLE_SELECTION
+        else:
+            handoff = None
+            state = SubtitlePartState.BLOCKED
+        caption_coverage = (
+            CaptionTimeCoverage(ExactTime(0), part_playback_duration)
+            if part_playback_duration is not None
+            else None
+        )
+        part_reports.append(
+            SubtitlePartReport(
+                artifact.source_id,
+                state,
+                None,
+                collection_interval,
+                caption_coverage,
+                candidate_risks,
+                handoff,
+            )
+        )
+
+    collection_caption_coverage = (
+        CaptionTimeCoverage(_interval_duration(collection_cue_intervals), playback_duration)
+        if playback_duration > ExactTime(0)
+        else None
+    )
+    risks = (
+        (
+            PlanningDiagnostic(
+                "partial_subtitle_collection", "One or more Parts require ASR planning."
+            ),
+        )
+        if any(
+            part_report.state is SubtitlePartState.SUBTITLE_UNAVAILABLE_REQUIRES_ASR_PLAN
+            for part_report in part_reports
+        )
+        else ()
+    )
+    return tuple(part_reports), collection_caption_coverage, risks
+
+
+def _selected_candidate(
+    candidates: list[SubtitleCandidate], selected_stream_index: int | None
+) -> SubtitleCandidate | None:
+    valid = [candidate for candidate in candidates if candidate.state is CandidateState.VALID]
+    if len(valid) == 1:
+        return valid[0]
+    if selected_stream_index is None:
+        return None
+    return next(
+        (candidate for candidate in valid if candidate.stream_index == selected_stream_index), None
+    )
+
+
+def _unresolved_ambiguous_source_ids(
+    candidates: tuple[SubtitleCandidate, ...], selections: tuple[SubtitleTrackSelection, ...]
+) -> tuple[str, ...]:
+    selected_source_ids = {selection.source_id for selection in selections}
+    return tuple(
+        source_id
+        for source_id in _ambiguous_source_ids(list(candidates))
+        if source_id not in selected_source_ids
+    )
+
+
+def _requires_asr_planning(candidates: list[SubtitleCandidate]) -> bool:
+    return bool(candidates) and all(
+        candidate.state in {CandidateState.UNAVAILABLE, CandidateState.INVALID}
+        for candidate in candidates
+    )
+
+
+def _collection_cue_intervals(
+    raw_pts_intervals: tuple[HalfOpenInterval, ...],
+    coverage_start: ExactTime | None,
+    collection_interval: HalfOpenInterval | None,
+) -> tuple[HalfOpenInterval, ...]:
+    if coverage_start is None or collection_interval is None:
+        return ()
+    return tuple(
+        HalfOpenInterval(
+            collection_interval.start + (interval.start - coverage_start),
+            collection_interval.start + (interval.end - coverage_start),
+        )
+        for interval in raw_pts_intervals
+    )
+
+
+def _interval_duration(
+    intervals: tuple[HalfOpenInterval, ...] | list[HalfOpenInterval],
+) -> ExactTime:
+    if not intervals:
+        return ExactTime(0)
+    ordered = sorted(intervals, key=lambda interval: (interval.start, interval.end))
+    merged: list[HalfOpenInterval] = [ordered[0]]
+    for interval in ordered[1:]:
+        previous = merged[-1]
+        if interval.start <= previous.end:
+            merged[-1] = HalfOpenInterval(previous.start, max(previous.end, interval.end))
+        else:
+            merged.append(interval)
+    duration = ExactTime(0)
+    for interval in merged:
+        duration += interval.end - interval.start
+    return duration
 
 
 def _parse_decoders(values: tuple[str, ...]) -> dict[tuple[str, int], str]:
@@ -1147,6 +1445,10 @@ def _extract_candidate(
         format_projection_losses=artifacts.projection_losses,
         cue_count=len(track.normalized_cues),
         coverage_start=_time_as_json(coverage_start),
+        raw_pts_cue_intervals=tuple(
+            HalfOpenInterval(cue.interval.start + coverage_start, cue.interval.end + coverage_start)
+            for cue in track.normalized_cues
+        ),
     )
 
 
@@ -1292,6 +1594,12 @@ def _resolve_decoder_candidates(
                     format_projection_losses=artifacts.projection_losses,
                     cue_count=len(track.normalized_cues),
                     coverage_start=_time_as_json(coverage_start),
+                    raw_pts_cue_intervals=tuple(
+                        HalfOpenInterval(
+                            cue.interval.start + coverage_start, cue.interval.end + coverage_start
+                        )
+                        for cue in track.normalized_cues
+                    ),
                     diagnostic=None,
                 )
             )
@@ -1539,6 +1847,76 @@ def _optional_time(value: object) -> dict[str, int] | None:
     ):
         raise ValueError("Coverage start must be an exact time object or null")
     return {"numerator": value["numerator"], "denominator": value["denominator"]}
+
+
+def _optional_list(value: object) -> list[object]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("Optional collection field must be a list or null")
+    return value
+
+
+def _exact_time_from_json(value: object, label: str) -> ExactTime:
+    if (
+        not isinstance(value, Mapping)
+        or not isinstance(value.get("numerator"), int)
+        or not isinstance(value.get("denominator"), int)
+        or isinstance(value.get("numerator"), bool)
+        or isinstance(value.get("denominator"), bool)
+    ):
+        raise ValueError(f"{label} must be an exact time object")
+    return ExactTime(value["numerator"], value["denominator"])
+
+
+def _interval_from_json(value: object, label: str) -> HalfOpenInterval:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an interval object")
+    return HalfOpenInterval(
+        _exact_time_from_json(value.get("start"), f"{label} start"),
+        _exact_time_from_json(value.get("end"), f"{label} end"),
+    )
+
+
+def _caption_time_coverage_from_json(value: object) -> CaptionTimeCoverage | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("Caption-time coverage must be an object or null")
+    covered_duration = _exact_time_from_json(value.get("covered_duration"), "Covered duration")
+    playback_duration = _exact_time_from_json(value.get("playback_duration"), "Playback duration")
+    if covered_duration < ExactTime(0) or playback_duration <= ExactTime(0):
+        raise ValueError("Caption-time coverage durations are invalid")
+    coverage = CaptionTimeCoverage(covered_duration, playback_duration)
+    if value.get("ratio") != coverage.as_json()["ratio"]:
+        raise ValueError("Caption-time coverage ratio is invalid")
+    return coverage
+
+
+def _part_report_from_json(value: object) -> SubtitlePartReport:
+    if not isinstance(value, Mapping):
+        raise ValueError("Part report must be an object")
+    collection_time = value.get("collection_virtual_time")
+    if collection_time is not None:
+        collection_time = _interval_from_json(collection_time, "Collection virtual time")
+    selected_stream_index = value.get("selected_stream_index")
+    if selected_stream_index is not None:
+        selected_stream_index = _required_nonnegative_int(
+            {"selected_stream_index": selected_stream_index}, "selected_stream_index"
+        )
+    risks = value.get("risks")
+    if not isinstance(risks, list) or value.get("audio_completeness") != "not_verified":
+        raise ValueError("Part report risk evidence is invalid")
+    handoff = value.get("asr_planning_handoff")
+    return SubtitlePartReport(
+        _required_string(value, "source_id"),
+        SubtitlePartState(_required_string(value, "state")),
+        selected_stream_index,
+        collection_time,
+        _caption_time_coverage_from_json(value.get("caption_time_coverage")),
+        tuple(_planning_diagnostic(risk) for risk in risks),
+        _planning_diagnostic(handoff) if handoff is not None else None,
+    )
 
 
 def _projection_loss(value: object) -> FormatProjectionLoss:

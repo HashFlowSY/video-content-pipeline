@@ -85,6 +85,72 @@ def _confirmed_plan(
     return plan
 
 
+def _confirmed_collection_plan(project_root: Path) -> RunPlan:
+    coverage_by_part = (
+        HalfOpenInterval(ExactTime(-1), ExactTime(2)),
+        HalfOpenInterval(ExactTime(10), ExactTime(14)),
+    )
+    artifacts: list[SourceArtifact] = []
+    inspection_evidence: list[PlanInspectionEvidence] = []
+    for ordinal, coverage in enumerate(coverage_by_part, start=1):
+        media_path = project_root / "input" / "source" / f"media-{ordinal}"
+        media_path.parent.mkdir(parents=True, exist_ok=True)
+        media_path.write_bytes(f"synthetic-part-{ordinal}".encode("ascii"))
+        digest, byte_count = sha256_file(media_path)
+        artifact = SourceArtifact(digest, digest, byte_count, media_path)
+        codec = "subrip" if ordinal == 1 else "hdmv_pgs_subtitle"
+        artifacts.append(artifact)
+        inspection_evidence.append(
+            PlanInspectionEvidence(
+                source_id=artifact.source_id,
+                structural_document=ProbeDocument(
+                    json.dumps(
+                        {
+                            "streams": [
+                                {
+                                    "index": ordinal,
+                                    "codec_type": "subtitle",
+                                    "codec_name": codec,
+                                }
+                            ]
+                        }
+                    )
+                ),
+                coverage_document=ProbeDocument('{"packets": []}'),
+                coverage_by_stream=(
+                    (0, StreamCoverage(coverage=coverage, gaps=(), diagnostics=())),
+                ),
+                subtitle_tracks=(
+                    SubtitleTrackCandidate(ordinal, "zh", "matroska", "embedded", True),
+                ),
+            )
+        )
+    ffmpeg = PinnedExternalTool("ffmpeg", project_root / "controlled-ffmpeg", "fixture", "f" * 64)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=tuple(artifacts),
+        tools=(ffmpeg,),
+        planned_increment_bytes=0,
+        configuration_fingerprint="phase-03-fixture",
+        inspection_evidence=tuple(inspection_evidence),
+    )
+    persist_plan_report(report, project_root / "plans")
+    plan = RunPlan(
+        plan_id="confirmed-collection-fixture-plan",
+        report_id=report.report_id,
+        source_artifacts=tuple(artifacts),
+        tools=(ffmpeg,),
+        disk_headroom=calculate_disk_headroom(0),
+        configuration_fingerprint=report.configuration_fingerprint,
+    )
+    plan_path = project_root / "plans" / plan.plan_id / "run-plan.json"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(
+        json.dumps(plan.as_json(), sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+    return plan
+
+
 def _configure_cli(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -109,6 +175,67 @@ def _configure_cli(
     monkeypatch.setattr(subtitle_pipeline, "run_tool", controlled_extraction)
     monkeypatch.setattr(subtitle_pipeline, "revalidate_external_tool", lambda _tool: None)
     return extraction_calls
+
+
+def test_subtitles_reports_a_partial_collection_and_asr_planning_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_collection_plan(tmp_path)
+    extraction_calls = _configure_cli(
+        tmp_path,
+        monkeypatch,
+        payload=(
+            b"1\n00:00:00,000 --> 00:00:02,000\nfirst\n\n2\n00:00:01,000 --> 00:00:03,000\nsecond\n"
+        ),
+    )
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    response = json.loads(capsys.readouterr().out)
+
+    assert response["status"] == "partial"
+    report = response["report"]
+    assert report["state"] == "partial"
+    assert report["caption_time_coverage"] == {
+        "covered_duration": {"numerator": 3, "denominator": 1},
+        "playback_duration": {"numerator": 7, "denominator": 1},
+        "ratio": {"numerator": 3, "denominator": 7},
+    }
+    assert report["audio_completeness"] == "not_verified"
+    assert report["risks"] == [
+        {
+            "reason": "partial_subtitle_collection",
+            "message": "One or more Parts require ASR planning.",
+        }
+    ]
+    completed, unavailable = report["part_reports"]
+    assert completed["state"] == "completed"
+    assert completed["selected_stream_index"] == 1
+    assert completed["collection_virtual_time"] == {
+        "start": {"numerator": 0, "denominator": 1},
+        "end": {"numerator": 3, "denominator": 1},
+    }
+    assert completed["caption_time_coverage"]["ratio"] == {"numerator": 1, "denominator": 1}
+    assert unavailable["source_id"] == plan.source_artifacts[1].source_id
+    assert unavailable["state"] == "subtitle_unavailable_requires_asr_plan"
+    assert unavailable["selected_stream_index"] is None
+    assert unavailable["collection_virtual_time"] == {
+        "start": {"numerator": 3, "denominator": 1},
+        "end": {"numerator": 7, "denominator": 1},
+    }
+    assert unavailable["caption_time_coverage"] == {
+        "covered_duration": {"numerator": 0, "denominator": 1},
+        "playback_duration": {"numerator": 4, "denominator": 1},
+        "ratio": {"numerator": 0, "denominator": 1},
+    }
+    assert unavailable["audio_completeness"] == "not_verified"
+    assert unavailable["risks"][0]["reason"] == "subtitle_format_unsupported"
+    assert unavailable["asr_planning_handoff"] == {
+        "reason": "subtitle_unavailable_requires_asr_plan",
+        "message": "No valid embedded subtitle track remains for this Part.",
+    }
+    assert extraction_calls[0][extraction_calls[0].index("-map") + 1] == "0:1"
+    assert len(extraction_calls) == 1
+    assert not (tmp_path / "outputs").exists()
 
 
 def test_subtitles_rejects_an_unconfirmed_plan_without_reading_subtitle_bytes(
