@@ -465,6 +465,64 @@ def load_plan_report(path: Path) -> PlanReport:
         raise PlanningError("plan_report_invalid", "PlanReport has an invalid schema.") from error
 
 
+def load_run_plan(path: Path) -> RunPlan:
+    """Load an immutable confirmed RunPlan without inferring any missing evidence."""
+
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise PlanningError(
+            "run_plan_not_confirmed", f"Cannot read confirmed RunPlan: {path}"
+        ) from error
+    if not isinstance(decoded, dict):
+        raise PlanningError("run_plan_not_confirmed", "RunPlan must be a JSON object.")
+    try:
+        source_values = decoded["source_artifacts"]
+        tool_values = decoded["tools"]
+        disk_value = decoded["disk_headroom"]
+        if not isinstance(source_values, list) or not isinstance(tool_values, list):
+            raise TypeError
+        if not isinstance(disk_value, dict):
+            raise TypeError
+        sources = tuple(
+            SourceArtifact(
+                source_id=_required_string(value, "source_id"),
+                sha256=_required_string(value, "sha256"),
+                byte_count=_required_integer(value, "byte_count"),
+                media_path=Path(_required_string(value, "media_path")),
+                origin_kind=_required_string(value, "origin_kind"),
+            )
+            for value in source_values
+        )
+        tools = tuple(
+            PinnedExternalTool(
+                tool_id=_required_string(value, "tool_id"),
+                path=Path(_required_string(value, "path")),
+                version=_required_string(value, "version"),
+                sha256=_required_string(value, "sha256"),
+            )
+            for value in tool_values
+        )
+        return RunPlan(
+            plan_id=_required_string(decoded, "plan_id"),
+            report_id=_required_string(decoded, "report_id"),
+            source_artifacts=sources,
+            tools=tools,
+            disk_headroom=DiskHeadroom(
+                increment_bytes=_required_integer(disk_value, "increment_bytes"),
+                reserve_bytes=_required_integer(disk_value, "reserve_bytes"),
+                required_bytes=_required_integer(disk_value, "required_bytes"),
+            ),
+            configuration_fingerprint=_required_string(decoded, "configuration_fingerprint"),
+            url_authorizations=tuple(
+                URLAuthorizationEvidence.from_json(value)
+                for value in decoded.get("url_authorizations", [])
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise PlanningError("run_plan_not_confirmed", "RunPlan has an invalid schema.") from error
+
+
 def build_full_decode_command(
     ffmpeg: PinnedExternalTool, artifact: SourceArtifact
 ) -> tuple[str, ...]:

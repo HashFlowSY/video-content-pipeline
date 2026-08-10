@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "phase": 4,
+  "status": "implementation_in_progress",
+  "recorded_at": "2026-08-10",
+  "project_root": "/Users/shangyang/Desktop/workspace/projects/video-content-pipeline",
+  "summary": {
+    "phase_4_implementation_started": true,
+    "user_media_accessed": false,
+    "network_requests": 0,
+    "ffmpeg_executed": false,
+    "models_downloaded": false,
+    "dependencies_downloaded": false,
+    "paid_apis_used": false,
+    "production_validated": false
+  },
+  "created_or_modified": [
+    "CONTEXT.md",
+    "docs/adr/0025-revalidate-before-subtitle-processing.md",
+    "docs/PHASED_EXECUTION_PLAN.md",
+    "project-state.json",
+    "docs/PHASE_04_SPECIFICATION.md",
+    "plans/PHASE-04/ATOMIC_TASK_LIST.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/spec.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/issues/01-establish-phase-4-evidence-and-workspace.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/issues/02-extract-retain-text-subtitle-candidates.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/issues/03-validate-candidate-text-and-time.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/issues/04-report-and-resolve-track-selection.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/issues/05-generate-provenance-bound-subtitle-artifacts.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/issues/06-report-coverage-risks-and-partial-collections.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/issues/07-prove-phase-4-contracts-offline.md",
+    "docs/PHASE_04_INVENTORY.json",
+    "config/subtitle-rules.json",
+    "src/video_content_pipeline/cli.py",
+    "src/video_content_pipeline/planning.py",
+    "src/video_content_pipeline/subtitle_pipeline.py",
+    "tests/integration/test_phase_4_cli_contract.py"
+  ],
+  "external_reads": [
+    "/Users/shangyang/.agents/skills/grill-with-docs/SKILL.md",
+    "/Users/shangyang/.agents/skills/grilling/SKILL.md",
+    "/Users/shangyang/.agents/skills/domain-modeling/SKILL.md",
+    "/Users/shangyang/.agents/skills/domain-modeling/CONTEXT-FORMAT.md",
+    "/Users/shangyang/.agents/skills/domain-modeling/ADR-FORMAT.md",
+    "/Users/shangyang/.agents/skills/to-spec/SKILL.md",
+    "/Users/shangyang/.agents/skills/to-tickets/SKILL.md",
+    "/Users/shangyang/.agents/skills/implement/SKILL.md",
+    "/Users/shangyang/.agents/skills/tdd/SKILL.md",
+    "/Users/shangyang/.agents/skills/code-review/SKILL.md"
+  ],
+  "execution_records": [
+    {
+      "command": "python -m pytest tests/integration/test_phase_4_cli_contract.py -q",
+      "result": "5 passed",
+      "mode": "project-local venv after require-project-venv.sh"
+    },
+    {
+      "command": "python -m pytest -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
+      "result": "116 passed; all static checks passed",
+      "mode": "project-local venv after require-project-venv.sh"
+    }
+  ],
+  "retention": "All Phase 4 design and implementation records are retained. No source media, model, dependency, cache, or temporary file is deleted by this implementation task. Tests use controlled FFmpeg substitutes only."
+}

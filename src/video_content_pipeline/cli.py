@@ -46,6 +46,7 @@ from video_content_pipeline.source import (
     snapshot_local_source,
     validate_local_source_candidate,
 )
+from video_content_pipeline.subtitle_pipeline import process_subtitles
 from video_content_pipeline.url_policy import (
     COLLECTION_CLOSURE_SIGNAL,
     ManualCollectionSession,
@@ -68,6 +69,9 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--url-mode", choices=tuple(mode.value for mode in URLAccessMode))
     plan.add_argument("--allow-insecure-http", action="store_true")
     plan.add_argument("--json", action="store_true")
+    subtitles = subcommands.add_parser("subtitles")
+    subtitles.add_argument("plan_id")
+    subtitles.add_argument("--json", action="store_true")
     return parser
 
 
@@ -101,6 +105,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         ) as error:
             print(json.dumps({"status": "error", "reason": _reason(error), "message": str(error)}))
             return 2
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "subtitles":
+        result = process_subtitles(arguments.plan_id, _project_root())
         print(json.dumps(result, sort_keys=True))
         return 0
     raise AssertionError(f"Unhandled command: {arguments.command}")

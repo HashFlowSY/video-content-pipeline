@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "id": "phase-04-subtitle-rules-v1",
+  "supported_embedded_codecs": ["subrip", "srt"]
+}
