@@ -491,11 +491,25 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
     def interval(start: int, end: int) -> HalfOpenInterval:
         return HalfOpenInterval(ExactTime(start), ExactTime(end))
 
+    audio_coverage = StreamCoverage(
+        coverage=interval(0, 10), gaps=(interval(4, 5),), diagnostics=()
+    )
     plan = _confirmed_plan(
         tmp_path,
-        StreamCoverage(coverage=interval(0, 10), gaps=(interval(4, 5),), diagnostics=()),
+        audio_coverage,
     )
     subtitle_report = _retained_subtitle_report(tmp_path, plan, (interval(0, 1),))
+    derivative_path = tmp_path / "work" / "controlled-vad.derivative"
+    derivative_path.parent.mkdir(parents=True, exist_ok=True)
+    derivative_path.write_bytes(b"controlled-vad-analysis-audio")
+    derivative_evidence = {
+        "path": derivative_path.as_posix(),
+        "sha256": sha256(derivative_path.read_bytes()).hexdigest(),
+        "byte_count": derivative_path.stat().st_size,
+    }
+    coverage_evidence_sha256 = audio_analysis._sha256_json(
+        audio_analysis._stream_coverage_as_json(audio_coverage)
+    )
     projection = {
         "schema_version": 1,
         "capability": "vad",
@@ -512,6 +526,12 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
                 {
                     "source_id": plan.source_artifacts[0].source_id,
                     "stream_index": 2,
+                    "source_time_mapping": {
+                        "schema_version": 1,
+                        "coordinate": "raw_pts_identity",
+                        "coverage_evidence_sha256": coverage_evidence_sha256,
+                        "derivative_evidence": derivative_evidence,
+                    },
                     "segments": [
                         {
                             "start": {"numerator": 0, "denominator": 1},
@@ -535,8 +555,8 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
             {
                 "expected_projection": projection,
                 "thresholds": {
-                    "uncovered_speech_duration": {"numerator": 2, "denominator": 1},
-                    "long_silence_duration": {"numerator": 3, "denominator": 1},
+                    "uncovered_speech_duration": {"numerator": 1, "denominator": 1},
+                    "long_silence_duration": {"numerator": 2, "denominator": 1},
                 },
             }
         ),
@@ -600,9 +620,13 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
     )
     report = json.loads(capsys.readouterr().out)["report"]
 
-    assert report["analysis_audio_streams"] == [
-        {"source_id": plan.source_artifacts[0].source_id, "stream_index": 2}
-    ]
+    assert report["state"] == "partial"
+    assert report["processing_authorization"]["state"] == "approved"
+    assert report["analysis_audio_streams"][0]["source_id"] == plan.source_artifacts[0].source_id
+    assert report["analysis_audio_streams"][0]["stream_index"] == 2
+    assert (
+        report["analysis_audio_streams"][0]["coverage_evidence_sha256"] == coverage_evidence_sha256
+    )
     vad = report["formal_evidence"][0]
     assert vad["capability"] == "vad"
     assert [item["state"] for item in vad["parts"][0]["voice_activity_intervals"]] == [
@@ -618,6 +642,7 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
                 "end": {"numerator": 3, "denominator": 1},
             },
             "elevated": True,
+            "asr_planning_recommendation": "required",
         }
     ]
     assert [item["interval"] for item in vad["parts"][0]["audio_state_indeterminate"]] == [

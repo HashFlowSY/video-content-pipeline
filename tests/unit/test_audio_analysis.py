@@ -32,8 +32,8 @@ def test_vad_part_evidence_partitions_known_audio_and_keeps_caption_risks() -> N
             VoiceActivityCandidateSegment(_interval(5, 8), VoiceActivityState.NON_SPEECH),
         ),
         caption_intervals=(_interval(0, 1),),
-        uncovered_speech_threshold=ExactTime(2),
-        long_silence_threshold=ExactTime(3),
+        uncovered_speech_threshold=ExactTime(1),
+        long_silence_threshold=ExactTime(2),
     )
 
     assert [(item.interval, item.state) for item in evidence.voice_activity_intervals] == [

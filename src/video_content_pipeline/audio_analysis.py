@@ -26,6 +26,7 @@ from video_content_pipeline.subtitle_pipeline import (
     CandidateState,
     SubtitleCandidateReport,
     SubtitleReportError,
+    subtitle_rules_fingerprint,
 )
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 
@@ -34,6 +35,7 @@ class AudioAnalysisReportState(StrEnum):
     """The current minimum Phase 5 report can only be blocked by missing models."""
 
     BLOCKED = "blocked"
+    PARTIAL = "partial"
 
 
 class AudioAnalysisError(ValueError):
@@ -101,9 +103,22 @@ class AnalysisAudioStreamSelection:
 
     source_id: str
     stream_index: int
+    codec: str
+    language: str | None
+    disposition: dict[str, object]
+    structural_evidence_sha256: str
+    coverage_evidence_sha256: str
 
     def as_json(self) -> dict[str, object]:
-        return {"source_id": self.source_id, "stream_index": self.stream_index}
+        return {
+            "source_id": self.source_id,
+            "stream_index": self.stream_index,
+            "codec": self.codec,
+            "language": self.language,
+            "disposition": self.disposition,
+            "structural_evidence_sha256": self.structural_evidence_sha256,
+            "coverage_evidence_sha256": self.coverage_evidence_sha256,
+        }
 
 
 @dataclass(frozen=True)
@@ -159,6 +174,7 @@ class AudioAnalysisReport:
     capabilities: tuple[CapabilityAvailability, ...]
     analysis_audio_streams: tuple[AnalysisAudioStreamSelection, ...]
     formal_evidence: tuple[dict[str, object], ...]
+    processing_authorization: dict[str, object]
     diagnostics: tuple[PlanningDiagnostic, ...]
 
     def as_json(self) -> dict[str, object]:
@@ -190,10 +206,7 @@ class AudioAnalysisReport:
             ],
             "formal_evidence": list(self.formal_evidence),
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
-            "processing_authorization": {
-                "state": "not_started",
-                "reason": "model_availability_only",
-            },
+            "processing_authorization": self.processing_authorization,
             "guarantees": {
                 "asr": "not_attempted",
                 "model_acquisition": "not_attempted",
@@ -233,6 +246,10 @@ def analyze_audio(
     capabilities: tuple[CapabilityAvailability, ...] = ()
     analysis_audio_streams: tuple[AnalysisAudioStreamSelection, ...] = ()
     formal_evidence: tuple[dict[str, object], ...] = ()
+    processing_authorization: dict[str, object] = {
+        "state": "not_started",
+        "reason": "model_availability_only",
+    }
     report_plan_id = plan_id
     report_subtitle_id = subtitle_report_id
 
@@ -271,6 +288,7 @@ def analyze_audio(
         capabilities = _capabilities_from_registry(project_root, workspace_path)
         vad_candidate = _qualified_vad_candidate(capabilities)
         if vad_candidate is not None:
+            _revalidate_vad_inputs(plan, subtitle_report, project_root)
             analysis_audio_streams = _select_audio_streams(
                 confirmed_report.inspection_evidence, requested_audio_streams
             )
@@ -283,6 +301,7 @@ def analyze_audio(
                     project_root,
                 ),
             )
+            processing_authorization = {"state": "approved", "reason": "vad_revalidated"}
         report_plan_id = plan.plan_id
         report_subtitle_id = subtitle_report.report_id
     except (AudioAnalysisError, PlanningError, SubtitleReportError, OSError, ValueError) as error:
@@ -297,7 +316,11 @@ def analyze_audio(
         report_id=report_id,
         plan_id=report_plan_id,
         subtitle_report_id=report_subtitle_id,
-        state=AudioAnalysisReportState.BLOCKED,
+        state=(
+            AudioAnalysisReportState.PARTIAL
+            if formal_evidence and not diagnostics
+            else AudioAnalysisReportState.BLOCKED
+        ),
         workspace_path=workspace_path,
         report_path=report_path,
         run_plan_evidence=run_plan_evidence,
@@ -306,6 +329,7 @@ def analyze_audio(
         capabilities=capabilities,
         analysis_audio_streams=analysis_audio_streams,
         formal_evidence=formal_evidence,
+        processing_authorization=processing_authorization,
         diagnostics=diagnostics,
     )
     _write_json_once(report_path, report.as_json())
@@ -865,7 +889,7 @@ def derive_vad_part_evidence(
     caption_union = _union_intervals(caption_intervals)
 
     uncovered_speech_risks = tuple(
-        VadRiskEvidence(interval, interval.end - interval.start >= uncovered_speech_threshold)
+        VadRiskEvidence(interval, interval.end - interval.start > uncovered_speech_threshold)
         for activity in partition
         if activity.state is VoiceActivityState.SPEECH_LIKELY
         for interval in _subtract_intervals(activity.interval, caption_union)
@@ -889,7 +913,7 @@ def derive_vad_part_evidence(
         LongSilenceEvidence(activity.interval)
         for activity in partition
         if activity.state is VoiceActivityState.NON_SPEECH
-        and activity.interval.end - activity.interval.start >= long_silence_threshold
+        and activity.interval.end - activity.interval.start > long_silence_threshold
     )
     return VadPartEvidence(
         source_id=source_id,
@@ -1077,7 +1101,7 @@ def _select_audio_streams(
                 "audio_stream_selection_invalid",
                 f"Part {evidence.source_id} has no selected usable audio stream.",
             )
-        selections.append(AnalysisAudioStreamSelection(evidence.source_id, requested_stream))
+        selections.append(_audio_stream_selection(evidence, requested_stream))
     if requested_by_source:
         raise AudioAnalysisError(
             "audio_stream_selection_invalid", "Audio stream selection references an unknown Part."
@@ -1146,6 +1170,57 @@ def _available_audio_streams(evidence: PlanInspectionEvidence) -> tuple[int, ...
     return tuple(sorted(available))
 
 
+def _audio_stream_selection(
+    evidence: PlanInspectionEvidence, stream_index: int
+) -> AnalysisAudioStreamSelection:
+    document = evidence.structural_document
+    if document is None:
+        raise AudioAnalysisError(
+            "audio_stream_selection_invalid", "Structural evidence is missing."
+        )
+    try:
+        decoded = json.loads(document.raw_json)
+    except json.JSONDecodeError as error:
+        raise AudioAnalysisError(
+            "audio_stream_selection_invalid", "Structural evidence is invalid."
+        ) from error
+    streams = decoded.get("streams") if isinstance(decoded, Mapping) else None
+    if not isinstance(streams, list):
+        raise AudioAnalysisError(
+            "audio_stream_selection_invalid", "Structural stream evidence is missing."
+        )
+    stream = next(
+        (
+            item
+            for item in streams
+            if isinstance(item, Mapping)
+            and item.get("index") == stream_index
+            and item.get("codec_type") == "audio"
+        ),
+        None,
+    )
+    coverage = dict(evidence.coverage_by_stream).get(stream_index)
+    if not isinstance(stream, Mapping) or coverage is None:
+        raise AudioAnalysisError(
+            "audio_stream_selection_invalid", "Audio stream evidence is missing."
+        )
+    tags = stream.get("tags")
+    disposition = stream.get("disposition")
+    return AnalysisAudioStreamSelection(
+        source_id=evidence.source_id,
+        stream_index=stream_index,
+        codec=str(stream.get("codec_name", stream.get("codec_type"))),
+        language=(
+            tags.get("language")
+            if isinstance(tags, Mapping) and isinstance(tags.get("language"), str)
+            else None
+        ),
+        disposition=dict(disposition) if isinstance(disposition, Mapping) else {},
+        structural_evidence_sha256=_sha256_json(document.raw_json),
+        coverage_evidence_sha256=_sha256_json(_stream_coverage_as_json(coverage)),
+    )
+
+
 def _derive_vad_evidence(
     candidate: Mapping[str, object],
     selections: tuple[AnalysisAudioStreamSelection, ...],
@@ -1187,6 +1262,21 @@ def _derive_vad_evidence(
         "calibration_profile": calibration.get("profile"),
         "parts": parts,
     }
+
+
+def _revalidate_vad_inputs(
+    plan: RunPlan, subtitle_report: SubtitleCandidateReport, project_root: Path
+) -> None:
+    for artifact in plan.source_artifacts:
+        digest, byte_count = sha256_file(artifact.media_path)
+        if digest != artifact.sha256 or byte_count != artifact.byte_count:
+            raise AudioAnalysisError(
+                "source_artifact_changed", "A source artifact changed after RunPlan confirmation."
+            )
+    if subtitle_report.subtitle_rules_fingerprint != subtitle_rules_fingerprint(project_root):
+        raise AudioAnalysisError(
+            "subtitle_rules_changed", "Subtitle rules changed after subtitle processing."
+        )
 
 
 def _vad_thresholds(candidate: Mapping[str, object], project_root: Path) -> dict[str, ExactTime]:
@@ -1243,7 +1333,10 @@ def _projected_vad_segments(
         raise AudioAnalysisError(
             "model_output_invalid", "VAD projection must provide every selected Part."
         )
-    expected = {(selection.source_id, selection.stream_index) for selection in selections}
+    selections_by_key = {
+        (selection.source_id, selection.stream_index): selection for selection in selections
+    }
+    expected = set(selections_by_key)
     projected: dict[tuple[str, int], tuple[VoiceActivityCandidateSegment, ...]] = {}
     for part in parts:
         if not isinstance(part, Mapping):
@@ -1267,10 +1360,29 @@ def _projected_vad_segments(
             raise AudioAnalysisError(
                 "model_output_invalid", "VAD projection Part identity is invalid."
             )
+        _validate_vad_time_mapping(
+            part.get("source_time_mapping"), selections_by_key[key], project_root
+        )
         projected[key] = tuple(_vad_candidate_segment(segment) for segment in segments)
     if set(projected) != expected:
         raise AudioAnalysisError("model_output_invalid", "VAD projection omitted a selected Part.")
     return projected
+
+
+def _validate_vad_time_mapping(
+    value: object, selection: AnalysisAudioStreamSelection, project_root: Path
+) -> None:
+    if not isinstance(value, Mapping):
+        raise AudioAnalysisError("model_output_invalid", "VAD source-time mapping is missing.")
+    derivative = value.get("derivative_evidence")
+    if (
+        value.get("schema_version") != 1
+        or value.get("coordinate") != "raw_pts_identity"
+        or value.get("coverage_evidence_sha256") != selection.coverage_evidence_sha256
+        or not isinstance(derivative, Mapping)
+    ):
+        raise AudioAnalysisError("model_output_invalid", "VAD source-time mapping is invalid.")
+    _retained_evidence_path(derivative, project_root)
 
 
 def _vad_candidate_segment(value: object) -> VoiceActivityCandidateSegment:
@@ -1319,6 +1431,11 @@ def _retained_evidence_path(evidence: Mapping[str, object], project_root: Path) 
     path = Path(value).resolve()
     if not path.is_relative_to(project_root.resolve()) or not path.is_file():
         raise AudioAnalysisError("model_output_invalid", "Retained evidence is unavailable.")
+    expected_sha256 = evidence.get("sha256")
+    expected_bytes = evidence.get("byte_count")
+    actual_sha256, actual_bytes = sha256_file(path)
+    if actual_sha256 != expected_sha256 or actual_bytes != expected_bytes:
+        raise AudioAnalysisError("model_output_invalid", "Retained evidence changed.")
     return path
 
 
@@ -1346,7 +1463,11 @@ def _vad_part_evidence_as_json(evidence: VadPartEvidence) -> dict[str, object]:
             for item in evidence.voice_activity_intervals
         ],
         "uncovered_speech_risks": [
-            {"interval": _interval_as_json(item.interval), "elevated": item.elevated}
+            {
+                "interval": _interval_as_json(item.interval),
+                "elevated": item.elevated,
+                "asr_planning_recommendation": "required" if item.elevated else "not_required",
+            }
             for item in evidence.uncovered_speech_risks
         ],
         "audio_state_indeterminate": [
@@ -1363,4 +1484,15 @@ def _interval_as_json(interval: HalfOpenInterval) -> dict[str, object]:
     return {
         "start": {"numerator": interval.start.numerator, "denominator": interval.start.denominator},
         "end": {"numerator": interval.end.numerator, "denominator": interval.end.denominator},
+    }
+
+
+def _stream_coverage_as_json(coverage: StreamCoverage) -> dict[str, object]:
+    return {
+        "coverage": _interval_as_json(coverage.coverage) if coverage.coverage is not None else None,
+        "gaps": [_interval_as_json(gap) for gap in coverage.gaps],
+        "diagnostics": [
+            {"reason": item.reason, "path": item.path, "message": item.message}
+            for item in coverage.diagnostics
+        ],
     }
