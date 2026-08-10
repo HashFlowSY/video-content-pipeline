@@ -10,7 +10,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from video_content_pipeline.audio_derivation import (
+    AnalysisAudioDerivationError,
+    AnalysisAudioDerivative,
+    PreprocessingProfile,
+    prepare_analysis_audio,
+)
 from video_content_pipeline.coverage import StreamCoverage
+from video_content_pipeline.external_tools import revalidate_external_tool
 from video_content_pipeline.inspection import PlanInspectionEvidence
 from video_content_pipeline.planning import (
     PlanningDiagnostic,
@@ -267,6 +274,7 @@ class AudioAnalysisReport:
     resumption_decision: str | None
     capabilities: tuple[CapabilityAvailability, ...]
     analysis_audio_streams: tuple[AnalysisAudioStreamSelection, ...]
+    analysis_audio_derivatives: tuple[dict[str, object], ...]
     formal_evidence: tuple[dict[str, object], ...]
     stage_execution: tuple[dict[str, object], ...]
     partial_analysis: dict[str, object] | None
@@ -306,6 +314,7 @@ class AudioAnalysisReport:
             "analysis_audio_streams": [
                 selection.as_json() for selection in self.analysis_audio_streams
             ],
+            "analysis_audio_derivatives": list(self.analysis_audio_derivatives),
             "formal_evidence": list(self.formal_evidence),
             "stage_execution": list(self.stage_execution),
             "partial_analysis": self.partial_analysis,
@@ -345,6 +354,8 @@ def analyze_audio(
     resumed_stage_execution: tuple[dict[str, object], ...] = (),
     expected_analysis_audio_streams: tuple[dict[str, object], ...] = (),
     resumed_release_verified: bool = False,
+    expected_analysis_audio_derivatives: tuple[dict[str, object], ...] = (),
+    analysis_audio_profile: PreprocessingProfile | None = None,
 ) -> dict[str, object]:
     """Run the controlled Phase 5 sequence without real model or media access."""
 
@@ -357,6 +368,7 @@ def analyze_audio(
     diagnostics: tuple[PlanningDiagnostic, ...] = ()
     capabilities: tuple[CapabilityAvailability, ...] = ()
     analysis_audio_streams: tuple[AnalysisAudioStreamSelection, ...] = ()
+    analysis_audio_derivatives: tuple[dict[str, object], ...] = ()
     formal_evidence: tuple[dict[str, object], ...] = ()
     stage_execution: list[dict[str, object]] = list(resumed_stage_execution)
     partial_analysis: dict[str, object] | None = None
@@ -405,6 +417,21 @@ def analyze_audio(
             resumed_stage_execution,
             allow_release_unverified=resumed_release_verified,
         )
+        # Stream preparation is part of input selection and must be visible even
+        # when no model candidate is available yet.
+        analysis_audio_streams = _select_audio_streams(
+            confirmed_report.inspection_evidence, requested_audio_streams
+        )
+        _validate_resumed_audio_streams(expected_analysis_audio_streams, analysis_audio_streams)
+        analysis_audio_derivatives = _prepare_analysis_audio_derivatives(
+            plan,
+            confirmed_report.inspection_evidence,
+            analysis_audio_streams,
+            project_root,
+            workspace_path,
+            expected_analysis_audio_derivatives,
+            analysis_audio_profile,
+        )
         resumed_by_capability = {
             evidence["capability"]: evidence for evidence in resumed_formal_evidence
         }
@@ -420,10 +447,6 @@ def analyze_audio(
                 )
         if vad_candidate is not None:
             _revalidate_analysis_inputs(plan, subtitle_report, project_root)
-            analysis_audio_streams = _select_audio_streams(
-                confirmed_report.inspection_evidence, requested_audio_streams
-            )
-            _validate_resumed_audio_streams(expected_analysis_audio_streams, analysis_audio_streams)
             resumed_vad = resumed_by_capability.get("vad")
             if resumed_vad is not None:
                 _validate_resumed_candidate(resumed_vad, vad_candidate)
@@ -552,8 +575,8 @@ def analyze_audio(
                 _next_missing_stage(formal_evidence),
                 getattr(error, "reason", "audio_analysis_paused"),
             )
-        elif getattr(error, "reason", None) == "audio_stream_selection_required":
-            partial_analysis = _partial_analysis("vad", "audio_stream_selection_required")
+        elif getattr(error, "reason", None) == "awaiting_audio_stream_selection":
+            partial_analysis = _partial_analysis("vad", "awaiting_audio_stream_selection")
         diagnostics = (
             PlanningDiagnostic(
                 getattr(error, "reason", "audio_analysis_input_invalid"),
@@ -570,7 +593,7 @@ def analyze_audio(
                 AudioAnalysisReportState.PARTIAL
                 if partial_analysis is not None
                 and partial_analysis.get("required_decision")
-                == {"reason": "audio_stream_selection_required"}
+                == {"reason": "awaiting_audio_stream_selection"}
                 else AudioAnalysisReportState.BLOCKED
             )
             if not formal_evidence
@@ -589,6 +612,7 @@ def analyze_audio(
         resumption_decision=resumption_decision,
         capabilities=capabilities,
         analysis_audio_streams=analysis_audio_streams,
+        analysis_audio_derivatives=analysis_audio_derivatives,
         formal_evidence=formal_evidence,
         stage_execution=tuple(stage_execution),
         partial_analysis=partial_analysis,
@@ -628,7 +652,7 @@ def resume_audio_analysis(
             "Only a retained Phase 5 pause can be resumed.",
         )
     pause_reason = _pause_reason(prior_document)
-    if pause_reason == "audio_stream_selection_required":
+    if pause_reason in {"awaiting_audio_stream_selection", "audio_stream_selection_required"}:
         if not requested_audio_streams:
             raise AudioAnalysisError(
                 "analysis_resume_invalid", "Audio stream selection resume requires --audio-stream."
@@ -694,7 +718,14 @@ def resume_audio_analysis(
             )
         resumed_audio_streams.append(f"{source_id}={stream_index}")
         expected_analysis_audio_streams.append(dict(stream))
-    if pause_reason == "audio_stream_selection_required":
+    derivative_values = prior_document.get("analysis_audio_derivatives", [])
+    if not isinstance(derivative_values, list) or any(
+        not isinstance(value, Mapping) for value in derivative_values
+    ):
+        raise AudioAnalysisError(
+            "analysis_report_invalid", "Audio analysis derivative evidence is invalid."
+        )
+    if pause_reason in {"awaiting_audio_stream_selection", "audio_stream_selection_required"}:
         if streams:
             raise AudioAnalysisError(
                 "analysis_report_invalid",
@@ -729,6 +760,7 @@ def resume_audio_analysis(
         resumed_stage_execution,
         tuple(expected_analysis_audio_streams),
         release_verified,
+        tuple(dict(value) for value in derivative_values),
     )
 
 
@@ -754,6 +786,7 @@ def _pause_reason(report: Mapping[str, object]) -> str | None:
         return None
     for diagnostic in diagnostics:
         if isinstance(diagnostic, Mapping) and diagnostic.get("reason") in {
+            "awaiting_audio_stream_selection",
             "audio_stream_selection_required",
             "diarization_model_selection_required",
             "model_release_unverified",
@@ -1930,9 +1963,14 @@ def _select_audio_streams(
         available = _available_audio_streams(evidence)
         requested_stream = requested_by_source.pop(evidence.source_id, None)
         if requested_stream is None:
+            if not available:
+                raise AudioAnalysisError(
+                    "audio_stream_unavailable",
+                    f"Part {evidence.source_id} has no usable retained audio stream.",
+                )
             if len(available) != 1:
                 raise AudioAnalysisError(
-                    "audio_stream_selection_required",
+                    "awaiting_audio_stream_selection",
                     f"Part {evidence.source_id} needs one explicit audio stream selection.",
                 )
             requested_stream = available[0]
@@ -1948,10 +1986,149 @@ def _select_audio_streams(
         )
     if not selections:
         raise AudioAnalysisError(
-            "audio_stream_selection_required",
+            "awaiting_audio_stream_selection",
             "No retained Part has selected usable audio evidence.",
         )
     return tuple(selections)
+
+
+def _prepare_analysis_audio_derivatives(
+    plan: RunPlan,
+    inspection_evidence: tuple[PlanInspectionEvidence, ...],
+    selections: tuple[AnalysisAudioStreamSelection, ...],
+    project_root: Path,
+    workspace_path: Path,
+    retained_derivatives: tuple[dict[str, object], ...],
+    profile: PreprocessingProfile | None,
+) -> tuple[dict[str, object], ...]:
+    """Create or revalidate one derivative for every selected Part when authorized."""
+
+    if retained_derivatives:
+        ffmpeg = next((tool for tool in plan.tools if tool.tool_id == "ffmpeg"), None)
+        if ffmpeg is None:
+            raise AudioAnalysisError(
+                "ffmpeg_identity_invalid", "Retained derivatives require pinned FFmpeg evidence."
+            )
+        try:
+            revalidate_external_tool(ffmpeg)
+        except (OSError, ValueError) as error:
+            raise AudioAnalysisError("tool_identity_changed", str(error)) from error
+        if profile is None:
+            profile = _load_analysis_audio_profile(project_root)
+        if profile is None:
+            raise AudioAnalysisError(
+                "preprocessing_profile_missing",
+                "Retained derivatives require a versioned preprocessing profile.",
+            )
+        selections_by_key = {(item.source_id, item.stream_index): item for item in selections}
+        for retained in retained_derivatives:
+            if not isinstance(retained, Mapping):
+                raise AudioAnalysisError(
+                    "analysis_audio_derivative_invalid",
+                    "Retained Analysis audio evidence is invalid.",
+                )
+            evidence = _retained_evidence_path(retained, project_root)
+            source_id = retained.get("source_id")
+            stream_index = retained.get("stream_index")
+            selection = (
+                selections_by_key.get((source_id, stream_index))
+                if isinstance(source_id, str)
+                and isinstance(stream_index, int)
+                and not isinstance(stream_index, bool)
+                else None
+            )
+            if selection is None or (
+                retained.get("structural_evidence_sha256") != selection.structural_evidence_sha256
+                or retained.get("coverage_evidence_sha256") != selection.coverage_evidence_sha256
+            ):
+                raise AudioAnalysisError(
+                    "analysis_audio_selection_changed",
+                    "Retained derivative selection evidence changed after the prior report.",
+                )
+            retained_profile = retained.get("preprocessing_profile")
+            if (
+                not isinstance(retained_profile, Mapping)
+                or retained_profile.get("sha256") != profile.sha256
+            ):
+                raise AudioAnalysisError(
+                    "preprocessing_profile_changed",
+                    "Analysis audio preprocessing profile changed after the prior report.",
+                )
+            try:
+                actual_hash, actual_size = sha256_file(evidence)
+            except OSError as error:
+                raise AudioAnalysisError(
+                    "analysis_audio_derivative_changed",
+                    "A retained Analysis audio derivative is unavailable.",
+                ) from error
+            if actual_hash != retained.get("sha256") or actual_size != retained.get("byte_count"):
+                raise AudioAnalysisError(
+                    "analysis_audio_derivative_changed",
+                    "A retained Analysis audio derivative changed after the prior report.",
+                )
+        return tuple(dict(item) for item in retained_derivatives)
+
+    ffmpeg = next((tool for tool in plan.tools if tool.tool_id == "ffmpeg"), None)
+    if ffmpeg is None:
+        if (
+            profile is not None
+            or (project_root / "config" / "audio-analysis-preprocessing.json").exists()
+        ):
+            raise AudioAnalysisError(
+                "ffmpeg_identity_missing",
+                "Analysis audio preparation requires a pinned FFmpeg identity.",
+            )
+        return ()
+    if profile is None:
+        profile = _load_analysis_audio_profile(project_root)
+    if profile is None:
+        raise AudioAnalysisError(
+            "preprocessing_profile_missing",
+            "Pinned FFmpeg requires a versioned Analysis audio preprocessing profile.",
+        )
+    coverage_by_source = {
+        evidence.source_id: dict(evidence.coverage_by_stream) for evidence in inspection_evidence
+    }
+    artifact_by_source = {artifact.source_id: artifact for artifact in plan.source_artifacts}
+    derivatives: list[AnalysisAudioDerivative] = []
+    for selection in selections:
+        artifact = artifact_by_source.get(selection.source_id)
+        coverage = coverage_by_source.get(selection.source_id, {}).get(selection.stream_index)
+        if artifact is None or coverage is None:
+            raise AudioAnalysisError(
+                "audio_coverage_indeterminate",
+                "Selected audio stream lacks retained SourceArtifact coverage evidence.",
+            )
+        destination = (
+            workspace_path
+            / "analysis-audio"
+            / selection.source_id
+            / f"stream-{selection.stream_index}.wav"
+        )
+        try:
+            created = prepare_analysis_audio(
+                artifact, selection, coverage, ffmpeg, profile, destination
+            )
+        except AnalysisAudioDerivationError as error:
+            raise AudioAnalysisError(error.reason, str(error)) from error
+        derivatives.append(created)
+    return tuple(derivative.as_json() for derivative in derivatives)
+
+
+def _load_analysis_audio_profile(project_root: Path) -> PreprocessingProfile | None:
+    path = project_root / "config" / "audio-analysis-preprocessing.json"
+    if not path.exists():
+        return None
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        value = document.get("profile") if isinstance(document, Mapping) else document
+        return PreprocessingProfile.from_json(value)
+    except (OSError, json.JSONDecodeError, AnalysisAudioDerivationError) as error:
+        if isinstance(error, AnalysisAudioDerivationError):
+            raise AudioAnalysisError(error.reason, str(error)) from error
+        raise AudioAnalysisError(
+            "preprocessing_profile_invalid", "Analysis audio preprocessing profile cannot be read."
+        ) from error
 
 
 def _validate_resumed_audio_streams(
@@ -2018,18 +2195,18 @@ def _available_audio_streams(evidence: PlanInspectionEvidence) -> tuple[int, ...
     document = evidence.structural_document
     if document is None:
         raise AudioAnalysisError(
-            "audio_stream_selection_required", "Part lacks retained structural audio evidence."
+            "awaiting_audio_stream_selection", "Part lacks retained structural audio evidence."
         )
     try:
         raw_document = json.loads(document.raw_json)
     except json.JSONDecodeError as error:
         raise AudioAnalysisError(
-            "audio_stream_selection_required", "Part structural evidence is not valid JSON."
+            "awaiting_audio_stream_selection", "Part structural evidence is not valid JSON."
         ) from error
     streams = raw_document.get("streams") if isinstance(raw_document, Mapping) else None
     if not isinstance(streams, list):
         raise AudioAnalysisError(
-            "audio_stream_selection_required", "Part structural evidence has no stream list."
+            "awaiting_audio_stream_selection", "Part structural evidence has no stream list."
         )
     coverage_by_stream = dict(evidence.coverage_by_stream)
     available: list[int] = []

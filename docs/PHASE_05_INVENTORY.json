@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "phase": 5,
-  "status": "ticketed_ready",
-  "recorded_at": "2026-08-10T19:54:36+0800",
+  "status": "implementation_incomplete",
+  "recorded_at": "2026-08-11T06:18:54+0800",
   "project_root": "/Users/shangyang/Desktop/workspace/projects/video-content-pipeline",
   "summary": {
     "offline_engineering_boundary_confirmed": true,
@@ -68,8 +68,37 @@
     "network_requests": 0,
     "production_validated": false
   },
+  "implementation_audit": {
+    "head": "d29e81d",
+    "ticket_status": {
+      "01": "resolved",
+      "02": "resolved",
+      "03": "implemented_pending_ticket_02",
+      "04": "implemented_pending_ticket_02_and_inspection_binding",
+      "05": "implemented_pending_ticket_04",
+      "06": "implemented_pending_ticket_04",
+      "07": "implemented_pending_tickets_05_and_06",
+      "08": "verification_passed_pending_phase_completion"
+    },
+    "completed_work": [
+      "Minimum analyze-audio CLI contract, immutable report workspaces, and non-acquiring availability reports.",
+      "Stream selection pause/resume and hash-bound selection evidence.",
+      "Controlled candidate eligibility, raw/projection retention, calibration, VAD, alignment, diarization, serial pause, and resume contracts."
+    ],
+    "open_requirements": [
+      "Ticket 04 must bind immutable PlanReport inspection evidence to the confirmed RunPlan and independently revalidate that evidence before formal VAD publication."
+    ],
+    "current_head_verification": {
+      "pytest": "155 passed in 0.93s",
+      "ruff_check": "passed",
+      "ruff_format_check": "39 files already formatted",
+      "mypy": "Success: no issues found in 18 source files",
+      "production_validated": false
+    }
+  },
   "created_or_modified": [
     "CONTEXT.md",
+    "config/audio-analysis-preprocessing.json",
     "docs/adr/0026-keep-adopted-alignment-timing-derived.md",
     "docs/adr/0027-require-model-specific-alignment-calibration.md",
     "docs/adr/0028-separate-voice-activity-from-subtitle-coverage.md",
@@ -95,8 +124,10 @@
     ".scratch/phase-05-auditable-audio-analysis-prototype/issues/07-deliver-serial-pauses-and-partial-analysis-reports.md",
     ".scratch/phase-05-auditable-audio-analysis-prototype/issues/08-prove-offline-audio-analysis-cli-contract.md",
     "src/video_content_pipeline/audio_analysis.py",
+    "src/video_content_pipeline/audio_derivation.py",
     "src/video_content_pipeline/cli.py",
     "tests/unit/test_audio_analysis.py",
+    "tests/unit/test_audio_derivation.py",
     "tests/integration/test_phase_5_cli_contract.py"
   ],
   "external_reads": [
@@ -251,6 +282,59 @@
       },
       "resource_bounds": {
         "memory": "less than 256 MiB",
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    },
+    {
+      "ticket": "status-audit",
+      "status": "passed_with_open_requirements",
+      "commands": [
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff format --check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m mypy src"
+      ],
+      "results": {
+        "pytest_full": "150 passed in 0.97s",
+        "ruff_check": "passed",
+        "ruff_format_check": "37 files already formatted",
+        "mypy": "Success: no issues found in 17 source files",
+        "audit": "Ticket 02 lacks FFmpeg derivative creation and Ticket 04 lacks immutable PlanReport inspection-evidence binding."
+      },
+      "resource_bounds": {
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    },
+    {
+      "ticket": "02",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate && scripts/require-project-venv.sh && pytest tests/unit/test_audio_derivation.py tests/unit/test_audio_analysis.py tests/integration/test_phase_5_cli_contract.py",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && pytest",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && ruff check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && ruff format --check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && mypy src"
+      ],
+      "results": {
+        "pytest_focused": "18 passed",
+        "pytest_full": "155 passed",
+        "ruff_check": "passed",
+        "ruff_format_check": "39 files already formatted",
+        "mypy": "Success: no issues found in 18 source files",
+        "network_or_downloads": false,
+        "ffmpeg_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false
+      },
+      "resource_bounds": {
         "network_or_downloads": false,
         "ffmpeg_or_ffprobe_executed": false,
         "model_execution": false,

@@ -227,6 +227,31 @@ def test_analyze_audio_retains_a_model_acquisition_required_report_without_side_
     assert not (tmp_path / "outputs").exists()
 
 
+def test_analyze_audio_auto_selects_a_unique_usable_audio_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(
+        tmp_path,
+        audio_coverage=StreamCoverage(
+            coverage=HalfOpenInterval(ExactTime(0), ExactTime(1)), gaps=(), diagnostics=()
+        ),
+    )
+    subtitle_report = _retained_subtitle_report(tmp_path, plan)
+    _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["analyze-audio", plan.plan_id, subtitle_report.report_id, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+
+    assert report["state"] == "blocked"
+    assert report["analysis_audio_streams"][0]["stream_index"] == 2
+    assert report["diagnostics"] == []
+    assert [item["state"] for item in report["capabilities"]] == [
+        "model_acquisition_required",
+        "model_acquisition_required",
+        "model_acquisition_required",
+    ]
+
+
 def test_analyze_audio_rejects_a_retained_subtitle_report_for_another_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -328,7 +353,12 @@ def test_analyze_audio_reports_non_acquiring_registered_capability_states(
 def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    plan = _confirmed_plan(tmp_path)
+    plan = _confirmed_plan(
+        tmp_path,
+        audio_coverage=StreamCoverage(
+            coverage=HalfOpenInterval(ExactTime(0), ExactTime(1)), gaps=(), diagnostics=()
+        ),
+    )
     subtitle_report = _retained_subtitle_report(tmp_path, plan)
     fixture_path = tmp_path / "tests" / "fixtures" / "calibration" / "vad.json"
     fixture_path.parent.mkdir(parents=True)
@@ -880,7 +910,7 @@ def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evide
     assert stream_selection_paused["state"] == "partial"
     assert stream_selection_paused["partial_analysis"] == {
         "missing_stage": "vad",
-        "required_decision": {"reason": "audio_stream_selection_required"},
+        "required_decision": {"reason": "awaiting_audio_stream_selection"},
     }
     assert stream_selection_paused["analysis_audio_streams"] == []
 

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "schema_version": 1,
+    "id": "phase-5-analysis-audio-v1",
+    "sample_rate": 48000,
+    "channel_count": 1,
+    "loudness_mode": "preserve",
+    "chunk_samples": 48000
+  }
+}
