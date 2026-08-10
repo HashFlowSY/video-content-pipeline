@@ -29,7 +29,7 @@ revalidation drift all produce retained non-selectable diagnostics. Resume-time
 payload paths are restricted to regular files in the recorded attempt workspace.
 Re-running
 extraction creates a new immutable workspace attempt and leaves incomplete
-payload bytes untouched. Offline verification passed: 131 tests, Ruff,
+payload bytes untouched. Offline verification passed: 134 tests, Ruff,
 formatter check, and strict Mypy. The review follow-up added an FFmpeg
 filesystem cap, retained resource-failure diagnostics, and rejected decoder
 choices for non-ambiguous streams.
