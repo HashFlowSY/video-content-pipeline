@@ -86,6 +86,9 @@ def _parser() -> argparse.ArgumentParser:
     analyze_audio_command = subcommands.add_parser("analyze-audio")
     analyze_audio_command.add_argument("plan_id")
     analyze_audio_command.add_argument("subtitle_report_id")
+    analyze_audio_command.add_argument(
+        "--audio-stream", action="append", default=[], metavar="PART_ID=STREAM_INDEX"
+    )
     analyze_audio_command.add_argument("--json", action="store_true")
     return parser
 
@@ -138,7 +141,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     if arguments.command == "analyze-audio":
-        result = analyze_audio(arguments.plan_id, arguments.subtitle_report_id, _project_root())
+        result = analyze_audio(
+            arguments.plan_id,
+            arguments.subtitle_report_id,
+            _project_root(),
+            tuple(arguments.audio_stream),
+        )
         print(json.dumps(result, sort_keys=True))
         return 0
     raise AssertionError(f"Unhandled command: {arguments.command}")

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from video_content_pipeline import audio_analysis, cli
+from video_content_pipeline.coverage import StreamCoverage
 from video_content_pipeline.inspection import PlanInspectionEvidence
 from video_content_pipeline.planning import (
     PlanState,
@@ -29,9 +30,10 @@ from video_content_pipeline.subtitle_pipeline import (
     SubtitleCandidateReport,
     subtitle_rules_fingerprint,
 )
+from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 
 
-def _confirmed_plan(project_root: Path) -> RunPlan:
+def _confirmed_plan(project_root: Path, audio_coverage: StreamCoverage | None = None) -> RunPlan:
     media_path = project_root / "input" / "source" / "synthetic-media"
     media_path.parent.mkdir(parents=True)
     media_path.write_bytes(b"phase-5-cli-contract-fixture")
@@ -39,9 +41,19 @@ def _confirmed_plan(project_root: Path) -> RunPlan:
     artifact = SourceArtifact(digest, digest, byte_count, media_path)
     evidence = PlanInspectionEvidence(
         source_id=artifact.source_id,
-        structural_document=ProbeDocument('{"streams": []}'),
+        structural_document=ProbeDocument(
+            json.dumps(
+                {
+                    "streams": (
+                        [{"index": 2, "codec_type": "audio", "time_base": "1/1"}]
+                        if audio_coverage is not None
+                        else []
+                    )
+                }
+            )
+        ),
         coverage_document=ProbeDocument('{"packets": []}'),
-        coverage_by_stream=(),
+        coverage_by_stream=((2, audio_coverage),) if audio_coverage is not None else (),
         subtitle_tracks=(),
     )
     plan_report = create_plan_report(
@@ -69,7 +81,11 @@ def _confirmed_plan(project_root: Path) -> RunPlan:
     return plan
 
 
-def _retained_subtitle_report(project_root: Path, plan: RunPlan) -> SubtitleCandidateReport:
+def _retained_subtitle_report(
+    project_root: Path,
+    plan: RunPlan,
+    raw_pts_cue_intervals: tuple[HalfOpenInterval, ...] = (),
+) -> SubtitleCandidateReport:
     report_id = "1" * 32
     report_path = project_root / "work" / plan.source_artifacts[0].source_id / report_id
     report_path = report_path / "candidate-report.json"
@@ -95,6 +111,7 @@ def _retained_subtitle_report(project_root: Path, plan: RunPlan) -> SubtitleCand
                 state=CandidateState.VALID,
                 source_vtt_path=source_artifact_path.as_posix(),
                 readable_vtt_path=readable_artifact_path.as_posix(),
+                raw_pts_cue_intervals=raw_pts_cue_intervals,
             ),
         ),
         diagnostics=(),
@@ -392,9 +409,10 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
     assert candidates["controlled-vad"]["state"] == "eligible"
     assert candidates["controlled-vad"]["adapter"]["state"] == "projected"
     assert candidates["controlled-vad"]["calibration"]["state"] == "qualified"
-    assert report["input_evidence"]["model_registry"]["sha256"] == sha256(
-        registry_path.read_bytes()
-    ).hexdigest()
+    assert (
+        report["input_evidence"]["model_registry"]["sha256"]
+        == sha256(registry_path.read_bytes()).hexdigest()
+    )
     assert Path(candidates["controlled-vad"]["adapter"]["raw_output"]["path"]).exists()
     assert Path(candidates["controlled-vad"]["adapter"]["projection"]["path"]).exists()
     assert Path(candidates["controlled-vad"]["calibration"]["record"]["path"]).exists()
@@ -465,3 +483,163 @@ def test_analyze_audio_rejects_an_incomplete_controlled_adapter_projection(
     assert candidate["adapter"]["projection"] is None
     assert candidate["calibration"]["state"] == "not_evaluated"
     assert report["formal_evidence"] == []
+
+
+def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def interval(start: int, end: int) -> HalfOpenInterval:
+        return HalfOpenInterval(ExactTime(start), ExactTime(end))
+
+    plan = _confirmed_plan(
+        tmp_path,
+        StreamCoverage(coverage=interval(0, 10), gaps=(interval(4, 5),), diagnostics=()),
+    )
+    subtitle_report = _retained_subtitle_report(tmp_path, plan, (interval(0, 1),))
+    projection = {
+        "schema_version": 1,
+        "capability": "vad",
+        "model_identity": {
+            "asset_sha256": "b" * 64,
+            "backend": "controlled-offline-adapter",
+            "backend_version": "1.0.0",
+            "precision": "fixture",
+            "device_class": "fixture-cpu",
+            "rules_fingerprint": "vad-rules-v1",
+        },
+        "result": {
+            "parts": [
+                {
+                    "source_id": plan.source_artifacts[0].source_id,
+                    "stream_index": 2,
+                    "segments": [
+                        {
+                            "start": {"numerator": 0, "denominator": 1},
+                            "end": {"numerator": 3, "denominator": 1},
+                            "state": "speech_likely",
+                        },
+                        {
+                            "start": {"numerator": 5, "denominator": 1},
+                            "end": {"numerator": 8, "denominator": 1},
+                            "state": "non_speech",
+                        },
+                    ],
+                }
+            ]
+        },
+    }
+    fixture_path = tmp_path / "tests" / "fixtures" / "calibration" / "vad.json"
+    fixture_path.parent.mkdir(parents=True)
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "expected_projection": projection,
+                "thresholds": {
+                    "uncovered_speech_duration": {"numerator": 2, "denominator": 1},
+                    "long_silence_duration": {"numerator": 3, "denominator": 1},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    dependency_plan = tmp_path / "models" / "plans" / "controlled-vad.md"
+    dependency_plan.parent.mkdir(parents=True)
+    dependency_plan.write_text("# Controlled VAD dependency plan\n", encoding="utf-8")
+    registry_path = tmp_path / "models" / "registry.json"
+    registry_path.parent.mkdir(exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "candidates": [
+                    {
+                        "candidate_id": "controlled-vad",
+                        "capability": "vad",
+                        "official_source": {"url": "https://example.invalid/vad", "approved": True},
+                        "license_approved": True,
+                        "revision": "fixture-r1",
+                        "asset_sha256": "b" * 64,
+                        "offline_runtime": True,
+                        "credential_required": False,
+                        "telemetry": False,
+                        "dependency_plan": "models/plans/controlled-vad.md",
+                        "resource_estimate": {"high_bytes": 1024},
+                        "controlled_adapter": {
+                            "adapter_version": "fixture-adapter-v1",
+                            "raw_output": {"native_segments": []},
+                            "projection": projection,
+                        },
+                        "calibration_evaluation": {
+                            "schema_version": 1,
+                            "reference_fixture": {
+                                "path": "tests/fixtures/calibration/vad.json",
+                                "sha256": sha256(fixture_path.read_bytes()).hexdigest(),
+                            },
+                            "evaluator_version": "fixture-evaluator-v1",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _configure_cli(tmp_path, monkeypatch)
+
+    assert (
+        cli.main(
+            [
+                "analyze-audio",
+                plan.plan_id,
+                subtitle_report.report_id,
+                "--audio-stream",
+                f"{plan.source_artifacts[0].source_id}=2",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    report = json.loads(capsys.readouterr().out)["report"]
+
+    assert report["analysis_audio_streams"] == [
+        {"source_id": plan.source_artifacts[0].source_id, "stream_index": 2}
+    ]
+    vad = report["formal_evidence"][0]
+    assert vad["capability"] == "vad"
+    assert [item["state"] for item in vad["parts"][0]["voice_activity_intervals"]] == [
+        "speech_likely",
+        "indeterminate",
+        "non_speech",
+        "indeterminate",
+    ]
+    assert vad["parts"][0]["uncovered_speech_risks"] == [
+        {
+            "interval": {
+                "start": {"numerator": 1, "denominator": 1},
+                "end": {"numerator": 3, "denominator": 1},
+            },
+            "elevated": True,
+        }
+    ]
+    assert [item["interval"] for item in vad["parts"][0]["audio_state_indeterminate"]] == [
+        {
+            "start": {"numerator": 3, "denominator": 1},
+            "end": {"numerator": 4, "denominator": 1},
+        },
+        {
+            "start": {"numerator": 4, "denominator": 1},
+            "end": {"numerator": 5, "denominator": 1},
+        },
+        {
+            "start": {"numerator": 8, "denominator": 1},
+            "end": {"numerator": 10, "denominator": 1},
+        },
+    ]
+    assert vad["parts"][0]["long_silences"] == [
+        {
+            "interval": {
+                "start": {"numerator": 5, "denominator": 1},
+                "end": {"numerator": 8, "denominator": 1},
+            }
+        }
+    ]
+    assert not (tmp_path / "outputs").exists()
