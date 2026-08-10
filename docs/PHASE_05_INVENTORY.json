@@ -171,6 +171,34 @@
         "user_media_accessed": false,
         "outputs_written": false
       }
+    },
+    {
+      "ticket": "06",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate; scripts/require-project-venv.sh; pytest tests/integration/test_phase_5_cli_contract.py -k anonymous_speaker_turn",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff check src tests",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff format --check src tests",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; mypy src",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; pytest"
+      ],
+      "results": {
+        "tdd_red": "expected missing diarization formal evidence in the Phase 5 CLI report",
+        "pytest_diarization": "controlled CLI contract passed for explicit candidate selection, explicit report resume, anonymous overlapping SpeakerTurns, VAD conflicts, subtitle citations, and hash-recorded user metadata",
+        "ruff_check": "passed",
+        "ruff_format_check": "passed",
+        "mypy": "passed; no issues in 17 source files",
+        "pytest_full": "150 passed",
+        "code_review": "standards and spec findings corrected before final verification"
+      },
+      "resource_bounds": {
+        "memory": "less than 256 MiB",
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
     }
   ],
   "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted."

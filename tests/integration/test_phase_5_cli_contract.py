@@ -517,7 +517,7 @@ def test_analyze_audio_rejects_an_incomplete_controlled_adapter_projection(
     assert report["formal_evidence"] == []
 
 
-def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
+def test_analyze_audio_publishes_calibrated_vad_and_anonymous_speaker_turn_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def interval(start: int, end: int) -> HalfOpenInterval:
@@ -654,6 +654,70 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
         ),
         encoding="utf-8",
     )
+    diarization_projection = {
+        "schema_version": 1,
+        "capability": "diarization",
+        "model_identity": {
+            "asset_sha256": "d" * 64,
+            "backend": "controlled-offline-adapter",
+            "backend_version": "1.0.0",
+            "precision": "fixture",
+            "device_class": "fixture-cpu",
+            "rules_fingerprint": "diarization-rules-v1",
+        },
+        "result": {
+            "parts": [
+                {
+                    "source_id": plan.source_artifacts[0].source_id,
+                    "stream_index": 2,
+                    "source_time_mapping": projection["result"]["parts"][0]["source_time_mapping"],
+                    "turns": [
+                        {
+                            "cluster_id": "alpha",
+                            "start": {"numerator": 0, "denominator": 1},
+                            "end": {"numerator": 2, "denominator": 1},
+                            "confidence": 0.9,
+                        },
+                        {
+                            "cluster_id": "bravo",
+                            "start": {"numerator": 1, "denominator": 1},
+                            "end": {"numerator": 3, "denominator": 1},
+                            "confidence": 0.8,
+                        },
+                        {
+                            "cluster_id": "charlie",
+                            "start": {"numerator": 3, "denominator": 1},
+                            "end": {"numerator": 4, "denominator": 1},
+                            "confidence": 0.9,
+                        },
+                        {
+                            "cluster_id": "delta",
+                            "start": {"numerator": 5, "denominator": 1},
+                            "end": {"numerator": 6, "denominator": 1},
+                            "confidence": 0.9,
+                        },
+                    ],
+                    "role_candidates": [
+                        {
+                            "cluster_id": "alpha",
+                            "role": "host",
+                            "subtitle_text": {"source_ordinal": 0, "text": "Cue 0"},
+                        },
+                    ],
+                }
+            ]
+        },
+    }
+    diarization_fixture_path = tmp_path / "tests" / "fixtures" / "calibration" / "diarization.json"
+    diarization_fixture_path.write_text(
+        json.dumps(
+            {
+                "expected_projection": diarization_projection,
+                "thresholds": {"minimum_confidence": 0.8},
+            }
+        ),
+        encoding="utf-8",
+    )
     dependency_plan = tmp_path / "models" / "plans" / "controlled-vad.md"
     dependency_plan.parent.mkdir(parents=True)
     dependency_plan.write_text("# Controlled VAD dependency plan\n", encoding="utf-8")
@@ -719,6 +783,35 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
                             "evaluator_version": "fixture-evaluator-v1",
                         },
                     },
+                    {
+                        "candidate_id": "controlled-diarization",
+                        "capability": "diarization",
+                        "official_source": {
+                            "url": "https://example.invalid/diarization",
+                            "approved": True,
+                        },
+                        "license_approved": True,
+                        "revision": "fixture-r1",
+                        "asset_sha256": "d" * 64,
+                        "offline_runtime": True,
+                        "credential_required": False,
+                        "telemetry": False,
+                        "dependency_plan": "models/plans/controlled-vad.md",
+                        "resource_estimate": {"high_bytes": 1024},
+                        "controlled_adapter": {
+                            "adapter_version": "fixture-adapter-v1",
+                            "raw_output": {"native_turns": []},
+                            "projection": diarization_projection,
+                        },
+                        "calibration_evaluation": {
+                            "schema_version": 1,
+                            "reference_fixture": {
+                                "path": "tests/fixtures/calibration/diarization.json",
+                                "sha256": sha256(diarization_fixture_path.read_bytes()).hexdigest(),
+                            },
+                            "evaluator_version": "fixture-evaluator-v1",
+                        },
+                    },
                 ],
             }
         ),
@@ -739,10 +832,39 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
         )
         == 0
     )
+    unselected_report = json.loads(capsys.readouterr().out)["report"]
+    assert [evidence["capability"] for evidence in unselected_report["formal_evidence"]] == [
+        "vad",
+        "forced_alignment",
+    ]
+    assert unselected_report["diagnostics"] == [
+        {
+            "reason": "diarization_model_selection_required",
+            "message": "A calibrated diarization candidate requires explicit user selection.",
+        }
+    ]
+
+    assert (
+        cli.main(
+            [
+                "resume-audio-analysis",
+                unselected_report["report_id"],
+                "--diarization-candidate",
+                "controlled-diarization",
+                "--role-metadata",
+                f"{plan.source_artifacts[0].source_id}=bravo=guest",
+                "--json",
+            ]
+        )
+        == 0
+    )
     report = json.loads(capsys.readouterr().out)["report"]
 
     assert report["diagnostics"] == []
     assert report["state"] == "partial"
+    assert (
+        report["input_evidence"]["resumed_from_report"]["path"] == unselected_report["report_path"]
+    )
     assert report["processing_authorization"]["state"] == "approved"
     assert report["analysis_audio_streams"][0]["source_id"] == plan.source_artifacts[0].source_id
     assert report["analysis_audio_streams"][0]["stream_index"] == 2
@@ -814,6 +936,78 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
             "reason": "adopted",
             "global_reason": None,
             "vad_indeterminate_risk": False,
+        }
+    ]
+    diarization = report["formal_evidence"][2]
+    assert diarization["capability"] == "diarization"
+    speaker_part = diarization["parts"][0]
+    assert speaker_part["speaker_turns"] == [
+        {
+            "speaker_label": "part-01:speaker-01",
+            "raw_pts_interval": {
+                "start": {"numerator": 0, "denominator": 1},
+                "end": {"numerator": 2, "denominator": 1},
+            },
+            "confidence": 0.9,
+        },
+        {
+            "speaker_label": "part-01:speaker-02",
+            "raw_pts_interval": {
+                "start": {"numerator": 1, "denominator": 1},
+                "end": {"numerator": 3, "denominator": 1},
+            },
+            "confidence": 0.8,
+        },
+    ]
+    assert speaker_part["diarization_vad_conflicts"] == [
+        {
+            "candidate_speaker_label": "part-01:speaker-03",
+            "raw_pts_interval": {
+                "start": {"numerator": 3, "denominator": 1},
+                "end": {"numerator": 4, "denominator": 1},
+            },
+            "confidence": 0.9,
+            "reason": "diarization_vad_conflict",
+            "vad_states": ["indeterminate"],
+        },
+        {
+            "candidate_speaker_label": "part-01:speaker-04",
+            "raw_pts_interval": {
+                "start": {"numerator": 5, "denominator": 1},
+                "end": {"numerator": 6, "denominator": 1},
+            },
+            "confidence": 0.9,
+            "reason": "diarization_vad_conflict",
+            "vad_states": ["non_speech"],
+        },
+    ]
+    assert speaker_part["role_candidates"][0] == {
+        "speaker_label": "part-01:speaker-01",
+        "role": "host",
+        "evidence": {"kind": "subtitle_text", "source_ordinal": 0, "text": "Cue 0"},
+    }
+    metadata_role = speaker_part["role_candidates"][1]
+    assert metadata_role["speaker_label"] == "part-01:speaker-02"
+    assert metadata_role["role"] == "guest"
+    assert metadata_role["evidence"]["kind"] == "user_metadata"
+    assert metadata_role["evidence"]["entry_id"] == audio_analysis._sha256_json(
+        {
+            "source_id": plan.source_artifacts[0].source_id,
+            "cluster_id": "bravo",
+            "role": "guest",
+        }
+    )
+    metadata_record = metadata_role["evidence"]["record"]
+    assert metadata_record["path"] == (
+        report["workspace_path"] + "/diarization/controlled-diarization/user-role-metadata.json"
+    )
+    assert Path(metadata_record["path"]).is_file()
+    assert json.loads(Path(metadata_record["path"]).read_text(encoding="utf-8"))["records"] == [
+        {
+            "entry_id": metadata_role["evidence"]["entry_id"],
+            "source_id": plan.source_artifacts[0].source_id,
+            "cluster_id": "bravo",
+            "role": "guest",
         }
     ]
     assert source_candidate_path.read_bytes() == source_candidate_before

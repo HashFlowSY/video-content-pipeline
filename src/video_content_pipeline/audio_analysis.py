@@ -153,6 +153,42 @@ class VadPartEvidence:
 
 
 @dataclass(frozen=True)
+class SpeakerTurnCandidate:
+    """One anonymous diarization group before VAD and calibration gates."""
+
+    cluster_id: str
+    interval: HalfOpenInterval
+    confidence: float
+
+
+@dataclass(frozen=True)
+class RoleCandidateProposal:
+    """One adapter-proposed role backed by an exact subtitle-text citation."""
+
+    cluster_id: str
+    role: str
+    source_ordinal: int
+    text: str
+
+
+@dataclass(frozen=True)
+class UserRoleMetadata:
+    """One explicit user role assignment for an anonymous diarization group."""
+
+    source_id: str
+    cluster_id: str
+    role: str
+
+
+@dataclass(frozen=True)
+class ProjectedDiarizationPart:
+    """One complete controlled-adapter diarization projection for a selected Part."""
+
+    turns: tuple[SpeakerTurnCandidate, ...]
+    role_candidates: tuple[RoleCandidateProposal, ...]
+
+
+@dataclass(frozen=True)
 class AnalysisAudioStreamSelection:
     """One Phase 5 audio stream selected from retained inspection evidence."""
 
@@ -226,6 +262,7 @@ class AudioAnalysisReport:
     run_plan_evidence: InputEvidence | None
     subtitle_report_evidence: InputEvidence | None
     model_registry_evidence: InputEvidence | None
+    resumed_from_report: InputEvidence | None
     capabilities: tuple[CapabilityAvailability, ...]
     analysis_audio_streams: tuple[AnalysisAudioStreamSelection, ...]
     formal_evidence: tuple[dict[str, object], ...]
@@ -252,6 +289,11 @@ class AudioAnalysisReport:
                 "model_registry": (
                     self.model_registry_evidence.as_json()
                     if self.model_registry_evidence is not None
+                    else None
+                ),
+                "resumed_from_report": (
+                    self.resumed_from_report.as_json()
+                    if self.resumed_from_report is not None
                     else None
                 ),
             },
@@ -288,6 +330,9 @@ def analyze_audio(
     subtitle_report_id: str,
     project_root: Path,
     requested_audio_streams: tuple[str, ...] = (),
+    requested_diarization_candidate: str | None = None,
+    requested_role_metadata: tuple[str, ...] = (),
+    resumed_from_report: InputEvidence | None = None,
 ) -> dict[str, object]:
     """Retain the Phase 5 no-model result without media processing or a model runtime."""
 
@@ -373,6 +418,24 @@ def analyze_audio(
                     )
                 )
                 formal_evidence = tuple(evidence)
+            diarization_candidate = _qualified_diarization_candidate(
+                capabilities, requested_diarization_candidate
+            )
+            if diarization_candidate is not None:
+                evidence.append(
+                    _derive_diarization_evidence(
+                        diarization_candidate,
+                        analysis_audio_streams,
+                        confirmed_report.inspection_evidence,
+                        subtitle_report,
+                        plan,
+                        vad_evidence,
+                        project_root,
+                        workspace_path,
+                        _parse_role_metadata_requests(requested_role_metadata),
+                    )
+                )
+                formal_evidence = tuple(evidence)
         report_plan_id = plan.plan_id
         report_subtitle_id = subtitle_report.report_id
     except (AudioAnalysisError, PlanningError, SubtitleReportError, OSError, ValueError) as error:
@@ -397,6 +460,7 @@ def analyze_audio(
         run_plan_evidence=run_plan_evidence,
         subtitle_report_evidence=subtitle_report_evidence,
         model_registry_evidence=model_registry_evidence,
+        resumed_from_report=resumed_from_report,
         capabilities=capabilities,
         analysis_audio_streams=analysis_audio_streams,
         formal_evidence=formal_evidence,
@@ -405,6 +469,105 @@ def analyze_audio(
     )
     _write_json_once(report_path, report.as_json())
     return {"status": report.state.value, "report": report.as_json()}
+
+
+def resume_audio_analysis(
+    report_id: str,
+    requested_diarization_candidate: str,
+    project_root: Path,
+    requested_role_metadata: tuple[str, ...] = (),
+) -> dict[str, object]:
+    """Resume an explicit diarization-selection pause from retained report evidence."""
+
+    prior_path = _analysis_report_path(project_root, report_id)
+    try:
+        prior_document = json.loads(prior_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "analysis_report_invalid", "Audio analysis report cannot be read."
+        ) from error
+    if not isinstance(prior_document, Mapping):
+        raise AudioAnalysisError("analysis_report_invalid", "Audio analysis report is invalid.")
+    if (
+        prior_document.get("report_id") != report_id
+        or prior_document.get("state") != AudioAnalysisReportState.PARTIAL.value
+        or not _has_diarization_selection_pause(prior_document)
+    ):
+        raise AudioAnalysisError(
+            "analysis_resume_invalid",
+            "Only a retained diarization-selection pause can be resumed.",
+        )
+    plan_id = prior_document.get("plan_id")
+    subtitle_report_id = prior_document.get("subtitle_report_id")
+    if not isinstance(plan_id, str) or not isinstance(subtitle_report_id, str):
+        raise AudioAnalysisError(
+            "analysis_report_invalid", "Audio analysis report identity is invalid."
+        )
+    input_evidence = prior_document.get("input_evidence")
+    if not isinstance(input_evidence, Mapping):
+        raise AudioAnalysisError(
+            "analysis_report_invalid", "Audio analysis report inputs are invalid."
+        )
+    for key in ("run_plan", "subtitle_candidate_report", "model_registry"):
+        evidence = input_evidence.get(key)
+        if evidence is not None:
+            if not isinstance(evidence, Mapping):
+                raise AudioAnalysisError(
+                    "analysis_report_invalid", "Audio analysis report inputs are invalid."
+                )
+            _retained_evidence_path(evidence, project_root)
+    streams = prior_document.get("analysis_audio_streams")
+    if not isinstance(streams, list) or not streams:
+        raise AudioAnalysisError(
+            "analysis_report_invalid", "Audio analysis stream evidence is invalid."
+        )
+    requested_audio_streams: list[str] = []
+    for stream in streams:
+        if not isinstance(stream, Mapping):
+            raise AudioAnalysisError(
+                "analysis_report_invalid", "Audio analysis stream evidence is invalid."
+            )
+        source_id = stream.get("source_id")
+        stream_index = stream.get("stream_index")
+        if not isinstance(source_id, str) or not isinstance(stream_index, int):
+            raise AudioAnalysisError(
+                "analysis_report_invalid", "Audio analysis stream evidence is invalid."
+            )
+        requested_audio_streams.append(f"{source_id}={stream_index}")
+    return analyze_audio(
+        plan_id,
+        subtitle_report_id,
+        project_root,
+        tuple(requested_audio_streams),
+        requested_diarization_candidate,
+        requested_role_metadata,
+        _input_evidence(prior_path),
+    )
+
+
+def _analysis_report_path(project_root: Path, report_id: str) -> Path:
+    try:
+        validated_id = uuid.UUID(hex=report_id).hex
+    except ValueError as error:
+        raise AudioAnalysisError(
+            "analysis_report_invalid", "Audio analysis report ID must be a UUID."
+        ) from error
+    return (
+        project_root
+        / "work"
+        / "audio-analysis-reports"
+        / validated_id
+        / "audio-analysis-report.json"
+    )
+
+
+def _has_diarization_selection_pause(report: Mapping[str, object]) -> bool:
+    diagnostics = report.get("diagnostics")
+    return isinstance(diagnostics, list) and any(
+        isinstance(diagnostic, Mapping)
+        and diagnostic.get("reason") == "diarization_model_selection_required"
+        for diagnostic in diagnostics
+    )
 
 
 def _matches_confirmed_plan(confirmed_report: PlanReport, plan: RunPlan) -> bool:
@@ -1299,15 +1462,7 @@ def _qualified_vad_candidate(
         return None
     qualified: list[dict[str, object]] = []
     for candidate in vad_capability.candidates:
-        calibration = candidate.get("calibration")
-        adapter = candidate.get("adapter")
-        if (
-            candidate.get("state") == "eligible"
-            and isinstance(calibration, Mapping)
-            and calibration.get("state") == "qualified"
-            and isinstance(adapter, Mapping)
-            and adapter.get("state") == "projected"
-        ):
+        if _candidate_is_qualified(candidate):
             qualified.append(candidate)
     if len(qualified) > 1:
         raise AudioAnalysisError(
@@ -1328,15 +1483,7 @@ def _qualified_alignment_candidate(
         return None
     qualified: list[dict[str, object]] = []
     for candidate in alignment_capability.candidates:
-        calibration = candidate.get("calibration")
-        adapter = candidate.get("adapter")
-        if (
-            candidate.get("state") == "eligible"
-            and isinstance(calibration, Mapping)
-            and calibration.get("state") == "qualified"
-            and isinstance(adapter, Mapping)
-            and adapter.get("state") == "projected"
-        ):
+        if _candidate_is_qualified(candidate):
             qualified.append(candidate)
     if len(qualified) > 1:
         raise AudioAnalysisError(
@@ -1344,6 +1491,53 @@ def _qualified_alignment_candidate(
             "Multiple calibrated alignment candidates require an explicit future selection.",
         )
     return qualified[0] if qualified else None
+
+
+def _qualified_diarization_candidate(
+    capabilities: tuple[CapabilityAvailability, ...],
+    requested_candidate_id: str | None,
+) -> dict[str, object] | None:
+    diarization_capability = next(
+        (capability for capability in capabilities if capability.capability == "diarization"),
+        None,
+    )
+    if diarization_capability is None:
+        return None
+    qualified = [
+        candidate
+        for candidate in diarization_capability.candidates
+        if _candidate_is_qualified(candidate)
+    ]
+    if not qualified:
+        return None
+    if requested_candidate_id is None:
+        raise AudioAnalysisError(
+            "diarization_model_selection_required",
+            "A calibrated diarization candidate requires explicit user selection.",
+        )
+    selected = [
+        candidate
+        for candidate in qualified
+        if candidate.get("candidate_id") == requested_candidate_id
+    ]
+    if len(selected) != 1:
+        raise AudioAnalysisError(
+            "diarization_model_selection_invalid",
+            "The selected diarization candidate is not calibrated and eligible.",
+        )
+    return selected[0]
+
+
+def _candidate_is_qualified(candidate: Mapping[str, object]) -> bool:
+    calibration = candidate.get("calibration")
+    adapter = candidate.get("adapter")
+    return (
+        candidate.get("state") == "eligible"
+        and isinstance(calibration, Mapping)
+        and calibration.get("state") == "qualified"
+        and isinstance(adapter, Mapping)
+        and adapter.get("state") == "projected"
+    )
 
 
 def _select_audio_streams(
@@ -1408,6 +1602,30 @@ def _parse_audio_stream_requests(values: tuple[str, ...]) -> dict[str, int]:
             )
         selections[source_id] = stream_index
     return selections
+
+
+def _parse_role_metadata_requests(values: tuple[str, ...]) -> tuple[UserRoleMetadata, ...]:
+    metadata: list[UserRoleMetadata] = []
+    seen: set[tuple[str, str]] = set()
+    for value in values:
+        source_id, first_separator, remainder = value.partition("=")
+        cluster_id, second_separator, role = remainder.partition("=")
+        key = (source_id, cluster_id)
+        if (
+            not first_separator
+            or not second_separator
+            or not source_id
+            or not cluster_id
+            or not role
+            or key in seen
+        ):
+            raise AudioAnalysisError(
+                "role_metadata_invalid",
+                "Role metadata must use unique PART_ID=CLUSTER_ID=ROLE assignments.",
+            )
+        seen.add(key)
+        metadata.append(UserRoleMetadata(source_id, cluster_id, role))
+    return tuple(metadata)
 
 
 def _available_audio_streams(evidence: PlanInspectionEvidence) -> tuple[int, ...]:
@@ -1667,6 +1885,404 @@ def _derive_alignment_evidence(
         "calibration_profile": calibration.get("profile"),
         "parts": parts,
     }
+
+
+def _derive_diarization_evidence(
+    candidate: Mapping[str, object],
+    selections: tuple[AnalysisAudioStreamSelection, ...],
+    inspection_evidence: tuple[PlanInspectionEvidence, ...],
+    subtitle_report: SubtitleCandidateReport,
+    plan: RunPlan,
+    vad_evidence: Mapping[str, object],
+    project_root: Path,
+    workspace_path: Path,
+    user_role_metadata: tuple[UserRoleMetadata, ...],
+) -> dict[str, object]:
+    candidate_id = candidate.get("candidate_id")
+    calibration = candidate.get("calibration")
+    if not isinstance(candidate_id, str) or not isinstance(calibration, Mapping):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization candidate evidence is missing."
+        )
+    _require_synthetic_calibration_scope(calibration, plan, project_root, "diarization")
+    minimum_confidence = _diarization_minimum_confidence(candidate, project_root)
+    projections_by_source = _projected_diarization_parts(candidate, selections, project_root)
+    vad_by_source = _vad_intervals_by_source(vad_evidence)
+    coverage_by_source = {
+        evidence.source_id: dict(evidence.coverage_by_stream) for evidence in inspection_evidence
+    }
+    selection_by_source = {selection.source_id: selection for selection in selections}
+    selected_source_ids = set(selection_by_source)
+    if any(item.source_id not in selected_source_ids for item in user_role_metadata):
+        raise AudioAnalysisError(
+            "role_metadata_invalid", "Role metadata references a Part without selected audio."
+        )
+    metadata_evidence = _retain_user_role_metadata(
+        plan, candidate_id, user_role_metadata, workspace_path
+    )
+    metadata_by_source: dict[str, tuple[UserRoleMetadata, ...]] = {
+        source_id: tuple(item for item in user_role_metadata if item.source_id == source_id)
+        for source_id in selected_source_ids
+    }
+    part_labels = {
+        selection.source_id: f"part-{part_number:02d}"
+        for part_number, selection in enumerate(selections, start=1)
+    }
+    parts: list[dict[str, object]] = []
+    for source_id, projected_part in projections_by_source.items():
+        selection = selection_by_source.get(source_id)
+        if selection is None:
+            raise AudioAnalysisError(
+                "audio_coverage_indeterminate",
+                "Selected audio stream lacks retained coverage evidence.",
+            )
+        audio_coverage = coverage_by_source.get(source_id, {}).get(selection.stream_index)
+        if audio_coverage is None:
+            raise AudioAnalysisError(
+                "audio_coverage_indeterminate",
+                "Selected audio stream lacks retained coverage evidence.",
+            )
+        source_cues = _speaker_role_cues(subtitle_report, source_id, project_root)
+        parts.append(
+            _speaker_turn_part_evidence_as_json(
+                source_id,
+                part_labels[source_id],
+                selection.stream_index,
+                projected_part,
+                _usable_audio_intervals(audio_coverage),
+                vad_by_source[source_id],
+                minimum_confidence,
+                source_cues,
+                metadata_by_source[source_id],
+                metadata_evidence,
+            )
+        )
+    return {
+        "capability": "diarization",
+        "candidate_id": candidate_id,
+        "calibration_profile": calibration.get("profile"),
+        "parts": parts,
+    }
+
+
+def _retain_user_role_metadata(
+    plan: RunPlan,
+    candidate_id: str,
+    metadata: tuple[UserRoleMetadata, ...],
+    workspace_path: Path,
+) -> InputEvidence | None:
+    if not metadata:
+        return None
+    path = workspace_path / "diarization" / candidate_id / "user-role-metadata.json"
+    _write_json_once(
+        path,
+        {
+            "schema_version": 1,
+            "plan_id": plan.plan_id,
+            "candidate_id": candidate_id,
+            "records": [
+                {
+                    "entry_id": _sha256_json(
+                        {
+                            "source_id": item.source_id,
+                            "cluster_id": item.cluster_id,
+                            "role": item.role,
+                        }
+                    ),
+                    "source_id": item.source_id,
+                    "cluster_id": item.cluster_id,
+                    "role": item.role,
+                }
+                for item in metadata
+            ],
+        },
+    )
+    return _input_evidence(path)
+
+
+def _diarization_minimum_confidence(candidate: Mapping[str, object], project_root: Path) -> float:
+    calibration = candidate.get("calibration")
+    if not isinstance(calibration, Mapping) or not isinstance(calibration.get("record"), Mapping):
+        raise AudioAnalysisError(
+            "diarization_calibration_required", "Diarization calibration record is missing."
+        )
+    record_path = _retained_evidence_path(calibration["record"], project_root)
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        thresholds = record.get("thresholds") if isinstance(record, Mapping) else None
+        confidence = (
+            thresholds.get("minimum_confidence") if isinstance(thresholds, Mapping) else None
+        )
+        if (
+            not isinstance(confidence, float | int)
+            or isinstance(confidence, bool)
+            or not 0 <= confidence <= 1
+        ):
+            raise ValueError
+        return float(confidence)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "diarization_calibration_required", "Diarization calibration thresholds are invalid."
+        ) from error
+
+
+def _projected_diarization_parts(
+    candidate: Mapping[str, object],
+    selections: tuple[AnalysisAudioStreamSelection, ...],
+    project_root: Path,
+) -> dict[str, ProjectedDiarizationPart]:
+    adapter = candidate.get("adapter")
+    if not isinstance(adapter, Mapping) or not isinstance(adapter.get("projection"), Mapping):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization projection evidence is missing."
+        )
+    projection_path = _retained_evidence_path(adapter["projection"], project_root)
+    try:
+        document = json.loads(projection_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization projection cannot be read."
+        ) from error
+    result = document.get("result") if isinstance(document, Mapping) else None
+    parts = result.get("parts") if isinstance(result, Mapping) else None
+    if not isinstance(parts, list):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization projection must provide every selected Part."
+        )
+    selections_by_key = {
+        (selection.source_id, selection.stream_index): selection for selection in selections
+    }
+    projected: dict[str, ProjectedDiarizationPart] = {}
+    for part in parts:
+        if not isinstance(part, Mapping):
+            raise AudioAnalysisError(
+                "model_output_invalid", "Diarization projected Part is invalid."
+            )
+        source_id = part.get("source_id")
+        stream_index = part.get("stream_index")
+        if (
+            not isinstance(source_id, str)
+            or not isinstance(stream_index, int)
+            or isinstance(stream_index, bool)
+            or (source_id, stream_index) not in selections_by_key
+            or source_id in projected
+        ):
+            raise AudioAnalysisError(
+                "model_output_invalid", "Diarization projection Part identity is invalid."
+            )
+        _validate_diarization_time_mapping(
+            part.get("source_time_mapping"),
+            selections_by_key[(source_id, stream_index)],
+            project_root,
+        )
+        turns = part.get("turns")
+        role_candidates = part.get("role_candidates", [])
+        if not isinstance(turns, list) or not isinstance(role_candidates, list):
+            raise AudioAnalysisError(
+                "model_output_invalid", "Diarization projected Part is incomplete."
+            )
+        projected[source_id] = ProjectedDiarizationPart(
+            tuple(_speaker_turn_candidate(value) for value in turns),
+            tuple(_role_candidate_proposal(value) for value in role_candidates),
+        )
+    if set(projected) != {selection.source_id for selection in selections}:
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization projection omitted a selected Part."
+        )
+    return projected
+
+
+def _validate_diarization_time_mapping(
+    value: object, selection: AnalysisAudioStreamSelection, project_root: Path
+) -> None:
+    if not isinstance(value, Mapping):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization source-time mapping is missing."
+        )
+    derivative = value.get("derivative_evidence")
+    if (
+        value.get("schema_version") != 1
+        or value.get("coordinate") != "raw_pts_identity"
+        or value.get("structural_evidence_sha256") != selection.structural_evidence_sha256
+        or value.get("coverage_evidence_sha256") != selection.coverage_evidence_sha256
+        or not isinstance(derivative, Mapping)
+    ):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization source-time mapping is invalid."
+        )
+    _retained_evidence_path(derivative, project_root)
+
+
+def _speaker_turn_candidate(value: object) -> SpeakerTurnCandidate:
+    if not isinstance(value, Mapping):
+        raise AudioAnalysisError("model_output_invalid", "Diarization turn must be an object.")
+    cluster_id = value.get("cluster_id")
+    confidence = value.get("confidence")
+    try:
+        interval = HalfOpenInterval(
+            _exact_time_from_json(value.get("start")), _exact_time_from_json(value.get("end"))
+        )
+    except (TypeError, ValueError) as error:
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization turn interval is invalid."
+        ) from error
+    if (
+        not isinstance(cluster_id, str)
+        or not cluster_id
+        or not isinstance(confidence, float | int)
+        or isinstance(confidence, bool)
+        or not 0 <= confidence <= 1
+    ):
+        raise AudioAnalysisError("model_output_invalid", "Diarization turn is invalid.")
+    return SpeakerTurnCandidate(cluster_id, interval, float(confidence))
+
+
+def _role_candidate_proposal(value: object) -> RoleCandidateProposal:
+    if not isinstance(value, Mapping):
+        raise AudioAnalysisError("model_output_invalid", "Role candidate must be an object.")
+    citation = value.get("subtitle_text")
+    cluster_id = value.get("cluster_id")
+    role = value.get("role")
+    source_ordinal = citation.get("source_ordinal") if isinstance(citation, Mapping) else None
+    text = citation.get("text") if isinstance(citation, Mapping) else None
+    if (
+        not isinstance(cluster_id, str)
+        or not cluster_id
+        or not isinstance(role, str)
+        or not role
+        or not isinstance(source_ordinal, int)
+        or isinstance(source_ordinal, bool)
+        or not isinstance(text, str)
+        or not text
+    ):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Role candidates require an exact subtitle-text citation."
+        )
+    return RoleCandidateProposal(cluster_id, role, source_ordinal, text)
+
+
+def _speaker_role_cues(
+    subtitle_report: SubtitleCandidateReport, source_id: str, project_root: Path
+) -> dict[int, str]:
+    if _primary_subtitle_candidate(subtitle_report, source_id) is None:
+        return {}
+    cues, _ = _primary_alignment_cues(subtitle_report, source_id, project_root)
+    return {cue.source_ordinal: cue.text for cue in cues}
+
+
+def _speaker_turn_part_evidence_as_json(
+    source_id: str,
+    part_label: str,
+    stream_index: int,
+    projected_part: ProjectedDiarizationPart,
+    usable_audio_intervals: tuple[HalfOpenInterval, ...],
+    voice_activity_intervals: tuple[VoiceActivityInterval, ...],
+    minimum_confidence: float,
+    source_cues: Mapping[int, str],
+    user_role_metadata: tuple[UserRoleMetadata, ...],
+    metadata_evidence: InputEvidence | None,
+) -> dict[str, object]:
+    published: list[SpeakerTurnCandidate] = []
+    conflicts: list[dict[str, object]] = []
+    labels_by_cluster = {
+        cluster_id: f"{part_label}:speaker-{ordinal:02d}"
+        for ordinal, cluster_id in enumerate(
+            sorted({turn.cluster_id for turn in projected_part.turns}), start=1
+        )
+    }
+    for turn in projected_part.turns:
+        if not any(
+            usable.start <= turn.interval.start and turn.interval.end <= usable.end
+            for usable in usable_audio_intervals
+        ):
+            raise AudioAnalysisError(
+                "model_output_invalid", "Diarization turn falls outside usable audio coverage."
+            )
+        conflict_states = sorted(
+            {
+                activity.state.value
+                for activity in voice_activity_intervals
+                if activity.state is not VoiceActivityState.SPEECH_LIKELY
+                and _intervals_overlap(turn.interval, activity.interval)
+            }
+        )
+        if conflict_states:
+            conflicts.append(
+                {
+                    "candidate_speaker_label": labels_by_cluster[turn.cluster_id],
+                    "raw_pts_interval": _interval_as_json(turn.interval),
+                    "confidence": turn.confidence,
+                    "reason": "diarization_vad_conflict",
+                    "vad_states": conflict_states,
+                }
+            )
+        elif turn.confidence >= minimum_confidence:
+            published.append(turn)
+    role_candidates: list[dict[str, object]] = []
+    for proposal in projected_part.role_candidates:
+        speaker_label = labels_by_cluster.get(proposal.cluster_id)
+        if speaker_label is None:
+            continue
+        if source_cues.get(proposal.source_ordinal) != proposal.text:
+            raise AudioAnalysisError(
+                "model_output_invalid", "Role candidate subtitle citation is not retained evidence."
+            )
+        role_candidates.append(
+            {
+                "speaker_label": speaker_label,
+                "role": proposal.role,
+                "evidence": {
+                    "kind": "subtitle_text",
+                    "source_ordinal": proposal.source_ordinal,
+                    "text": proposal.text,
+                },
+            }
+        )
+    if user_role_metadata and metadata_evidence is None:
+        raise AudioAnalysisError("role_metadata_invalid", "User metadata evidence is unavailable.")
+    for metadata in user_role_metadata:
+        speaker_label = labels_by_cluster.get(metadata.cluster_id)
+        if speaker_label is None:
+            raise AudioAnalysisError(
+                "role_metadata_invalid", "User metadata references an unknown diarization group."
+            )
+        role_candidates.append(
+            {
+                "speaker_label": speaker_label,
+                "role": metadata.role,
+                "evidence": {
+                    "kind": "user_metadata",
+                    "record": metadata_evidence.as_json()
+                    if metadata_evidence is not None
+                    else None,
+                    "entry_id": _sha256_json(
+                        {
+                            "source_id": source_id,
+                            "cluster_id": metadata.cluster_id,
+                            "role": metadata.role,
+                        }
+                    ),
+                },
+            }
+        )
+    return {
+        "source_id": source_id,
+        "audio_stream_index": stream_index,
+        "speaker_turns": [
+            {
+                "speaker_label": labels_by_cluster[turn.cluster_id],
+                "raw_pts_interval": _interval_as_json(turn.interval),
+                "confidence": turn.confidence,
+            }
+            for turn in published
+        ],
+        "diarization_vad_conflicts": conflicts,
+        "role_candidates": role_candidates,
+    }
+
+
+def _intervals_overlap(left: HalfOpenInterval, right: HalfOpenInterval) -> bool:
+    return left.start < right.end and right.start < left.end
 
 
 def _require_synthetic_calibration_scope(
