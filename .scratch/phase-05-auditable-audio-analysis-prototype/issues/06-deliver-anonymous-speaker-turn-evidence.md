@@ -7,7 +7,7 @@ evidence.
 
 **Blocked by:** 04 -- Deliver VAD evidence and caption-gap risks.
 
-**Status:** resolved
+**Status:** ready-for-agent
 **Labels:** ready-for-agent
 
 - [x] Formal SpeakerTurns use Part-local anonymous labels, RawPtsTime intervals, and calibration-backed confidence; no cross-Part, cross-run, voiceprint, or real-name association is emitted.
@@ -27,3 +27,7 @@ uses `vcp resume-audio-analysis` with the retained partial report ID. The full
 suite (150), Ruff, formatter, and strict Mypy passed with controlled fixtures
 only: no model download/execution, network request, user-media access, or
 output publication occurred.
+
+2026-08-11: The implementation and all local acceptance checks are retained,
+but the ticket is reopened behind Ticket 04. Formal diarization evidence cannot
+be closed while the upstream VAD input provenance remains incomplete.

@@ -7,7 +7,7 @@ and immutable evidence boundaries, not a real-world audio-quality claim.
 
 **Blocked by:** 07 -- Deliver serial pauses and partial analysis reports.
 
-**Status:** resolved
+**Status:** ready-for-agent
 **Labels:** ready-for-agent
 
 - [x] End-to-end CLI tests cover missing and blocked models, stream selection, revalidation drift, calibration results, VAD risks, alignment and diarization conflicts, pauses, resumes, and partial reports.
@@ -26,3 +26,9 @@ formatter check, strict Mypy, and full 150-test suite passed from the project
 virtual environment. No model or dependency was acquired, no network, FFmpeg,
 FFprobe, or model action occurred, no user media was accessed, and no
 `outputs/` content was written. `production_validated` remains false.
+
+2026-08-11: Re-ran the full project suite at `5c7baa4`: 150 tests passed,
+Ruff and formatter checks passed, and strict Mypy reported no issues in 17
+source files. This proves the currently implemented controlled contract, but
+does not close the Phase 5 specification while Ticket 02 lacks actual
+FFmpeg-derived audio and Ticket 04 lacks immutable inspection-evidence binding.

@@ -11,6 +11,14 @@ identity.
 **Status:** ready-for-agent
 **Labels:** ready-for-agent
 
-- [ ] Each candidate is reported as `eligible`, `blocked`, or `unsupported` using the approved source, license, offline-runtime, credential, telemetry, dependency, and resource rules; Qwen and Silero remain candidates only.
-- [ ] Every controlled adapter retains raw native output plus a complete versioned Model-output projection; incomplete projection returns `model_output_invalid` and produces no formal evidence.
-- [ ] Deterministic Calibration evaluation records create identity-bound profiles or `calibration_failed`; uncalibrated, drifted, or failed profiles cannot publish formal alignment, VAD, or diarization evidence.
+- [x] Each candidate is reported as `eligible`, `blocked`, or `unsupported` using the approved source, license, offline-runtime, credential, telemetry, dependency, and resource rules; Qwen and Silero remain candidates only.
+- [x] Every controlled adapter retains raw native output plus a complete versioned Model-output projection; incomplete projection returns `model_output_invalid` and produces no formal evidence.
+- [x] Deterministic Calibration evaluation records create identity-bound profiles or `calibration_failed`; uncalibrated, drifted, or failed profiles cannot publish formal alignment, VAD, or diarization evidence.
+
+## Comments
+
+2026-08-11: Candidate eligibility, controlled raw/projection retention, and
+deterministic calibration gates are implemented and covered by the current
+offline suite. This ticket cannot be closed until Ticket 02 produces and binds
+the actual analysis-audio derivative that those capability projections must
+consume.

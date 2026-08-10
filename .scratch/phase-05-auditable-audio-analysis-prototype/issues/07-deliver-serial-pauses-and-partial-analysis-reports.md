@@ -7,7 +7,7 @@ instead of changing model configuration or recovery behavior on its own.
 
 **Blocked by:** 05 -- Deliver adopted alignment timing views; 06 -- Deliver anonymous speaker-turn evidence.
 
-**Status:** resolved
+**Status:** ready-for-agent
 **Labels:** ready-for-agent
 
 - [x] Stages execute serially and retain output, resource measurement, and unload evidence before loading the next controlled capability.
@@ -27,3 +27,7 @@ resource-reconfiguration decisions and rejects an attempt without the matching
 decision. Focused CLI-contract tests, Ruff, strict Mypy, and the full 150-test
 suite passed with controlled adapters only. No model, user media, network,
 download, FFmpeg, FFprobe, or `outputs/` action occurred.
+
+2026-08-11: Serial-stage implementation and checks remain in place, but this
+ticket cannot remain resolved while Tickets 05 and 06 are formally open behind
+the VAD provenance boundary.

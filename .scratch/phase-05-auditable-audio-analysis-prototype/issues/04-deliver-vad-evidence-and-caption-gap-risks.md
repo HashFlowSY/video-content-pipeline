@@ -30,3 +30,11 @@ suite passed. Final review found that the Phase 3 RunPlan does not retain an
 inspection-evidence fingerprint, so Phase 5 cannot prove that mutable retained
 PlanReport coverage/stream evidence has not changed before publishing formal
 VAD evidence. Ticket completion remains pending that prerequisite boundary.
+
+2026-08-11: The later source/subtitle revalidation change does not complete
+this prerequisite. `_matches_confirmed_plan` does not bind retained inspection
+evidence to the RunPlan, and `_revalidate_analysis_inputs` does not independently
+revalidate it. VAD currently compares a projection against hashes recomputed
+from the currently loaded PlanReport, not an immutable confirmed inspection
+record. Ticket 04 remains open until Ticket 02's derivative boundary and this
+PlanReport inspection-evidence binding are complete.

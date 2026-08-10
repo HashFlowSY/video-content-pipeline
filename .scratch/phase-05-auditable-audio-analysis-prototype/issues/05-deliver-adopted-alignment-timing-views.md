@@ -26,3 +26,7 @@ the whole mixed view without erasing per-cue reasons, and a second retained matc
 failure enters `alignment_diagnosis_required` with both failed timing views retained. No model,
 media, network, or `outputs/` action occurred. Unit/CLI tests, Ruff, strict Mypy,
 and the full 150-test suite passed.
+
+2026-08-11: The implementation and focused acceptance checks remain present,
+but formal closure is blocked by Ticket 04: VAD must first have a provenance-
+bound Analysis audio derivative and immutable PlanReport inspection evidence.
