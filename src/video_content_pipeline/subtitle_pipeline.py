@@ -357,6 +357,20 @@ def process_subtitles(
                 artifact, evidence, plan, report_id, project_root, decoders
             )
         )
+    decoder_diagnostics = _validate_decoder_targets(tuple(candidates), decoders)
+    if decoder_diagnostics:
+        report_path = _report_path(project_root, plan.source_artifacts, report_id)
+        candidate_report = SubtitleCandidateReport(
+            report_id,
+            plan.plan_id,
+            CandidateReportState.BLOCKED,
+            rules_fingerprint,
+            tuple(candidates),
+            decoder_diagnostics,
+            report_path,
+        )
+        _write_json_once(report_path, candidate_report.as_json())
+        return {"status": "blocked", "report": candidate_report.as_json()}
     ambiguous_source_ids = _ambiguous_source_ids(candidates)
     state = _initial_report_state(candidates, ambiguous_source_ids)
     report_diagnostics = tuple(
@@ -398,6 +412,17 @@ def resume_subtitles(
         report = load_plan_report(
             project_root / "plans" / "reports" / plan.report_id / "plan-report.json"
         )
+        if report.state is not PlanState.READY_FOR_CONFIRMATION or not _matches_plan(report, plan):
+            return _persist_blocked_report(
+                project_root,
+                plan_id,
+                report_id,
+                (
+                    PlanningDiagnostic(
+                        "run_plan_not_confirmed", "RunPlan evidence does not match confirmation."
+                    ),
+                ),
+            )
         expected_parent_report_id = _validated_report_id(parent_report_id)
         parent_path = _report_path(project_root, plan.source_artifacts, expected_parent_report_id)
         parent_report = _load_candidate_report(parent_path)
@@ -421,10 +446,12 @@ def resume_subtitles(
             )
         _ensure_subtitle_headroom(plan, report, project_root)
         decoders = _parse_decoders(requested_decoders)
+        decoder_diagnostics = _validate_decoder_targets(parent_report.candidates, decoders)
+        if decoder_diagnostics:
+            return _persist_blocked_report(project_root, plan_id, report_id, decoder_diagnostics)
         candidates = _resolve_decoder_candidates(
             parent_report.candidates,
             decoders,
-            plan,
             report,
         )
         selections = tuple(_parse_selection(value) for value in requested_selections)
@@ -558,16 +585,84 @@ def _ensure_subtitle_headroom(plan: RunPlan, report: object, project_root: Path)
     """Reserve the plan requirement plus one bounded payload per supported track."""
 
     evidence_values = getattr(report, "inspection_evidence", ())
-    supported_count = 0
+    estimated_increment = 0
     for evidence in evidence_values:
-        for candidate in getattr(evidence, "subtitle_tracks", ()):
-            if _source_format(evidence, candidate) is not None:
-                supported_count += 1
-    estimate = max(SUBTITLE_MAX_PAYLOAD_BYTES, supported_count * SUBTITLE_MAX_PAYLOAD_BYTES)
-    requirement = calculate_disk_headroom(estimate)
+        stream_indexes = tuple(
+            candidate.stream_index
+            for candidate in getattr(evidence, "subtitle_tracks", ())
+            if _source_format(evidence, candidate) is not None
+        )
+        estimated_increment += _subtitle_packet_growth_estimate(evidence, stream_indexes)
+    requirement = calculate_disk_headroom(estimated_increment)
     if plan.disk_headroom.required_bytes > requirement.required_bytes:
         requirement = plan.disk_headroom
     ensure_disk_headroom(project_root, requirement)
+
+
+def _subtitle_packet_growth_estimate(
+    evidence: PlanInspectionEvidence, stream_indexes: tuple[int, ...]
+) -> int:
+    if not stream_indexes:
+        return 0
+    document = evidence.coverage_document
+    if document is None:
+        return len(stream_indexes) * SUBTITLE_MAX_PAYLOAD_BYTES
+    try:
+        decoded = json.loads(document.raw_json)
+    except json.JSONDecodeError:
+        return len(stream_indexes) * SUBTITLE_MAX_PAYLOAD_BYTES
+    packets = decoded.get("packets") if isinstance(decoded, dict) else None
+    if not isinstance(packets, list):
+        return len(stream_indexes) * SUBTITLE_MAX_PAYLOAD_BYTES
+    packet_bytes = 0
+    known_indexes = set(stream_indexes)
+    for packet in packets:
+        if not isinstance(packet, dict):
+            continue
+        try:
+            stream_index = int(packet.get("stream_index"))
+        except (TypeError, ValueError):
+            continue
+        if stream_index not in known_indexes:
+            continue
+        size = packet.get("size")
+        if not isinstance(size, int | str) or isinstance(size, bool):
+            return len(stream_indexes) * SUBTITLE_MAX_PAYLOAD_BYTES
+        try:
+            packet_size = int(size)
+        except (TypeError, ValueError):
+            return len(stream_indexes) * SUBTITLE_MAX_PAYLOAD_BYTES
+        if packet_size < 0:
+            return len(stream_indexes) * SUBTITLE_MAX_PAYLOAD_BYTES
+        packet_bytes += packet_size
+    return min(packet_bytes, len(stream_indexes) * SUBTITLE_MAX_PAYLOAD_BYTES)
+
+
+def _validate_decoder_targets(
+    candidates: tuple[SubtitleCandidate, ...],
+    decoders: dict[tuple[str, int], str],
+) -> tuple[PlanningDiagnostic, ...]:
+    candidates_by_key = {
+        (candidate.source_id, candidate.stream_index): candidate for candidate in candidates
+    }
+    diagnostics: list[PlanningDiagnostic] = []
+    for source_id, stream_index in decoders:
+        candidate = candidates_by_key.get((source_id, stream_index))
+        if candidate is None:
+            diagnostics.append(
+                PlanningDiagnostic(
+                    "subtitle_decoder_invalid",
+                    f"Part {source_id} does not have subtitle stream {stream_index}.",
+                )
+            )
+        elif candidate.state is not CandidateState.ENCODING_AMBIGUOUS:
+            diagnostics.append(
+                PlanningDiagnostic(
+                    "subtitle_decoder_not_required",
+                    f"Part {source_id} stream {stream_index} is not encoding ambiguous.",
+                )
+            )
+    return tuple(diagnostics)
 
 
 def _ambiguous_source_ids(candidates: list[SubtitleCandidate]) -> tuple[str, ...]:
@@ -747,7 +842,7 @@ def _extract_supported_candidates(
             )
             continue
         candidates.append(
-            _extract_candidate(
+            _extract_candidate_with_resource_retention(
                 artifact,
                 candidate,
                 codec or "unknown",
@@ -856,6 +951,8 @@ def _extract_candidate(
         extraction_format.ffmpeg_codec,
         "-f",
         extraction_format.ffmpeg_muxer,
+        "-fs",
+        str(SUBTITLE_MAX_PAYLOAD_BYTES),
         str(raw_payload),
     )
     try:
@@ -983,6 +1080,7 @@ def _extract_candidate(
         track_id=f"stream-{candidate.stream_index}",
         coverage=relative_coverage,
     )
+
     if not track.valid:
         diagnostic = track.diagnostics[0]
         return SubtitleCandidate(
@@ -1027,10 +1125,58 @@ def _extract_candidate(
     )
 
 
+def _extract_candidate_with_resource_retention(
+    artifact: SourceArtifact,
+    candidate: SubtitleTrackCandidate,
+    codec: str,
+    extraction_format: ExtractionFormat,
+    coverage_by_stream: tuple[tuple[int, StreamCoverage], ...],
+    ffmpeg: PinnedExternalTool | None,
+    report_id: str,
+    project_root: Path,
+    requested_decoder: str | None,
+) -> SubtitleCandidate:
+    try:
+        return _extract_candidate(
+            artifact,
+            candidate,
+            codec,
+            extraction_format,
+            coverage_by_stream,
+            ffmpeg,
+            report_id,
+            project_root,
+            requested_decoder,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        payload_path = (
+            project_root
+            / "work"
+            / artifact.source_id
+            / report_id
+            / f"stream-{candidate.stream_index}.payload.{extraction_format.source_format}"
+        )
+        evidence = _payload_evidence_safely(payload_path)
+        return SubtitleCandidate(
+            artifact.source_id,
+            candidate.stream_index,
+            CandidateState.INCOMPLETE,
+            source_format=extraction_format.source_format,
+            raw_payload_path=evidence.path,
+            raw_payload_sha256=evidence.sha256,
+            raw_payload_bytes=evidence.byte_count,
+            attempt_id=report_id,
+            codec=codec,
+            diagnostic=PlanningDiagnostic(
+                "subtitle_extraction_resource_failure",
+                f"Subtitle extraction could not retain a complete payload: {error}.",
+            ),
+        )
+
+
 def _resolve_decoder_candidates(
     candidates: tuple[SubtitleCandidate, ...],
     decoders: dict[tuple[str, int], str],
-    plan: RunPlan,
     report: object,
 ) -> tuple[SubtitleCandidate, ...]:
     if not decoders:
@@ -1059,6 +1205,15 @@ def _resolve_decoder_candidates(
         try:
             payload_path = Path(candidate.raw_payload_path)
             payload = payload_path.read_bytes()
+            payload_hash, payload_bytes = sha256_file(payload_path)
+            if (
+                payload_hash != candidate.raw_payload_sha256
+                or payload_bytes != candidate.raw_payload_bytes
+            ):
+                raise SubtitleReportError(
+                    "subtitle_payload_changed",
+                    "The retained subtitle payload no longer matches its recorded evidence.",
+                )
             if len(payload) > SUBTITLE_MAX_PAYLOAD_BYTES:
                 raise SubtitleReportError(
                     "extraction_size_limit",
@@ -1180,6 +1335,13 @@ def _payload_evidence(raw_payload: Path) -> RawPayloadEvidence:
         return RawPayloadEvidence(None, None, None)
     digest, byte_count = sha256_file(raw_payload)
     return RawPayloadEvidence(raw_payload.as_posix(), digest, byte_count)
+
+
+def _payload_evidence_safely(raw_payload: Path) -> RawPayloadEvidence:
+    try:
+        return _payload_evidence(raw_payload)
+    except OSError:
+        return RawPayloadEvidence(None, None, None)
 
 
 def _write_source_candidate(

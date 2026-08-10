@@ -28,4 +28,6 @@ payload limit, 300-second timeout, interruption, unsupported codecs, and
 revalidation drift all produce retained non-selectable diagnostics. Re-running
 extraction creates a new immutable workspace attempt and leaves incomplete
 payload bytes untouched. Offline verification passed: 131 tests, Ruff,
-formatter check, and strict Mypy.
+formatter check, and strict Mypy. The review follow-up added an FFmpeg
+filesystem cap, retained resource-failure diagnostics, and rejected decoder
+choices for non-ambiguous streams.

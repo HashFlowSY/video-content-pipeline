@@ -181,6 +181,8 @@ def test_subtitles_extracts_and_validates_one_utf8_srt_track_into_a_retained_wor
             "copy",
             "-f",
             "srt",
+            "-fs",
+            str(subtitle_pipeline.SUBTITLE_MAX_PAYLOAD_BYTES),
             str(raw_payload),
         )
     ]
@@ -318,7 +320,15 @@ def test_subtitles_converts_mov_text_to_a_retained_srt_payload(
 
     assert candidate["state"] == "valid"
     assert candidate["source_format"] == "srt"
-    assert extraction_calls[0][-5:] == ("-c:s", "srt", "-f", "srt", candidate["raw_payload_path"])
+    assert extraction_calls[0][-7:] == (
+        "-c:s",
+        "srt",
+        "-f",
+        "srt",
+        "-fs",
+        str(subtitle_pipeline.SUBTITLE_MAX_PAYLOAD_BYTES),
+        candidate["raw_payload_path"],
+    )
 
 
 def test_subtitles_preserves_original_cue_order_in_source_exports(
@@ -667,6 +677,66 @@ def test_subtitles_blocks_before_extraction_when_disk_preflight_fails(
         }
     ]
     assert extraction_calls == []
+
+
+def test_subtitles_rejects_decoder_choices_for_nonambiguous_or_unknown_tracks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    extraction_calls = _configure_cli(tmp_path, monkeypatch)
+    source_id = plan.source_artifacts[0].source_id
+
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--decoder",
+                f"{source_id}=1=cp1252",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    nonambiguous = json.loads(capsys.readouterr().out)
+    assert nonambiguous["status"] == "blocked"
+    assert nonambiguous["report"]["diagnostics"][0]["reason"] == "subtitle_decoder_not_required"
+
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--decoder",
+                f"{source_id}=99=cp1252",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    unknown = json.loads(capsys.readouterr().out)
+    assert unknown["status"] == "blocked"
+    assert unknown["report"]["diagnostics"][0]["reason"] == "subtitle_decoder_invalid"
+    assert len(extraction_calls) == 2
+
+
+def test_subtitles_retains_a_filesystem_resource_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _configure_cli(tmp_path, monkeypatch)
+
+    def unavailable_destination(_arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        raise OSError("controlled workspace failure")
+
+    monkeypatch.setattr(subtitle_pipeline, "run_tool", unavailable_destination)
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    response = json.loads(capsys.readouterr().out)
+    candidate = response["report"]["candidates"][0]
+    assert response["status"] == "blocked"
+    assert candidate["state"] == "incomplete"
+    assert candidate["diagnostic"]["reason"] == "subtitle_extraction_resource_failure"
 
 
 def test_subtitles_retries_to_a_new_attempt_without_reusing_incomplete_bytes(
