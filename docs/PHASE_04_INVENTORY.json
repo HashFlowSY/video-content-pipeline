@@ -85,6 +85,11 @@
       "command": "python -m pytest -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
       "result": "125 passed; all static checks passed for explicit subtitle-track selection",
       "mode": "project-local venv after require-project-venv.sh; controlled localhost proxy only for existing offline acquisition tests"
+    },
+    {
+      "command": "python -m pytest -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
+      "result": "131 passed; all static checks passed for bounded subtitle-processing failures",
+      "mode": "project-local venv after require-project-venv.sh; controlled localhost proxy only for existing offline acquisition tests"
     }
   ],
   "retention": "All Phase 4 design and implementation records are retained. No source media, model, dependency, cache, or temporary file is deleted by this implementation task. Tests use controlled FFmpeg substitutes only."

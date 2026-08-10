@@ -564,3 +564,139 @@ def test_subtitle_selection_cannot_promote_an_invalid_candidate(
             "message": (f"Part {source_id} does not have a valid selected subtitle stream."),
         }
     ]
+
+
+def test_subtitles_requires_and_records_an_explicit_decoder_for_ambiguous_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _configure_cli(tmp_path, monkeypatch, payload=b"1\n00:00:00,000 --> 00:00:01,000\ncaf\xe9\n")
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    initial = json.loads(capsys.readouterr().out)
+    candidate = initial["report"]["candidates"][0]
+    assert initial["status"] == "blocked"
+    assert candidate["state"] == "encoding_ambiguous"
+    assert candidate["decoder"] is None
+
+    decoder = f"{plan.source_artifacts[0].source_id}=1=cp1252"
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--resume",
+                initial["report"]["report_id"],
+                "--decoder",
+                decoder,
+                "--json",
+            ]
+        )
+        == 0
+    )
+    resumed = json.loads(capsys.readouterr().out)
+    resolved = resumed["report"]["candidates"][0]
+    assert resumed["status"] == "completed"
+    assert resolved["state"] == "valid"
+    assert resolved["decoder"] == "cp1252"
+    assert "café" in Path(resolved["source_vtt_path"]).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        ("timeout", "subtitle_extraction_timeout"),
+        ("interrupt", "subtitle_extraction_interrupted"),
+        ("size", "extraction_size_limit"),
+    ],
+)
+def test_subtitles_retains_bounded_extraction_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+    reason: str,
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _configure_cli(tmp_path, monkeypatch)
+
+    def failed_extraction(arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        destination = Path(arguments[-1])
+        if failure == "timeout":
+            destination.write_bytes(b"partial")
+            raise subprocess.TimeoutExpired(arguments, 1)
+        if failure == "interrupt":
+            destination.write_bytes(b"partial")
+            raise KeyboardInterrupt
+        with destination.open("wb") as payload:
+            payload.seek(subtitle_pipeline.SUBTITLE_MAX_PAYLOAD_BYTES + 1)
+            payload.write(b"x")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(subtitle_pipeline, "run_tool", failed_extraction)
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    response = json.loads(capsys.readouterr().out)
+    candidate = response["report"]["candidates"][0]
+    assert response["status"] == "blocked"
+    assert candidate["state"] == "incomplete"
+    assert candidate["diagnostic"]["reason"] == reason
+    assert candidate["attempt_id"] == response["report"]["report_id"]
+
+
+def test_subtitles_blocks_before_extraction_when_disk_preflight_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    extraction_calls = _configure_cli(tmp_path, monkeypatch)
+
+    def no_headroom(_root: Path, _requirement: object) -> None:
+        raise subtitle_pipeline.SourceIntakeError(
+            "disk_headroom_insufficient", "controlled disk preflight failure"
+        )
+
+    monkeypatch.setattr(subtitle_pipeline, "ensure_disk_headroom", no_headroom)
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    response = json.loads(capsys.readouterr().out)
+    assert response["status"] == "blocked"
+    assert response["report"]["diagnostics"] == [
+        {
+            "reason": "disk_headroom_insufficient",
+            "message": "controlled disk preflight failure",
+        }
+    ]
+    assert extraction_calls == []
+
+
+def test_subtitles_retries_to_a_new_attempt_without_reusing_incomplete_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _configure_cli(tmp_path, monkeypatch)
+    attempts = 0
+
+    def retrying_extraction(arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        attempts += 1
+        destination = Path(arguments[-1])
+        if attempts == 1:
+            destination.write_bytes(b"partial")
+            return subprocess.CompletedProcess(arguments, 1, "", "interrupted fixture")
+        destination.write_bytes(b"1\n00:00:00,000 --> 00:00:01,000\nretry\n")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(subtitle_pipeline, "run_tool", retrying_extraction)
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    first = json.loads(capsys.readouterr().out)
+    first_candidate = first["report"]["candidates"][0]
+    assert first_candidate["state"] == "incomplete"
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    second = json.loads(capsys.readouterr().out)
+    second_candidate = second["report"]["candidates"][0]
+    assert second_candidate["state"] == "valid"
+    assert first["report"]["report_id"] != second["report"]["report_id"]
+    assert first_candidate["raw_payload_path"] != second_candidate["raw_payload_path"]
+    assert Path(first_candidate["raw_payload_path"]).read_bytes() == b"partial"
+    assert attempts == 2

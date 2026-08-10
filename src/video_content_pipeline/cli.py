@@ -73,6 +73,14 @@ def _parser() -> argparse.ArgumentParser:
     subtitles.add_argument("plan_id")
     subtitles.add_argument("--resume", metavar="REPORT_ID")
     subtitles.add_argument("--select", action="append", default=[], metavar="PART_ID=STREAM_INDEX")
+    subtitles.add_argument(
+        "--decoder",
+        "--decode",
+        dest="decoders",
+        action="append",
+        default=[],
+        metavar="PART_ID=STREAM_INDEX=ENCODING",
+    )
     subtitles.add_argument("--json", action="store_true")
     return parser
 
@@ -111,13 +119,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if arguments.command == "subtitles":
         if arguments.resume is None:
-            result = process_subtitles(arguments.plan_id, _project_root())
+            result = process_subtitles(
+                arguments.plan_id, _project_root(), tuple(arguments.decoders)
+            )
         else:
             result = resume_subtitles(
                 arguments.plan_id,
                 arguments.resume,
                 tuple(arguments.select),
                 _project_root(),
+                tuple(arguments.decoders),
             )
         print(json.dumps(result, sort_keys=True))
         return 0

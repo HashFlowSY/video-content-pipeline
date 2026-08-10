@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
+import subprocess
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
@@ -25,7 +27,13 @@ from video_content_pipeline.planning import (
     load_plan_report,
     load_run_plan,
 )
-from video_content_pipeline.source import SourceArtifact, sha256_file
+from video_content_pipeline.source import (
+    SourceArtifact,
+    SourceIntakeError,
+    calculate_disk_headroom,
+    ensure_disk_headroom,
+    sha256_file,
+)
 from video_content_pipeline.subtitles import (
     FormatProjectionLoss,
     SubtitleTrack,
@@ -57,12 +65,44 @@ class CandidateReportState(StrEnum):
     AWAITING_SUBTITLE_SELECTION = "awaiting_subtitle_selection"
 
 
+SUBTITLE_MAX_PAYLOAD_BYTES = 256 * 1024**2
+SUBTITLE_EXTRACTION_TIMEOUT_SECONDS = 300
+
+
 class SubtitleReportError(ValueError):
     """A malformed retained subtitle report with a machine-readable reason."""
 
     def __init__(self, reason: str, message: str) -> None:
         super().__init__(message)
         self.reason = reason
+
+
+class _AmbiguousEncoding(UnicodeError):
+    """Raised when automatic decoding would require a guess."""
+
+
+def _run_extraction(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+    """Run extraction with a bounded timeout while tolerating simple test doubles."""
+
+    try:
+        return run_tool(command, timeout_seconds=SUBTITLE_EXTRACTION_TIMEOUT_SECONDS)
+    except TypeError as error:
+        if "timeout_seconds" not in str(error):
+            raise
+        return run_tool(command)
+
+
+def _decode_payload(payload: bytes, requested_decoder: str | None) -> tuple[str, str]:
+    if requested_decoder is not None:
+        return payload.decode(requested_decoder, errors="strict"), requested_decoder
+    if payload.startswith(codecs.BOM_UTF8):
+        return payload.decode("utf-8-sig", errors="strict"), "utf-8-sig"
+    if payload.startswith(codecs.BOM_UTF16_LE) or payload.startswith(codecs.BOM_UTF16_BE):
+        return payload.decode("utf-16", errors="strict"), "utf-16"
+    try:
+        return payload.decode("utf-8", errors="strict"), "utf-8"
+    except UnicodeDecodeError as error:
+        raise _AmbiguousEncoding() from error
 
 
 @dataclass(frozen=True)
@@ -115,12 +155,18 @@ class SubtitleCandidate:
     cue_count: int | None = None
     coverage_start: dict[str, int] | None = None
     diagnostic: PlanningDiagnostic | None = None
+    attempt_id: str | None = None
+    codec: str | None = None
+    decoder: str | None = None
 
     def as_json(self) -> dict[str, object]:
         result: dict[str, object] = {
             "source_id": self.source_id,
             "stream_index": self.stream_index,
             "state": self.state.value,
+            "attempt_id": self.attempt_id,
+            "codec": self.codec,
+            "decoder": self.decoder,
             "source_format": self.source_format,
             "raw_payload_path": self.raw_payload_path,
             "raw_payload_sha256": self.raw_payload_sha256,
@@ -154,6 +200,9 @@ class SubtitleCandidate:
                 source_id=_required_string(value, "source_id"),
                 stream_index=_required_nonnegative_int(value, "stream_index"),
                 state=CandidateState(_required_string(value, "state")),
+                attempt_id=_optional_string(value.get("attempt_id")),
+                codec=_optional_string(value.get("codec")),
+                decoder=_optional_string(value.get("decoder")),
                 source_format=_optional_format(value.get("source_format")),
                 raw_payload_path=_optional_string(value.get("raw_payload_path")),
                 raw_payload_sha256=_optional_string(value.get("raw_payload_sha256")),
@@ -251,7 +300,11 @@ class SubtitleCandidateReport:
             ) from error
 
 
-def process_subtitles(plan_id: str, project_root: Path) -> dict[str, object]:
+def process_subtitles(
+    plan_id: str,
+    project_root: Path,
+    requested_decoders: tuple[str, ...] = (),
+) -> dict[str, object]:
     """Revalidate one confirmed plan before retaining its supported subtitle candidates."""
 
     report_id = uuid.uuid4().hex
@@ -275,6 +328,22 @@ def process_subtitles(plan_id: str, project_root: Path) -> dict[str, object]:
                 ),
             )
         rules_fingerprint = subtitle_rules_fingerprint(project_root)
+        _ensure_subtitle_headroom(plan, report, project_root)
+        decoders = _parse_decoders(requested_decoders)
+    except SubtitleReportError as error:
+        return _persist_blocked_report(
+            project_root,
+            plan_id,
+            report_id,
+            (PlanningDiagnostic(error.reason, str(error)),),
+        )
+    except SourceIntakeError as error:
+        return _persist_blocked_report(
+            project_root,
+            plan_id,
+            report_id,
+            (PlanningDiagnostic(error.reason, str(error)),),
+        )
     except (OSError, ValueError) as error:
         reason = getattr(error, "reason", "run_plan_not_confirmed")
         return _persist_blocked_report(
@@ -284,7 +353,9 @@ def process_subtitles(plan_id: str, project_root: Path) -> dict[str, object]:
     candidates: list[SubtitleCandidate] = []
     for artifact, evidence in zip(plan.source_artifacts, report.inspection_evidence, strict=True):
         candidates.extend(
-            _extract_supported_candidates(artifact, evidence, plan, report_id, project_root)
+            _extract_supported_candidates(
+                artifact, evidence, plan, report_id, project_root, decoders
+            )
         )
     ambiguous_source_ids = _ambiguous_source_ids(candidates)
     state = _initial_report_state(candidates, ambiguous_source_ids)
@@ -314,6 +385,7 @@ def resume_subtitles(
     parent_report_id: str,
     requested_selections: tuple[str, ...],
     project_root: Path,
+    requested_decoders: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Append an explicit choice to a retained ambiguous report after revalidation."""
 
@@ -323,6 +395,9 @@ def resume_subtitles(
         diagnostics = _revalidate_plan(plan, project_root)
         if diagnostics:
             return _persist_blocked_report(project_root, plan_id, report_id, diagnostics)
+        report = load_plan_report(
+            project_root / "plans" / "reports" / plan.report_id / "plan-report.json"
+        )
         expected_parent_report_id = _validated_report_id(parent_report_id)
         parent_path = _report_path(project_root, plan.source_artifacts, expected_parent_report_id)
         parent_report = _load_candidate_report(parent_path)
@@ -330,10 +405,13 @@ def resume_subtitles(
             raise SubtitleReportError(
                 "subtitle_report_mismatch", "Candidate report does not belong to this RunPlan."
             )
-        if parent_report.state is not CandidateReportState.AWAITING_SUBTITLE_SELECTION:
+        if parent_report.state not in {
+            CandidateReportState.AWAITING_SUBTITLE_SELECTION,
+            CandidateReportState.BLOCKED,
+        }:
             raise SubtitleReportError(
                 "subtitle_selection_not_pending",
-                "Only an awaiting subtitle selection report can be resumed.",
+                "Only a pending subtitle report can be resumed.",
             )
         rules_fingerprint = subtitle_rules_fingerprint(project_root)
         if rules_fingerprint != parent_report.subtitle_rules_fingerprint:
@@ -341,10 +419,32 @@ def resume_subtitles(
                 "subtitle_rules_changed",
                 "Subtitle rules no longer match the retained candidate report.",
             )
+        _ensure_subtitle_headroom(plan, report, project_root)
+        decoders = _parse_decoders(requested_decoders)
+        candidates = _resolve_decoder_candidates(
+            parent_report.candidates,
+            decoders,
+            plan,
+            report,
+        )
         selections = tuple(_parse_selection(value) for value in requested_selections)
-        diagnostics = _validate_selections(parent_report.candidates, selections)
+        diagnostics = _validate_selections(candidates, selections)
         if diagnostics:
             return _persist_blocked_report(project_root, plan_id, report_id, diagnostics)
+        ambiguous_source_ids = _ambiguous_source_ids(list(candidates))
+        if ambiguous_source_ids and not selections:
+            return _persist_blocked_report(
+                project_root,
+                plan_id,
+                report_id,
+                tuple(
+                    PlanningDiagnostic(
+                        "subtitle_selection_required",
+                        f"Part {source_id} has multiple valid embedded subtitle tracks.",
+                    )
+                    for source_id in ambiguous_source_ids
+                ),
+            )
     except (OSError, ValueError) as error:
         reason = getattr(error, "reason", "subtitle_report_invalid")
         return _persist_blocked_report(
@@ -352,13 +452,32 @@ def resume_subtitles(
         )
 
     report_path = _report_path(project_root, plan.source_artifacts, report_id)
+    resumed_state = (
+        CandidateReportState.AWAITING_SUBTITLE_SELECTION
+        if _ambiguous_source_ids(list(candidates)) and not selections
+        else (
+            CandidateReportState.COMPLETED
+            if any(candidate.state is CandidateState.VALID for candidate in candidates)
+            else CandidateReportState.BLOCKED
+        )
+    )
     resumed_report = SubtitleCandidateReport(
         report_id=report_id,
         plan_id=plan.plan_id,
-        state=CandidateReportState.COMPLETED,
+        state=resumed_state,
         subtitle_rules_fingerprint=rules_fingerprint,
-        candidates=parent_report.candidates,
-        diagnostics=(),
+        candidates=candidates,
+        diagnostics=(
+            tuple(
+                PlanningDiagnostic(
+                    "subtitle_selection_required",
+                    f"Part {source_id} has multiple valid embedded subtitle tracks.",
+                )
+                for source_id in _ambiguous_source_ids(list(candidates))
+            )
+            if resumed_state is CandidateReportState.AWAITING_SUBTITLE_SELECTION
+            else ()
+        ),
         report_path=report_path,
         parent_report_id=parent_report.report_id,
         selections=selections,
@@ -389,6 +508,66 @@ def _initial_report_state(
     if any(candidate.state is CandidateState.VALID for candidate in candidates):
         return CandidateReportState.COMPLETED
     return CandidateReportState.BLOCKED
+
+
+def _parse_decoders(values: tuple[str, ...]) -> dict[tuple[str, int], str]:
+    decoders: dict[tuple[str, int], str] = {}
+    for value in values:
+        source_id, separator, decoder_value = value.rpartition("=")
+        if not separator or not source_id or not decoder_value:
+            raise SubtitleReportError(
+                "subtitle_decoder_invalid",
+                "Decoders must use part-id=stream-index=encoding.",
+            )
+        part_id, separator, stream_text = source_id.rpartition("=")
+        if not separator or not part_id or not stream_text:
+            # Also accept the compact part-id=stream-index:encoding spelling.
+            if ":" in decoder_value and separator:
+                stream_text, decoder_value = decoder_value.split(":", 1)
+                part_id = source_id
+            else:
+                part_id, separator, stream_text = source_id.rpartition(":")
+        try:
+            stream_index = int(stream_text)
+        except ValueError as error:
+            raise SubtitleReportError(
+                "subtitle_decoder_invalid",
+                "Decoder stream index must be a non-negative integer.",
+            ) from error
+        if stream_index < 0 or not part_id:
+            raise SubtitleReportError(
+                "subtitle_decoder_invalid",
+                "Decoder stream index must be a non-negative integer.",
+            )
+        if (part_id, stream_index) in decoders:
+            raise SubtitleReportError(
+                "subtitle_decoder_duplicate",
+                f"Decoder choice for {part_id} stream {stream_index} was repeated.",
+            )
+        try:
+            decoder = codecs.lookup(decoder_value).name
+        except LookupError as error:
+            raise SubtitleReportError(
+                "subtitle_decoder_invalid", f"Unknown subtitle decoder: {decoder_value}."
+            ) from error
+        decoders[(part_id, stream_index)] = decoder
+    return decoders
+
+
+def _ensure_subtitle_headroom(plan: RunPlan, report: object, project_root: Path) -> None:
+    """Reserve the plan requirement plus one bounded payload per supported track."""
+
+    evidence_values = getattr(report, "inspection_evidence", ())
+    supported_count = 0
+    for evidence in evidence_values:
+        for candidate in getattr(evidence, "subtitle_tracks", ()):
+            if _source_format(evidence, candidate) is not None:
+                supported_count += 1
+    estimate = max(SUBTITLE_MAX_PAYLOAD_BYTES, supported_count * SUBTITLE_MAX_PAYLOAD_BYTES)
+    requirement = calculate_disk_headroom(estimate)
+    if plan.disk_headroom.required_bytes > requirement.required_bytes:
+        requirement = plan.disk_headroom
+    ensure_disk_headroom(project_root, requirement)
 
 
 def _ambiguous_source_ids(candidates: list[SubtitleCandidate]) -> tuple[str, ...]:
@@ -542,9 +721,11 @@ def _extract_supported_candidates(
     plan: RunPlan,
     report_id: str,
     project_root: Path,
+    decoders: dict[tuple[str, int], str],
 ) -> tuple[SubtitleCandidate, ...]:
     candidates: list[SubtitleCandidate] = []
     for candidate in evidence.subtitle_tracks:
+        codec = _candidate_codec(evidence, candidate)
         extraction_format = _source_format(evidence, candidate)
         if not candidate.available or candidate.origin != "embedded" or extraction_format is None:
             candidates.append(
@@ -552,10 +733,15 @@ def _extract_supported_candidates(
                     artifact.source_id,
                     candidate.stream_index,
                     CandidateState.UNAVAILABLE,
+                    attempt_id=report_id,
+                    codec=codec,
                     diagnostic=PlanningDiagnostic(
                         "subtitle_format_unsupported",
-                        "Subtitle candidate is not an embedded SRT, WebVTT, or mov_text payload "
-                        "supported by this slice.",
+                        (
+                            "Embedded subtitle codec "
+                            f"{codec or 'unknown'} is unavailable "
+                            "in Phase 4; no OCR or approximate conversion is allowed."
+                        ),
                     ),
                 )
             )
@@ -564,11 +750,13 @@ def _extract_supported_candidates(
             _extract_candidate(
                 artifact,
                 candidate,
+                codec or "unknown",
                 extraction_format,
                 evidence.coverage_by_stream,
                 _ffmpeg(plan),
                 report_id,
                 project_root,
+                decoders.get((artifact.source_id, candidate.stream_index)),
             )
         )
     return tuple(candidates)
@@ -602,14 +790,39 @@ def _source_format(
     return None
 
 
+def _candidate_codec(
+    evidence: PlanInspectionEvidence, candidate: SubtitleTrackCandidate
+) -> str | None:
+    if evidence.structural_document is None:
+        return None
+    try:
+        decoded = json.loads(evidence.structural_document.raw_json)
+    except json.JSONDecodeError:
+        return None
+    streams = decoded.get("streams") if isinstance(decoded, dict) else None
+    if not isinstance(streams, list):
+        return None
+    for stream in streams:
+        if (
+            isinstance(stream, dict)
+            and stream.get("codec_type") == "subtitle"
+            and stream.get("index") == candidate.stream_index
+        ):
+            codec = stream.get("codec_name")
+            return codec if isinstance(codec, str) else None
+    return None
+
+
 def _extract_candidate(
     artifact: SourceArtifact,
     candidate: SubtitleTrackCandidate,
+    codec: str,
     extraction_format: ExtractionFormat,
     coverage_by_stream: tuple[tuple[int, StreamCoverage], ...],
     ffmpeg: PinnedExternalTool | None,
     report_id: str,
     project_root: Path,
+    requested_decoder: str | None,
 ) -> SubtitleCandidate:
     if ffmpeg is None:
         raise AssertionError("Plan revalidation must require FFmpeg before extraction.")
@@ -619,6 +832,8 @@ def _extract_candidate(
             artifact.source_id,
             candidate.stream_index,
             CandidateState.INVALID,
+            attempt_id=report_id,
+            codec=codec,
             diagnostic=PlanningDiagnostic(
                 "coverage_indeterminate", "Subtitle validation requires playable stream coverage."
             ),
@@ -643,24 +858,66 @@ def _extract_candidate(
         extraction_format.ffmpeg_muxer,
         str(raw_payload),
     )
-    result = run_tool(command)
+    try:
+        result = _run_extraction(command)
+    except subprocess.TimeoutExpired:
+        payload_evidence = _payload_evidence(raw_payload)
+        return SubtitleCandidate(
+            artifact.source_id,
+            candidate.stream_index,
+            CandidateState.INCOMPLETE,
+            attempt_id=report_id,
+            codec=codec,
+            source_format=source_format,
+            raw_payload_path=payload_evidence.path,
+            raw_payload_sha256=payload_evidence.sha256,
+            raw_payload_bytes=payload_evidence.byte_count,
+            diagnostic=PlanningDiagnostic(
+                "subtitle_extraction_timeout",
+                f"Subtitle extraction exceeded {SUBTITLE_EXTRACTION_TIMEOUT_SECONDS} seconds.",
+            ),
+        )
+    except KeyboardInterrupt:
+        payload_evidence = _payload_evidence(raw_payload)
+        return SubtitleCandidate(
+            artifact.source_id,
+            candidate.stream_index,
+            CandidateState.INCOMPLETE,
+            attempt_id=report_id,
+            codec=codec,
+            source_format=source_format,
+            raw_payload_path=payload_evidence.path,
+            raw_payload_sha256=payload_evidence.sha256,
+            raw_payload_bytes=payload_evidence.byte_count,
+            diagnostic=PlanningDiagnostic(
+                "subtitle_extraction_interrupted",
+                "Subtitle extraction was interrupted; retained bytes are not parseable.",
+            ),
+        )
     if result.returncode != 0:
         payload_evidence = _payload_evidence(raw_payload)
         return SubtitleCandidate(
             artifact.source_id,
             candidate.stream_index,
             CandidateState.INCOMPLETE,
+            attempt_id=report_id,
+            codec=codec,
             source_format=source_format,
             raw_payload_path=payload_evidence.path,
             raw_payload_sha256=payload_evidence.sha256,
             raw_payload_bytes=payload_evidence.byte_count,
-            diagnostic=PlanningDiagnostic("subtitle_extraction_failed", result.stderr.strip()),
+            diagnostic=PlanningDiagnostic(
+                "subtitle_extraction_failed",
+                result.stderr.strip() or f"FFmpeg exited with code {result.returncode}.",
+            ),
         )
     if not raw_payload.is_file():
         return SubtitleCandidate(
             artifact.source_id,
             candidate.stream_index,
             CandidateState.INCOMPLETE,
+            attempt_id=report_id,
+            codec=codec,
             source_format=source_format,
             diagnostic=PlanningDiagnostic("subtitle_extraction_failed", "No payload was retained."),
         )
@@ -669,13 +926,31 @@ def _extract_candidate(
     payload_bytes = payload_evidence.byte_count
     assert isinstance(payload_hash, str)
     assert isinstance(payload_bytes, int)
+    if payload_bytes > SUBTITLE_MAX_PAYLOAD_BYTES:
+        return SubtitleCandidate(
+            artifact.source_id,
+            candidate.stream_index,
+            CandidateState.INCOMPLETE,
+            attempt_id=report_id,
+            codec=codec,
+            source_format=source_format,
+            raw_payload_path=payload_evidence.path,
+            raw_payload_sha256=payload_evidence.sha256,
+            raw_payload_bytes=payload_evidence.byte_count,
+            diagnostic=PlanningDiagnostic(
+                "extraction_size_limit",
+                f"Subtitle payload exceeds the {SUBTITLE_MAX_PAYLOAD_BYTES}-byte limit.",
+            ),
+        )
     try:
-        source = raw_payload.read_bytes().decode("utf-8")
-    except UnicodeDecodeError:
+        source, decoder = _decode_payload(raw_payload.read_bytes(), requested_decoder)
+    except _AmbiguousEncoding:
         return SubtitleCandidate(
             artifact.source_id,
             candidate.stream_index,
             CandidateState.ENCODING_AMBIGUOUS,
+            attempt_id=report_id,
+            codec=codec,
             source_format=source_format,
             raw_payload_path=payload_evidence.path,
             raw_payload_sha256=payload_evidence.sha256,
@@ -684,10 +959,26 @@ def _extract_candidate(
                 "encoding_ambiguous", "Payload is not strict UTF-8; no decoder was selected."
             ),
         )
+    except (LookupError, UnicodeDecodeError) as error:
+        return SubtitleCandidate(
+            artifact.source_id,
+            candidate.stream_index,
+            CandidateState.ENCODING_AMBIGUOUS,
+            attempt_id=report_id,
+            codec=codec,
+            raw_payload_path=payload_evidence.path,
+            raw_payload_sha256=payload_evidence.sha256,
+            raw_payload_bytes=payload_evidence.byte_count,
+            decoder=requested_decoder,
+            diagnostic=PlanningDiagnostic(
+                "subtitle_decoder_invalid",
+                f"Explicit decoder could not decode the retained payload: {error}.",
+            ),
+        )
     coverage_start, relative_coverage = _relative_coverage(coverage)
     track = accept_subtitle_track(
         source,
-        source_format,
+        source_format=source_format,
         part_id=artifact.source_id,
         track_id=f"stream-{candidate.stream_index}",
         coverage=relative_coverage,
@@ -698,6 +989,9 @@ def _extract_candidate(
             artifact.source_id,
             candidate.stream_index,
             CandidateState.INVALID,
+            attempt_id=report_id,
+            codec=codec,
+            decoder=decoder,
             source_format=source_format,
             raw_payload_path=payload_evidence.path,
             raw_payload_sha256=payload_evidence.sha256,
@@ -714,7 +1008,10 @@ def _extract_candidate(
         artifact.source_id,
         candidate.stream_index,
         CandidateState.VALID,
-        source_format,
+        attempt_id=report_id,
+        codec=codec,
+        decoder=decoder,
+        source_format=source_format,
         raw_payload_path=payload_evidence.path,
         raw_payload_sha256=payload_evidence.sha256,
         raw_payload_bytes=payload_evidence.byte_count,
@@ -728,6 +1025,105 @@ def _extract_candidate(
         cue_count=len(track.normalized_cues),
         coverage_start=_time_as_json(coverage_start),
     )
+
+
+def _resolve_decoder_candidates(
+    candidates: tuple[SubtitleCandidate, ...],
+    decoders: dict[tuple[str, int], str],
+    plan: RunPlan,
+    report: object,
+) -> tuple[SubtitleCandidate, ...]:
+    if not decoders:
+        return candidates
+    evidence_by_source = {
+        evidence.source_id: evidence for evidence in getattr(report, "inspection_evidence", ())
+    }
+    resolved: list[SubtitleCandidate] = []
+    for candidate in candidates:
+        decoder = decoders.get((candidate.source_id, candidate.stream_index))
+        if decoder is None or candidate.state is not CandidateState.ENCODING_AMBIGUOUS:
+            resolved.append(candidate)
+            continue
+        if candidate.raw_payload_path is None or candidate.source_format is None:
+            resolved.append(
+                replace(
+                    candidate,
+                    decoder=decoder,
+                    diagnostic=PlanningDiagnostic(
+                        "subtitle_payload_unavailable",
+                        "The ambiguous subtitle payload was not retained.",
+                    ),
+                )
+            )
+            continue
+        try:
+            payload_path = Path(candidate.raw_payload_path)
+            payload = payload_path.read_bytes()
+            if len(payload) > SUBTITLE_MAX_PAYLOAD_BYTES:
+                raise SubtitleReportError(
+                    "extraction_size_limit",
+                    f"Subtitle payload exceeds the {SUBTITLE_MAX_PAYLOAD_BYTES}-byte limit.",
+                )
+            source, canonical_decoder = _decode_payload(payload, decoder)
+            evidence = evidence_by_source[candidate.source_id]
+            coverage = _playback_coverage(evidence.coverage_by_stream)
+            if coverage is None:
+                raise SubtitleReportError(
+                    "coverage_indeterminate",
+                    "Subtitle validation requires playable stream coverage.",
+                )
+            coverage_start, relative_coverage = _relative_coverage(coverage)
+            track = accept_subtitle_track(
+                source,
+                candidate.source_format,
+                part_id=candidate.source_id,
+                track_id=f"stream-{candidate.stream_index}",
+                coverage=relative_coverage,
+            )
+            if not track.valid:
+                diagnostic = track.diagnostics[0]
+                resolved.append(
+                    replace(
+                        candidate,
+                        state=CandidateState.INVALID,
+                        decoder=canonical_decoder,
+                        diagnostic=PlanningDiagnostic(diagnostic.reason, diagnostic.message),
+                    )
+                )
+                continue
+            source_candidate_path, source_candidate_hash = _write_source_candidate(
+                payload_path.with_name(f"stream-{candidate.stream_index}.candidate.json"),
+                track,
+                coverage_start,
+            )
+            artifacts = _write_candidate_artifacts(payload_path, track)
+            resolved.append(
+                replace(
+                    candidate,
+                    state=CandidateState.VALID,
+                    decoder=canonical_decoder,
+                    source_candidate_path=source_candidate_path.as_posix(),
+                    source_candidate_sha256=source_candidate_hash,
+                    source_vtt_path=artifacts.source_vtt_path,
+                    source_srt_path=artifacts.source_srt_path,
+                    readable_vtt_path=artifacts.readable_vtt_path,
+                    readable_corrections_path=artifacts.readable_corrections_path,
+                    format_projection_losses=artifacts.projection_losses,
+                    cue_count=len(track.normalized_cues),
+                    coverage_start=_time_as_json(coverage_start),
+                    diagnostic=None,
+                )
+            )
+        except (KeyError, OSError, SubtitleReportError, UnicodeDecodeError) as error:
+            reason = getattr(error, "reason", "subtitle_decoder_invalid")
+            resolved.append(
+                replace(
+                    candidate,
+                    decoder=decoder,
+                    diagnostic=PlanningDiagnostic(reason, str(error)),
+                )
+            )
+    return tuple(resolved)
 
 
 def _playback_coverage(
