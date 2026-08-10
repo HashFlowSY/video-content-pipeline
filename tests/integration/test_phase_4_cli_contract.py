@@ -24,7 +24,10 @@ from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 
 
 def _confirmed_plan(
-    project_root: Path, *, subtitle_codecs: tuple[str, ...] = ("subrip",)
+    project_root: Path,
+    *,
+    subtitle_codecs: tuple[str, ...] = ("subrip",),
+    subtitle_stream_indexes: tuple[int, ...] | None = None,
 ) -> RunPlan:
     media_path = project_root / "input" / "source" / "media"
     media_path.parent.mkdir(parents=True)
@@ -32,9 +35,11 @@ def _confirmed_plan(
     digest, byte_count = sha256_file(media_path)
     artifact = SourceArtifact(digest, digest, byte_count, media_path)
     ffmpeg = PinnedExternalTool("ffmpeg", project_root / "controlled-ffmpeg", "fixture", "f" * 64)
+    stream_indexes = subtitle_stream_indexes or tuple(range(1, len(subtitle_codecs) + 1))
+    assert len(stream_indexes) == len(subtitle_codecs)
     subtitle_streams = [
         {"index": stream_index, "codec_type": "subtitle", "codec_name": codec}
-        for stream_index, codec in enumerate(subtitle_codecs, start=1)
+        for stream_index, codec in zip(stream_indexes, subtitle_codecs, strict=True)
     ]
     inspection = PlanInspectionEvidence(
         source_id=artifact.source_id,
@@ -52,7 +57,7 @@ def _confirmed_plan(
         ),
         subtitle_tracks=tuple(
             SubtitleTrackCandidate(index, "zh", "matroska", "embedded", True)
-            for index in range(1, len(subtitle_codecs) + 1)
+            for index in stream_indexes
         ),
     )
     report = create_plan_report(
@@ -437,6 +442,42 @@ def test_subtitles_requires_an_explicit_selection_for_ambiguous_valid_tracks(
     ]
     assert len(extraction_calls) == 2
     assert Path(report["report_path"]).read_text(encoding="utf-8") == original_report
+
+
+def test_subtitle_selection_can_resume_a_zero_index_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(
+        tmp_path,
+        subtitle_codecs=("subrip", "subrip"),
+        subtitle_stream_indexes=(0, 1),
+    )
+    _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+
+    selection = f"{plan.source_artifacts[0].source_id}=0"
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--resume",
+                report["report_id"],
+                "--select",
+                selection,
+                "--json",
+            ]
+        )
+        == 0
+    )
+    resumed = json.loads(capsys.readouterr().out)
+
+    assert resumed["status"] == "completed"
+    assert resumed["report"]["selections"] == [
+        {"source_id": plan.source_artifacts[0].source_id, "stream_index": 0}
+    ]
 
 
 def test_subtitle_selection_resume_revalidates_before_reusing_candidates(

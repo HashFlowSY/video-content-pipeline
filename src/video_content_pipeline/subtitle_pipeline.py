@@ -152,7 +152,7 @@ class SubtitleCandidate:
             diagnostic = value.get("diagnostic")
             return cls(
                 source_id=_required_string(value, "source_id"),
-                stream_index=_required_positive_int(value, "stream_index"),
+                stream_index=_required_nonnegative_int(value, "stream_index"),
                 state=CandidateState(_required_string(value, "state")),
                 source_format=_optional_format(value.get("source_format")),
                 raw_payload_path=_optional_string(value.get("raw_payload_path")),
@@ -428,11 +428,11 @@ def _parse_selection(value: str) -> SubtitleTrackSelection:
         stream_index = int(stream_index_text)
     except ValueError as error:
         raise SubtitleReportError(
-            "subtitle_selection_invalid", "Selection stream index must be a positive integer."
+            "subtitle_selection_invalid", "Selection stream index must be a non-negative integer."
         ) from error
-    if stream_index <= 0:
+    if stream_index < 0:
         raise SubtitleReportError(
-            "subtitle_selection_invalid", "Selection stream index must be a positive integer."
+            "subtitle_selection_invalid", "Selection stream index must be a non-negative integer."
         )
     return SubtitleTrackSelection(source_id, stream_index)
 
@@ -881,6 +881,13 @@ def _required_positive_int(value: Mapping[str, object], field: str) -> int:
     return result
 
 
+def _required_nonnegative_int(value: Mapping[str, object], field: str) -> int:
+    result = value.get(field)
+    if not isinstance(result, int) or isinstance(result, bool) or result < 0:
+        raise ValueError(f"{field} must be a non-negative integer")
+    return result
+
+
 def _optional_nonnegative_int(value: object) -> int | None:
     if value is None:
         return None
@@ -939,7 +946,7 @@ def _selection_from_json(value: object) -> SubtitleTrackSelection:
     if not isinstance(value, Mapping):
         raise ValueError("Selection must be an object")
     return SubtitleTrackSelection(
-        _required_string(value, "source_id"), _required_positive_int(value, "stream_index")
+        _required_string(value, "source_id"), _required_nonnegative_int(value, "stream_index")
     )
 
 
