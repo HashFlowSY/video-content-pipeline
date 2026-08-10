@@ -23,6 +23,7 @@ from video_content_pipeline.planning import (
 )
 from video_content_pipeline.source import SourceArtifact, sha256_file
 from video_content_pipeline.subtitle_pipeline import (
+    CandidateReportState,
     CandidateState,
     SubtitleCandidateReport,
     SubtitleReportError,
@@ -298,6 +299,7 @@ def analyze_audio(
                     analysis_audio_streams,
                     confirmed_report.inspection_evidence,
                     subtitle_report,
+                    plan,
                     project_root,
                 ),
             )
@@ -1226,11 +1228,36 @@ def _derive_vad_evidence(
     selections: tuple[AnalysisAudioStreamSelection, ...],
     inspection_evidence: tuple[PlanInspectionEvidence, ...],
     subtitle_report: SubtitleCandidateReport,
+    plan: RunPlan,
     project_root: Path,
 ) -> dict[str, object]:
     candidate_id = candidate.get("candidate_id")
     if not isinstance(candidate_id, str):
         raise AudioAnalysisError("model_output_invalid", "VAD candidate identity is missing.")
+    calibration = candidate.get("calibration")
+    if not isinstance(calibration, Mapping):
+        raise AudioAnalysisError("calibration_failed", "VAD calibration evidence is missing.")
+    profile = calibration.get("profile")
+    if not isinstance(profile, Mapping):
+        raise AudioAnalysisError("calibration_failed", "VAD calibration profile is missing.")
+    profile_path = _retained_evidence_path(profile, project_root)
+    try:
+        profile_document = json.loads(profile_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "calibration_failed", "VAD calibration profile cannot be read."
+        ) from error
+    synthetic_only = (
+        isinstance(profile_document, Mapping)
+        and profile_document.get("qualification_scope") == "synthetic_verification_only"
+    )
+    if synthetic_only and any(
+        artifact.origin_kind != "synthetic_fixture" for artifact in plan.source_artifacts
+    ):
+        raise AudioAnalysisError(
+            "calibration_scope_insufficient",
+            "Synthetic-only VAD calibration cannot publish evidence for a non-synthetic source.",
+        )
     thresholds = _vad_thresholds(candidate, project_root)
     candidate_segments = _projected_vad_segments(candidate, selections, project_root)
     coverage_by_source = {
@@ -1254,8 +1281,6 @@ def _derive_vad_evidence(
             long_silence_threshold=thresholds["long_silence_duration"],
         )
         parts.append(_vad_part_evidence_as_json(evidence))
-    calibration = candidate.get("calibration")
-    assert isinstance(calibration, Mapping)
     return {
         "capability": "vad",
         "candidate_id": candidate_id,
@@ -1378,6 +1403,7 @@ def _validate_vad_time_mapping(
     if (
         value.get("schema_version") != 1
         or value.get("coordinate") != "raw_pts_identity"
+        or value.get("structural_evidence_sha256") != selection.structural_evidence_sha256
         or value.get("coverage_evidence_sha256") != selection.coverage_evidence_sha256
         or not isinstance(derivative, Mapping)
     ):
@@ -1413,6 +1439,15 @@ def _primary_caption_intervals(
         for selection in subtitle_report.selections
         if selection.source_id == source_id
     }
+    if len(valid) > 1 and len(selected_indexes) != 1:
+        raise AudioAnalysisError(
+            "subtitle_selection_required",
+            "Multiple valid subtitle tracks require an explicit retained selection.",
+        )
+    if subtitle_report.state is CandidateReportState.AWAITING_SUBTITLE_SELECTION:
+        raise AudioAnalysisError(
+            "subtitle_selection_required", "Subtitle track selection remains unresolved."
+        )
     if len(valid) == 1:
         return valid[0].raw_pts_cue_intervals
     if len(selected_indexes) == 1:

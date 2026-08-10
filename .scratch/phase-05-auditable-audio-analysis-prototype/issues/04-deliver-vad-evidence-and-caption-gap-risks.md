@@ -7,8 +7,8 @@ subtitle coverage without creating a transcript.
 
 **Blocked by:** 03 -- Introduce capability and calibration evidence.
 
-**Status:** resolved
-**Labels:** enhancement
+**Status:** ready-for-agent
+**Labels:** ready-for-agent
 
 - [x] Formal Voice activity intervals completely partition known usable audio in RawPtsTime into `speech_likely`, `non_speech`, or `indeterminate`; missing, rounded, or undecidable segments remain `indeterminate`.
 - [x] The report retains all uncovered-speech risk evidence, separately reports `audio_state_indeterminate`, and elevates only continuous duration-qualified risk without silently discarding short evidence.
@@ -26,4 +26,7 @@ duration thresholds affect risk elevation and continuous non-speech yields long
 silence. Tests cover coverage gaps, short risks, absent Primary subtitle coverage,
 and the CLI report contract. No model, dependency, source media, network, or
 `outputs/` publication action occurred. Ruff, strict Mypy, and the complete 147-test
-suite passed.
+suite passed. Final review found that the Phase 3 RunPlan does not retain an
+inspection-evidence fingerprint, so Phase 5 cannot prove that mutable retained
+PlanReport coverage/stream evidence has not changed before publishing formal
+VAD evidence. Ticket completion remains pending that prerequisite boundary.

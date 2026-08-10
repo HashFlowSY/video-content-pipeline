@@ -38,7 +38,9 @@ def _confirmed_plan(project_root: Path, audio_coverage: StreamCoverage | None = 
     media_path.parent.mkdir(parents=True)
     media_path.write_bytes(b"phase-5-cli-contract-fixture")
     digest, byte_count = sha256_file(media_path)
-    artifact = SourceArtifact(digest, digest, byte_count, media_path)
+    artifact = SourceArtifact(
+        digest, digest, byte_count, media_path, origin_kind="synthetic_fixture"
+    )
     evidence = PlanInspectionEvidence(
         source_id=artifact.source_id,
         structural_document=ProbeDocument(
@@ -529,6 +531,15 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
                     "source_time_mapping": {
                         "schema_version": 1,
                         "coordinate": "raw_pts_identity",
+                        "structural_evidence_sha256": audio_analysis._sha256_json(
+                            json.dumps(
+                                {
+                                    "streams": [
+                                        {"index": 2, "codec_type": "audio", "time_base": "1/1"}
+                                    ]
+                                }
+                            )
+                        ),
                         "coverage_evidence_sha256": coverage_evidence_sha256,
                         "derivative_evidence": derivative_evidence,
                     },

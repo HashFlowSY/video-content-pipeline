@@ -132,7 +132,7 @@
         "ruff_format_check": "passed",
         "mypy": "passed; no issues in 17 source files",
         "pytest_full": "147 passed",
-        "code_review": "standards and specification findings corrected and reverified"
+        "code_review": "VAD-local findings corrected; PlanReport inspection-evidence fingerprint remains a Phase 3 prerequisite"
       },
       "resource_bounds": {
         "memory": "less than 256 MiB",
