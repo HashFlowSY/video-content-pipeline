@@ -1,7 +1,0 @@
-{
-  "path": "recipes/phase-02-fixtures-v1.json",
-  "byte_count": 2716,
-  "sha256": "71dd17d646840e01d123befe0a18f737f45197a213b8ba45135057dbc7d9ee08",
-  "retention_class": "recipe",
-  "fixture_id": "fixture-corpus"
-}

@@ -1,2 +1,0 @@
-Archiving invalid Ticket 10 manifest at /Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tests/fixtures/evidence/phase-02-manifest-rerun-03-invalid.json
-jq: error (at /Users/shangyang/Desktop/workspace/projects/video-content-pipeline/tmp/phase-02-fixture-manifest-repair-20260809/phase-02-manifest.json:7): Cannot iterate over null (null)
