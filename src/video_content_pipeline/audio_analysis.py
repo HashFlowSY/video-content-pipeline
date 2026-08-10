@@ -25,6 +25,7 @@ from video_content_pipeline.source import SourceArtifact, sha256_file
 from video_content_pipeline.subtitle_pipeline import (
     CandidateReportState,
     CandidateState,
+    SubtitleCandidate,
     SubtitleCandidateReport,
     SubtitleReportError,
     subtitle_rules_fingerprint,
@@ -53,6 +54,59 @@ class VoiceActivityState(StrEnum):
     SPEECH_LIKELY = "speech_likely"
     NON_SPEECH = "non_speech"
     INDETERMINATE = "indeterminate"
+
+
+@dataclass(frozen=True)
+class AlignmentCue:
+    """One immutable Primary subtitle cue eligible only for timing adoption."""
+
+    source_ordinal: int
+    text: str
+    interval: HalfOpenInterval
+
+
+@dataclass(frozen=True)
+class AlignmentProposal:
+    """A controlled aligner proposal for one existing subtitle cue identity."""
+
+    source_ordinal: int
+    text: str
+    interval: HalfOpenInterval
+    confidence: float
+
+
+@dataclass(frozen=True)
+class AlignmentCandidateEvidence:
+    """The retained adoption outcome for one Primary subtitle cue."""
+
+    source_ordinal: int
+    original_interval: HalfOpenInterval
+    proposed_interval: HalfOpenInterval
+    interval: HalfOpenInterval
+    adopted: bool
+    reason: str
+    global_reason: str | None
+    vad_indeterminate_risk: bool
+
+
+@dataclass(frozen=True)
+class AdoptedAlignmentTimingView:
+    """An immutable timing derivative that leaves source subtitle evidence unchanged."""
+
+    state: str
+    source_id: str
+    language: str
+    cues: tuple[AlignmentCue, ...]
+    candidates: tuple[AlignmentCandidateEvidence, ...]
+    diagnostic: str | None = None
+
+
+@dataclass(frozen=True)
+class ProjectedAlignmentPart:
+    """One complete controlled-adapter alignment projection for a selected Part."""
+
+    language: str
+    proposals: tuple[AlignmentProposal, ...]
 
 
 @dataclass(frozen=True)
@@ -288,22 +342,37 @@ def analyze_audio(
             model_registry_evidence = _input_evidence(registry_path)
         capabilities = _capabilities_from_registry(project_root, workspace_path)
         vad_candidate = _qualified_vad_candidate(capabilities)
+        alignment_candidate = _qualified_alignment_candidate(capabilities)
         if vad_candidate is not None:
-            _revalidate_vad_inputs(plan, subtitle_report, project_root)
+            _revalidate_analysis_inputs(plan, subtitle_report, project_root)
             analysis_audio_streams = _select_audio_streams(
                 confirmed_report.inspection_evidence, requested_audio_streams
             )
-            formal_evidence = (
-                _derive_vad_evidence(
-                    vad_candidate,
-                    analysis_audio_streams,
-                    confirmed_report.inspection_evidence,
-                    subtitle_report,
-                    plan,
-                    project_root,
-                ),
+            vad_evidence = _derive_vad_evidence(
+                vad_candidate,
+                analysis_audio_streams,
+                confirmed_report.inspection_evidence,
+                subtitle_report,
+                plan,
+                project_root,
             )
+            evidence: list[dict[str, object]] = [vad_evidence]
+            formal_evidence = tuple(evidence)
             processing_authorization = {"state": "approved", "reason": "vad_revalidated"}
+            if alignment_candidate is not None:
+                evidence.append(
+                    _derive_alignment_evidence(
+                        alignment_candidate,
+                        analysis_audio_streams,
+                        confirmed_report.inspection_evidence,
+                        subtitle_report,
+                        plan,
+                        vad_evidence,
+                        project_root,
+                        workspace_path,
+                    )
+                )
+                formal_evidence = tuple(evidence)
         report_plan_id = plan.plan_id
         report_subtitle_id = subtitle_report.report_id
     except (AudioAnalysisError, PlanningError, SubtitleReportError, OSError, ValueError) as error:
@@ -320,7 +389,7 @@ def analyze_audio(
         subtitle_report_id=report_subtitle_id,
         state=(
             AudioAnalysisReportState.PARTIAL
-            if formal_evidence and not diagnostics
+            if formal_evidence
             else AudioAnalysisReportState.BLOCKED
         ),
         workspace_path=workspace_path,
@@ -927,6 +996,177 @@ def derive_vad_part_evidence(
     )
 
 
+def derive_adopted_alignment_timing_view(
+    *,
+    source_id: str,
+    language: str,
+    source_cues: tuple[AlignmentCue, ...],
+    proposals: tuple[AlignmentProposal, ...],
+    usable_audio_intervals: tuple[HalfOpenInterval, ...],
+    voice_activity_intervals: tuple[VoiceActivityInterval, ...],
+    minimum_confidence: float,
+    duration_rules: Mapping[str, tuple[ExactTime, ExactTime]],
+) -> AdoptedAlignmentTimingView:
+    """Adopt only calibrated candidate times for an unchanged Primary subtitle track."""
+
+    if not source_id or not language or not 0 <= minimum_confidence <= 1:
+        raise AudioAnalysisError(
+            "alignment_input_invalid", "Alignment identity and confidence threshold are invalid."
+        )
+    _validate_alignment_text_contract(source_cues, proposals)
+    duration_rule = duration_rules.get(language)
+    if duration_rule is None:
+        raise AudioAnalysisError(
+            "alignment_duration_rule_missing",
+            "Alignment calibration lacks a duration rule for the subtitle language.",
+        )
+    minimum_duration, maximum_duration = duration_rule
+    if minimum_duration <= ExactTime(0) or maximum_duration < minimum_duration:
+        raise AudioAnalysisError(
+            "alignment_duration_rule_invalid", "Alignment duration rule is invalid."
+        )
+    _validate_alignment_audio_evidence(usable_audio_intervals, voice_activity_intervals)
+
+    proposals_by_ordinal = {proposal.source_ordinal: proposal for proposal in proposals}
+    candidates: list[AlignmentCandidateEvidence] = []
+    mixed_cues: list[AlignmentCue] = []
+    for cue in source_cues:
+        proposal = proposals_by_ordinal[cue.source_ordinal]
+        reason, indeterminate_risk = _alignment_candidate_reason(
+            proposal,
+            usable_audio_intervals,
+            voice_activity_intervals,
+            minimum_confidence,
+            minimum_duration,
+            maximum_duration,
+        )
+        adopted = reason == "adopted"
+        interval = proposal.interval if adopted else cue.interval
+        candidates.append(
+            AlignmentCandidateEvidence(
+                source_ordinal=cue.source_ordinal,
+                original_interval=cue.interval,
+                proposed_interval=proposal.interval,
+                interval=interval,
+                adopted=adopted,
+                reason=reason,
+                global_reason=None,
+                vad_indeterminate_risk=indeterminate_risk,
+            )
+        )
+        mixed_cues.append(AlignmentCue(cue.source_ordinal, cue.text, interval))
+
+    if not _has_stable_alignment_order(mixed_cues):
+        untrusted_candidates = tuple(
+            AlignmentCandidateEvidence(
+                source_ordinal=candidate.source_ordinal,
+                original_interval=candidate.original_interval,
+                proposed_interval=candidate.proposed_interval,
+                interval=candidate.original_interval,
+                adopted=False,
+                reason=candidate.reason,
+                global_reason="alignment_untrusted",
+                vad_indeterminate_risk=candidate.vad_indeterminate_risk,
+            )
+            for candidate in candidates
+        )
+        return AdoptedAlignmentTimingView(
+            state="alignment_untrusted",
+            source_id=source_id,
+            language=language,
+            cues=source_cues,
+            candidates=untrusted_candidates,
+            diagnostic="source_order_invalid",
+        )
+    return AdoptedAlignmentTimingView(
+        state="adopted",
+        source_id=source_id,
+        language=language,
+        cues=tuple(mixed_cues),
+        candidates=tuple(candidates),
+    )
+
+
+def _validate_alignment_text_contract(
+    source_cues: tuple[AlignmentCue, ...], proposals: tuple[AlignmentProposal, ...]
+) -> None:
+    source_by_ordinal = {cue.source_ordinal: cue for cue in source_cues}
+    proposal_by_ordinal = {proposal.source_ordinal: proposal for proposal in proposals}
+    if (
+        not source_cues
+        or len(source_by_ordinal) != len(source_cues)
+        or len(proposal_by_ordinal) != len(proposals)
+        or set(source_by_ordinal) != set(proposal_by_ordinal)
+        or any(
+            source_by_ordinal[ordinal].text != proposal.text
+            for ordinal, proposal in proposal_by_ordinal.items()
+        )
+    ):
+        raise AudioAnalysisError(
+            "alignment_text_contract_violation",
+            "Alignment may only propose times for the existing Primary subtitle cue identities.",
+        )
+
+
+def _validate_alignment_audio_evidence(
+    usable_audio_intervals: tuple[HalfOpenInterval, ...],
+    voice_activity_intervals: tuple[VoiceActivityInterval, ...],
+) -> None:
+    if not usable_audio_intervals:
+        raise AudioAnalysisError(
+            "alignment_audio_coverage_missing", "Alignment requires usable audio coverage evidence."
+        )
+    previous_end: ExactTime | None = None
+    for interval in usable_audio_intervals:
+        if previous_end is not None and interval.start < previous_end:
+            raise AudioAnalysisError(
+                "alignment_audio_coverage_invalid", "Usable audio coverage intervals overlap."
+            )
+        previous_end = interval.end
+    for activity in voice_activity_intervals:
+        if not any(_contains(coverage, activity.interval) for coverage in usable_audio_intervals):
+            raise AudioAnalysisError(
+                "alignment_vad_invalid", "VAD evidence falls outside usable audio coverage."
+            )
+
+
+def _alignment_candidate_reason(
+    proposal: AlignmentProposal,
+    usable_audio_intervals: tuple[HalfOpenInterval, ...],
+    voice_activity_intervals: tuple[VoiceActivityInterval, ...],
+    minimum_confidence: float,
+    minimum_duration: ExactTime,
+    maximum_duration: ExactTime,
+) -> tuple[str, bool]:
+    if proposal.confidence < minimum_confidence or proposal.confidence > 1:
+        return "alignment_low_confidence", False
+    duration = proposal.interval.end - proposal.interval.start
+    if duration < minimum_duration or duration > maximum_duration:
+        return "alignment_duration_implausible", False
+    if not any(_contains(coverage, proposal.interval) for coverage in usable_audio_intervals):
+        return "alignment_out_of_coverage", False
+    if any(
+        activity.state is VoiceActivityState.NON_SPEECH
+        and proposal.interval.overlaps(activity.interval)
+        for activity in voice_activity_intervals
+    ):
+        return "alignment_vad_conflict", False
+    indeterminate_risk = any(
+        activity.state is VoiceActivityState.INDETERMINATE
+        and proposal.interval.overlaps(activity.interval)
+        for activity in voice_activity_intervals
+    )
+    return "adopted", indeterminate_risk
+
+
+def _has_stable_alignment_order(cues: list[AlignmentCue]) -> bool:
+    return all(
+        earlier.source_ordinal < later.source_ordinal
+        and earlier.interval.start <= later.interval.start
+        for earlier, later in zip(cues, cues[1:], strict=False)
+    )
+
+
 def _usable_audio_intervals(audio_coverage: StreamCoverage) -> tuple[HalfOpenInterval, ...]:
     if audio_coverage.coverage is None or audio_coverage.diagnostics:
         raise AudioAnalysisError(
@@ -1073,6 +1313,35 @@ def _qualified_vad_candidate(
         raise AudioAnalysisError(
             "vad_model_selection_required",
             "Multiple calibrated VAD candidates require an explicit future selection.",
+        )
+    return qualified[0] if qualified else None
+
+
+def _qualified_alignment_candidate(
+    capabilities: tuple[CapabilityAvailability, ...],
+) -> dict[str, object] | None:
+    alignment_capability = next(
+        (capability for capability in capabilities if capability.capability == "forced_alignment"),
+        None,
+    )
+    if alignment_capability is None:
+        return None
+    qualified: list[dict[str, object]] = []
+    for candidate in alignment_capability.candidates:
+        calibration = candidate.get("calibration")
+        adapter = candidate.get("adapter")
+        if (
+            candidate.get("state") == "eligible"
+            and isinstance(calibration, Mapping)
+            and calibration.get("state") == "qualified"
+            and isinstance(adapter, Mapping)
+            and adapter.get("state") == "projected"
+        ):
+            qualified.append(candidate)
+    if len(qualified) > 1:
+        raise AudioAnalysisError(
+            "alignment_model_selection_required",
+            "Multiple calibrated alignment candidates require an explicit future selection.",
         )
     return qualified[0] if qualified else None
 
@@ -1289,7 +1558,511 @@ def _derive_vad_evidence(
     }
 
 
-def _revalidate_vad_inputs(
+def _derive_alignment_evidence(
+    candidate: Mapping[str, object],
+    selections: tuple[AnalysisAudioStreamSelection, ...],
+    inspection_evidence: tuple[PlanInspectionEvidence, ...],
+    subtitle_report: SubtitleCandidateReport,
+    plan: RunPlan,
+    vad_evidence: Mapping[str, object],
+    project_root: Path,
+    workspace_path: Path,
+) -> dict[str, object]:
+    candidate_id = candidate.get("candidate_id")
+    calibration = candidate.get("calibration")
+    if not isinstance(candidate_id, str) or not isinstance(calibration, Mapping):
+        raise AudioAnalysisError("model_output_invalid", "Alignment candidate evidence is missing.")
+    _require_synthetic_calibration_scope(calibration, plan, project_root, "alignment")
+    minimum_confidence, duration_rules = _alignment_thresholds(candidate, project_root)
+    projections_by_source = _projected_alignment_proposals(candidate, selections, project_root)
+    expected_sources = _primary_alignment_source_ids(subtitle_report, selections)
+    if set(projections_by_source) != expected_sources:
+        raise AudioAnalysisError(
+            "model_output_invalid",
+            "Alignment projection must provide exactly every selected Part with a Primary "
+            "subtitle track.",
+        )
+    vad_by_source = _vad_intervals_by_source(vad_evidence)
+    coverage_by_source = {
+        evidence.source_id: dict(evidence.coverage_by_stream) for evidence in inspection_evidence
+    }
+    selection_by_source = {selection.source_id: selection for selection in selections}
+    parts: list[dict[str, object]] = []
+    for source_id, projected_part in projections_by_source.items():
+        selection = selection_by_source.get(source_id)
+        if selection is None:
+            raise AudioAnalysisError(
+                "model_output_invalid", "Alignment projection Part is not selected."
+            )
+        audio_coverage = coverage_by_source.get(source_id, {}).get(selection.stream_index)
+        if audio_coverage is None:
+            raise AudioAnalysisError(
+                "audio_coverage_indeterminate",
+                "Selected audio stream lacks retained coverage evidence.",
+            )
+        source_cues, source_evidence = _primary_alignment_cues(
+            subtitle_report, source_id, project_root
+        )
+        view_path = (
+            workspace_path
+            / "alignment"
+            / candidate_id
+            / source_id
+            / "adopted-alignment-timing-view.json"
+        )
+        view = derive_adopted_alignment_timing_view(
+            source_id=source_id,
+            language=projected_part.language,
+            source_cues=source_cues,
+            proposals=projected_part.proposals,
+            usable_audio_intervals=_usable_audio_intervals(audio_coverage),
+            voice_activity_intervals=vad_by_source[source_id],
+            minimum_confidence=minimum_confidence,
+            duration_rules=duration_rules,
+        )
+        view_document = _alignment_view_as_json(view, source_evidence)
+        if view.state == "alignment_untrusted":
+            fingerprint = _alignment_failure_fingerprint(
+                plan, source_id, source_evidence, candidate_id, calibration, view
+            )
+            view_document["failure_fingerprint"] = fingerprint
+            prior_reports = _matching_alignment_failure_reports(project_root, fingerprint)
+            if prior_reports:
+                _write_json_once(view_path, view_document)
+                diagnosis_path = view_path.with_name("alignment-diagnosis.json")
+                _write_json_once(
+                    diagnosis_path,
+                    {
+                        "schema_version": 1,
+                        "state": "alignment_diagnosis_required",
+                        "failure_fingerprint": fingerprint,
+                        "evidence_reports": [path.as_posix() for path in prior_reports],
+                        "current_timing_view": _input_evidence(view_path).as_json(),
+                        "diagnosis": "root_cause_inconclusive",
+                    },
+                )
+                parts.append(
+                    {
+                        "source_id": source_id,
+                        "audio_stream_index": selection.stream_index,
+                        "timing_view": _input_evidence(view_path).as_json(),
+                        "state": "alignment_diagnosis_required",
+                        "diagnostic": _input_evidence(diagnosis_path).as_json(),
+                    }
+                )
+                continue
+        _write_json_once(view_path, view_document)
+        parts.append(
+            {
+                "source_id": source_id,
+                "audio_stream_index": selection.stream_index,
+                "timing_view": _input_evidence(view_path).as_json(),
+                "state": view.state,
+                "diagnostic": view.diagnostic,
+            }
+        )
+    return {
+        "capability": "forced_alignment",
+        "candidate_id": candidate_id,
+        "calibration_profile": calibration.get("profile"),
+        "parts": parts,
+    }
+
+
+def _require_synthetic_calibration_scope(
+    calibration: Mapping[str, object], plan: RunPlan, project_root: Path, capability: str
+) -> None:
+    profile = calibration.get("profile")
+    if not isinstance(profile, Mapping):
+        raise AudioAnalysisError(
+            "calibration_failed", f"{capability} calibration profile is missing."
+        )
+    profile_path = _retained_evidence_path(profile, project_root)
+    try:
+        document = json.loads(profile_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "calibration_failed", f"{capability} calibration profile cannot be read."
+        ) from error
+    if (
+        isinstance(document, Mapping)
+        and document.get("qualification_scope") == "synthetic_verification_only"
+        and any(artifact.origin_kind != "synthetic_fixture" for artifact in plan.source_artifacts)
+    ):
+        raise AudioAnalysisError(
+            "calibration_scope_insufficient",
+            f"Synthetic-only {capability} calibration cannot publish evidence for a "
+            "non-synthetic source.",
+        )
+
+
+def _alignment_thresholds(
+    candidate: Mapping[str, object], project_root: Path
+) -> tuple[float, dict[str, tuple[ExactTime, ExactTime]]]:
+    calibration = candidate.get("calibration")
+    if not isinstance(calibration, Mapping) or not isinstance(calibration.get("record"), Mapping):
+        raise AudioAnalysisError(
+            "alignment_calibration_required", "Alignment calibration record is missing."
+        )
+    record_path = _retained_evidence_path(calibration["record"], project_root)
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        thresholds = record.get("thresholds") if isinstance(record, Mapping) else None
+        confidence = (
+            thresholds.get("minimum_confidence") if isinstance(thresholds, Mapping) else None
+        )
+        rules = thresholds.get("duration_rules") if isinstance(thresholds, Mapping) else None
+        if (
+            not isinstance(confidence, float | int)
+            or isinstance(confidence, bool)
+            or not 0 <= confidence <= 1
+            or not isinstance(rules, Mapping)
+        ):
+            raise ValueError
+        parsed_rules = {
+            language: (
+                _exact_time_from_json(rule.get("minimum_duration")),
+                _exact_time_from_json(rule.get("maximum_duration")),
+            )
+            for language, rule in rules.items()
+            if isinstance(language, str) and language and isinstance(rule, Mapping)
+        }
+        if len(parsed_rules) != len(rules):
+            raise ValueError
+        return float(confidence), parsed_rules
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "alignment_calibration_required", "Alignment calibration thresholds are invalid."
+        ) from error
+
+
+def _projected_alignment_proposals(
+    candidate: Mapping[str, object],
+    selections: tuple[AnalysisAudioStreamSelection, ...],
+    project_root: Path,
+) -> dict[str, ProjectedAlignmentPart]:
+    adapter = candidate.get("adapter")
+    if not isinstance(adapter, Mapping) or not isinstance(adapter.get("projection"), Mapping):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Alignment projection evidence is missing."
+        )
+    projection_path = _retained_evidence_path(adapter["projection"], project_root)
+    try:
+        projection = json.loads(projection_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "model_output_invalid", "Alignment projection cannot be read."
+        ) from error
+    result = projection.get("result") if isinstance(projection, Mapping) else None
+    parts = result.get("parts") if isinstance(result, Mapping) else None
+    if not isinstance(parts, list):
+        raise AudioAnalysisError("model_output_invalid", "Alignment projection must provide Parts.")
+    selections_by_key = {
+        (selection.source_id, selection.stream_index): selection for selection in selections
+    }
+    projected: dict[str, ProjectedAlignmentPart] = {}
+    for part in parts:
+        if not isinstance(part, Mapping):
+            raise AudioAnalysisError(
+                "model_output_invalid", "Alignment projection Part is invalid."
+            )
+        source_id = part.get("source_id")
+        stream_index = part.get("stream_index")
+        language = part.get("language")
+        cue_values = part.get("cues")
+        if (
+            not isinstance(source_id, str)
+            or not isinstance(stream_index, int)
+            or isinstance(stream_index, bool)
+            or not isinstance(language, str)
+            or not language
+            or not isinstance(cue_values, list)
+            or (source_id, stream_index) not in selections_by_key
+            or source_id in projected
+        ):
+            raise AudioAnalysisError(
+                "model_output_invalid", "Alignment projection Part identity is invalid."
+            )
+        _validate_vad_time_mapping(
+            part.get("source_time_mapping"),
+            selections_by_key[(source_id, stream_index)],
+            project_root,
+        )
+        projected[source_id] = ProjectedAlignmentPart(
+            language, tuple(_alignment_proposal(value) for value in cue_values)
+        )
+    return projected
+
+
+def _alignment_proposal(value: object) -> AlignmentProposal:
+    if not isinstance(value, Mapping):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Alignment cue proposal must be an object."
+        )
+    source_ordinal = value.get("source_ordinal")
+    text = value.get("text")
+    confidence = value.get("confidence")
+    if (
+        not isinstance(source_ordinal, int)
+        or isinstance(source_ordinal, bool)
+        or source_ordinal < 0
+        or not isinstance(text, str)
+        or not isinstance(confidence, float | int)
+        or isinstance(confidence, bool)
+    ):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Alignment cue proposal identity is invalid."
+        )
+    try:
+        return AlignmentProposal(
+            source_ordinal,
+            text,
+            HalfOpenInterval(
+                _exact_time_from_json(value.get("start")), _exact_time_from_json(value.get("end"))
+            ),
+            float(confidence),
+        )
+    except (TypeError, ValueError) as error:
+        raise AudioAnalysisError(
+            "model_output_invalid", "Alignment cue proposal timing is invalid."
+        ) from error
+
+
+def _vad_intervals_by_source(
+    evidence: Mapping[str, object],
+) -> dict[str, tuple[VoiceActivityInterval, ...]]:
+    parts = evidence.get("parts")
+    if not isinstance(parts, list):
+        raise AudioAnalysisError(
+            "alignment_vad_required", "Alignment requires retained VAD evidence."
+        )
+    result: dict[str, tuple[VoiceActivityInterval, ...]] = {}
+    for part in parts:
+        if not isinstance(part, Mapping) or not isinstance(part.get("source_id"), str):
+            raise AudioAnalysisError(
+                "alignment_vad_required", "Retained VAD Part evidence is invalid."
+            )
+        source_id = part["source_id"]
+        intervals = part.get("voice_activity_intervals")
+        if source_id in result or not isinstance(intervals, list):
+            raise AudioAnalysisError(
+                "alignment_vad_required", "Retained VAD intervals are invalid."
+            )
+        try:
+            result[source_id] = tuple(
+                VoiceActivityInterval(
+                    HalfOpenInterval(
+                        _exact_time_from_json(value.get("interval", {}).get("start")),
+                        _exact_time_from_json(value.get("interval", {}).get("end")),
+                    ),
+                    VoiceActivityState(str(value.get("state"))),
+                )
+                for value in intervals
+                if isinstance(value, Mapping) and isinstance(value.get("interval"), Mapping)
+            )
+        except (TypeError, ValueError) as error:
+            raise AudioAnalysisError(
+                "alignment_vad_required", "Retained VAD intervals are invalid."
+            ) from error
+        if len(result[source_id]) != len(intervals):
+            raise AudioAnalysisError(
+                "alignment_vad_required", "Retained VAD intervals are invalid."
+            )
+    return result
+
+
+def _primary_alignment_cues(
+    subtitle_report: SubtitleCandidateReport, source_id: str, project_root: Path
+) -> tuple[tuple[AlignmentCue, ...], InputEvidence]:
+    primary = _primary_subtitle_candidate(subtitle_report, source_id)
+    if (
+        primary is None
+        or primary.source_candidate_path is None
+        or primary.source_candidate_sha256 is None
+    ):
+        raise AudioAnalysisError(
+            "alignment_primary_subtitle_unavailable",
+            "Alignment requires retained Primary subtitle source-candidate evidence.",
+        )
+    path = Path(primary.source_candidate_path).resolve()
+    if not path.is_relative_to(project_root.resolve()) or not path.is_file():
+        raise AudioAnalysisError(
+            "alignment_primary_subtitle_unavailable",
+            "Primary subtitle source evidence is unavailable.",
+        )
+    evidence = _input_evidence(path)
+    if evidence.sha256 != primary.source_candidate_sha256:
+        raise AudioAnalysisError(
+            "alignment_primary_subtitle_changed", "Primary subtitle source evidence changed."
+        )
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        cues = document.get("cues") if isinstance(document, Mapping) else None
+        if document.get("schema_version") != 1 or not isinstance(cues, list):
+            raise ValueError
+        parsed = tuple(
+            AlignmentCue(
+                value["source_ordinal"],
+                value["text"],
+                HalfOpenInterval(
+                    _exact_time_from_json(value.get("raw_pts_interval", {}).get("start")),
+                    _exact_time_from_json(value.get("raw_pts_interval", {}).get("end")),
+                ),
+            )
+            for value in cues
+            if isinstance(value, Mapping)
+            and isinstance(value.get("source_ordinal"), int)
+            and not isinstance(value.get("source_ordinal"), bool)
+            and isinstance(value.get("text"), str)
+            and isinstance(value.get("raw_pts_interval"), Mapping)
+        )
+    except (OSError, TypeError, ValueError, KeyError) as error:
+        raise AudioAnalysisError(
+            "alignment_primary_subtitle_unavailable", "Primary subtitle source evidence is invalid."
+        ) from error
+    if not parsed or len(parsed) != len(cues):
+        raise AudioAnalysisError(
+            "alignment_primary_subtitle_unavailable", "Primary subtitle source evidence is invalid."
+        )
+    return parsed, evidence
+
+
+def _primary_alignment_source_ids(
+    subtitle_report: SubtitleCandidateReport, selections: tuple[AnalysisAudioStreamSelection, ...]
+) -> set[str]:
+    return {
+        selection.source_id
+        for selection in selections
+        if _primary_subtitle_candidate(subtitle_report, selection.source_id) is not None
+    }
+
+
+def _primary_subtitle_candidate(
+    subtitle_report: SubtitleCandidateReport, source_id: str
+) -> SubtitleCandidate | None:
+    valid = [
+        candidate
+        for candidate in subtitle_report.candidates
+        if candidate.source_id == source_id and candidate.state is CandidateState.VALID
+    ]
+    selections = {
+        selection.stream_index
+        for selection in subtitle_report.selections
+        if selection.source_id == source_id
+    }
+    if len(valid) == 1:
+        return valid[0]
+    return next((candidate for candidate in valid if candidate.stream_index in selections), None)
+
+
+def _alignment_view_as_json(
+    view: AdoptedAlignmentTimingView, source_evidence: InputEvidence
+) -> dict[str, object]:
+    candidates_by_ordinal = {candidate.source_ordinal: candidate for candidate in view.candidates}
+    return {
+        "schema_version": 1,
+        "state": view.state,
+        "source_id": view.source_id,
+        "language": view.language,
+        "source_candidate": source_evidence.as_json(),
+        "diagnostic": view.diagnostic,
+        "cues": [
+            {
+                "source_ordinal": cue.source_ordinal,
+                "text": cue.text,
+                "original_raw_pts_interval": _interval_as_json(
+                    candidates_by_ordinal[cue.source_ordinal].original_interval
+                ),
+                "proposed_raw_pts_interval": _interval_as_json(
+                    candidates_by_ordinal[cue.source_ordinal].proposed_interval
+                ),
+                "adopted_raw_pts_interval": _interval_as_json(cue.interval),
+                "adopted": candidates_by_ordinal[cue.source_ordinal].adopted,
+                "reason": candidates_by_ordinal[cue.source_ordinal].reason,
+                "global_reason": candidates_by_ordinal[cue.source_ordinal].global_reason,
+                "vad_indeterminate_risk": candidates_by_ordinal[
+                    cue.source_ordinal
+                ].vad_indeterminate_risk,
+            }
+            for cue in view.cues
+        ],
+    }
+
+
+def _alignment_failure_fingerprint(
+    plan: RunPlan,
+    source_id: str,
+    source_evidence: InputEvidence,
+    candidate_id: str,
+    calibration: Mapping[str, object],
+    view: AdoptedAlignmentTimingView,
+) -> str:
+    return _sha256_json(
+        {
+            "recurrence_key": _alignment_recurrence_key(
+                plan, source_id, source_evidence, candidate_id, calibration
+            ),
+            "failed_gate": view.diagnostic,
+        }
+    )
+
+
+def _alignment_recurrence_key(
+    plan: RunPlan,
+    source_id: str,
+    source_evidence: InputEvidence,
+    candidate_id: str,
+    calibration: Mapping[str, object],
+) -> str:
+    artifact = next((item for item in plan.source_artifacts if item.source_id == source_id), None)
+    profile = calibration.get("profile")
+    if artifact is None or not isinstance(profile, Mapping):
+        raise AudioAnalysisError("alignment_input_invalid", "Alignment provenance is incomplete.")
+    return _sha256_json(
+        {
+            "source_artifact_sha256": artifact.sha256,
+            "source_candidate_sha256": source_evidence.sha256,
+            "candidate_id": candidate_id,
+            "calibration_profile_sha256": profile.get("sha256"),
+        }
+    )
+
+
+def _matching_alignment_failure_reports(project_root: Path, fingerprint: str) -> tuple[Path, ...]:
+    reports_root = project_root / "work" / "audio-analysis-reports"
+    if not reports_root.is_dir():
+        return ()
+    matching: list[Path] = []
+    for report_path in reports_root.glob("*/audio-analysis-report.json"):
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            formal_evidence = report.get("formal_evidence") if isinstance(report, Mapping) else None
+            if not isinstance(formal_evidence, list):
+                continue
+            for evidence in formal_evidence:
+                if (
+                    not isinstance(evidence, Mapping)
+                    or evidence.get("capability") != "forced_alignment"
+                ):
+                    continue
+                parts = evidence.get("parts")
+                if not isinstance(parts, list):
+                    continue
+                for part in parts:
+                    timing_view = part.get("timing_view") if isinstance(part, Mapping) else None
+                    if not isinstance(timing_view, Mapping):
+                        continue
+                    view_path = _retained_evidence_path(timing_view, project_root)
+                    view = json.loads(view_path.read_text(encoding="utf-8"))
+                    if isinstance(view, Mapping) and view.get("failure_fingerprint") == fingerprint:
+                        matching.append(report_path)
+                        break
+        except (AudioAnalysisError, OSError, ValueError, json.JSONDecodeError):
+            continue
+    return tuple(matching)
+
+
+def _revalidate_analysis_inputs(
     plan: RunPlan, subtitle_report: SubtitleCandidateReport, project_root: Path
 ) -> None:
     for artifact in plan.source_artifacts:

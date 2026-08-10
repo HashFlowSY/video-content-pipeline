@@ -5,9 +5,13 @@ from __future__ import annotations
 import pytest
 
 from video_content_pipeline.audio_analysis import (
+    AlignmentCue,
+    AlignmentProposal,
     AudioAnalysisError,
     VoiceActivityCandidateSegment,
+    VoiceActivityInterval,
     VoiceActivityState,
+    derive_adopted_alignment_timing_view,
     derive_vad_part_evidence,
 )
 from video_content_pipeline.coverage import StreamCoverage
@@ -91,3 +95,79 @@ def test_vad_without_a_primary_subtitle_track_keeps_short_speech_risk() -> None:
         (_interval(0, 1), False),
     ]
     assert evidence.audio_state_indeterminate == ()
+
+
+def test_adopted_alignment_retains_rejected_cue_original_time_and_legal_overlap() -> None:
+    view = derive_adopted_alignment_timing_view(
+        source_id="part-a",
+        language="en",
+        source_cues=(
+            AlignmentCue(0, "First cue", _interval(0, 3)),
+            AlignmentCue(1, "Second cue", _interval(1, 4)),
+        ),
+        proposals=(
+            AlignmentProposal(0, "First cue", _interval(0, 2), confidence=0.9),
+            AlignmentProposal(1, "Second cue", _interval(1, 4), confidence=0.9),
+        ),
+        usable_audio_intervals=(_interval(0, 5),),
+        voice_activity_intervals=(
+            VoiceActivityInterval(_interval(0, 2), VoiceActivityState.SPEECH_LIKELY),
+            VoiceActivityInterval(_interval(2, 3), VoiceActivityState.NON_SPEECH),
+            VoiceActivityInterval(_interval(3, 5), VoiceActivityState.SPEECH_LIKELY),
+        ),
+        minimum_confidence=0.8,
+        duration_rules={"en": (ExactTime(1), ExactTime(6))},
+    )
+
+    assert view.state == "adopted"
+    assert [cue.source_ordinal for cue in view.cues] == [0, 1]
+    assert [cue.interval for cue in view.cues] == [_interval(0, 2), _interval(1, 4)]
+    assert view.candidates[0].adopted is True
+    assert view.candidates[1].adopted is False
+    assert view.candidates[1].reason == "alignment_vad_conflict"
+    assert view.cues[1].interval == _interval(1, 4)
+
+
+def test_adopted_alignment_rejects_changed_text_or_cue_cardinality() -> None:
+    with pytest.raises(AudioAnalysisError) as error:
+        derive_adopted_alignment_timing_view(
+            source_id="part-a",
+            language="en",
+            source_cues=(AlignmentCue(0, "Original", _interval(0, 2)),),
+            proposals=(AlignmentProposal(0, "Changed", _interval(0, 2), confidence=0.9),),
+            usable_audio_intervals=(_interval(0, 2),),
+            voice_activity_intervals=(
+                VoiceActivityInterval(_interval(0, 2), VoiceActivityState.SPEECH_LIKELY),
+            ),
+            minimum_confidence=0.8,
+            duration_rules={"en": (ExactTime(1), ExactTime(4))},
+        )
+
+    assert error.value.reason == "alignment_text_contract_violation"
+
+
+def test_adopted_alignment_rejects_entire_mixed_view_when_times_reorder_source_cues() -> None:
+    view = derive_adopted_alignment_timing_view(
+        source_id="part-a",
+        language="en",
+        source_cues=(
+            AlignmentCue(0, "First", _interval(0, 2)),
+            AlignmentCue(1, "Second", _interval(2, 4)),
+        ),
+        proposals=(
+            AlignmentProposal(0, "First", _interval(2, 3), confidence=0.9),
+            AlignmentProposal(1, "Second", _interval(1, 2), confidence=0.9),
+        ),
+        usable_audio_intervals=(_interval(0, 4),),
+        voice_activity_intervals=(
+            VoiceActivityInterval(_interval(0, 4), VoiceActivityState.SPEECH_LIKELY),
+        ),
+        minimum_confidence=0.8,
+        duration_rules={"en": (ExactTime(1), ExactTime(4))},
+    )
+
+    assert view.state == "alignment_untrusted"
+    assert [cue.interval for cue in view.cues] == [_interval(0, 2), _interval(2, 4)]
+    assert all(candidate.adopted is False for candidate in view.candidates)
+    assert all(candidate.reason == "adopted" for candidate in view.candidates)
+    assert all(candidate.global_reason == "alignment_untrusted" for candidate in view.candidates)

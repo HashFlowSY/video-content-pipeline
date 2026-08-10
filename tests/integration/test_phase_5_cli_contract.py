@@ -98,9 +98,37 @@ def _retained_subtitle_report(
     )
     source_artifact_path = report_path.parent / "source.vtt"
     readable_artifact_path = report_path.parent / "readable.vtt"
+    source_candidate_path = report_path.parent / "source-candidate.json"
     source_artifact_path.parent.mkdir(parents=True)
     source_artifact_path.write_text("WEBVTT\n\n", encoding="utf-8")
     readable_artifact_path.write_text("WEBVTT\n\n", encoding="utf-8")
+    source_candidate_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "cues": [
+                    {
+                        "source_ordinal": ordinal,
+                        "text": f"Cue {ordinal}",
+                        "raw_pts_interval": {
+                            "start": {
+                                "numerator": interval.start.numerator,
+                                "denominator": interval.start.denominator,
+                            },
+                            "end": {
+                                "numerator": interval.end.numerator,
+                                "denominator": interval.end.denominator,
+                            },
+                        },
+                    }
+                    for ordinal, interval in enumerate(raw_pts_cue_intervals)
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     report = SubtitleCandidateReport(
         report_id=report_id,
         plan_id=plan.plan_id,
@@ -111,6 +139,8 @@ def _retained_subtitle_report(
                 source_id=plan.source_artifacts[0].source_id,
                 stream_index=1,
                 state=CandidateState.VALID,
+                source_candidate_path=source_candidate_path.as_posix(),
+                source_candidate_sha256=sha256(source_candidate_path.read_bytes()).hexdigest(),
                 source_vtt_path=source_artifact_path.as_posix(),
                 readable_vtt_path=readable_artifact_path.as_posix(),
                 raw_pts_cue_intervals=raw_pts_cue_intervals,
@@ -501,6 +531,8 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
         audio_coverage,
     )
     subtitle_report = _retained_subtitle_report(tmp_path, plan, (interval(0, 1),))
+    source_candidate_path = Path(subtitle_report.candidates[0].source_candidate_path or "")
+    source_candidate_before = source_candidate_path.read_bytes()
     derivative_path = tmp_path / "work" / "controlled-vad.derivative"
     derivative_path.parent.mkdir(parents=True, exist_ok=True)
     derivative_path.write_bytes(b"controlled-vad-analysis-audio")
@@ -573,6 +605,55 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
         ),
         encoding="utf-8",
     )
+    alignment_projection = {
+        "schema_version": 1,
+        "capability": "forced_alignment",
+        "model_identity": {
+            "asset_sha256": "c" * 64,
+            "backend": "controlled-offline-adapter",
+            "backend_version": "1.0.0",
+            "precision": "fixture",
+            "device_class": "fixture-cpu",
+            "rules_fingerprint": "alignment-rules-v1",
+        },
+        "result": {
+            "parts": [
+                {
+                    "source_id": plan.source_artifacts[0].source_id,
+                    "stream_index": 2,
+                    "language": "en",
+                    "source_time_mapping": projection["result"]["parts"][0]["source_time_mapping"],
+                    "cues": [
+                        {
+                            "source_ordinal": 0,
+                            "text": "Cue 0",
+                            "start": {"numerator": 0, "denominator": 1},
+                            "end": {"numerator": 1, "denominator": 1},
+                            "confidence": 0.9,
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    alignment_fixture_path = tmp_path / "tests" / "fixtures" / "calibration" / "alignment.json"
+    alignment_fixture_path.write_text(
+        json.dumps(
+            {
+                "expected_projection": alignment_projection,
+                "thresholds": {
+                    "minimum_confidence": 0.8,
+                    "duration_rules": {
+                        "en": {
+                            "minimum_duration": {"numerator": 1, "denominator": 2},
+                            "maximum_duration": {"numerator": 3, "denominator": 1},
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     dependency_plan = tmp_path / "models" / "plans" / "controlled-vad.md"
     dependency_plan.parent.mkdir(parents=True)
     dependency_plan.write_text("# Controlled VAD dependency plan\n", encoding="utf-8")
@@ -608,7 +689,36 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
                             },
                             "evaluator_version": "fixture-evaluator-v1",
                         },
-                    }
+                    },
+                    {
+                        "candidate_id": "controlled-alignment",
+                        "capability": "forced_alignment",
+                        "official_source": {
+                            "url": "https://example.invalid/alignment",
+                            "approved": True,
+                        },
+                        "license_approved": True,
+                        "revision": "fixture-r1",
+                        "asset_sha256": "c" * 64,
+                        "offline_runtime": True,
+                        "credential_required": False,
+                        "telemetry": False,
+                        "dependency_plan": "models/plans/controlled-vad.md",
+                        "resource_estimate": {"high_bytes": 1024},
+                        "controlled_adapter": {
+                            "adapter_version": "fixture-adapter-v1",
+                            "raw_output": {"native_cues": []},
+                            "projection": alignment_projection,
+                        },
+                        "calibration_evaluation": {
+                            "schema_version": 1,
+                            "reference_fixture": {
+                                "path": "tests/fixtures/calibration/alignment.json",
+                                "sha256": sha256(alignment_fixture_path.read_bytes()).hexdigest(),
+                            },
+                            "evaluator_version": "fixture-evaluator-v1",
+                        },
+                    },
                 ],
             }
         ),
@@ -631,6 +741,7 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
     )
     report = json.loads(capsys.readouterr().out)["report"]
 
+    assert report["diagnostics"] == []
     assert report["state"] == "partial"
     assert report["processing_authorization"]["state"] == "approved"
     assert report["analysis_audio_streams"][0]["source_id"] == plan.source_artifacts[0].source_id
@@ -678,4 +789,32 @@ def test_analyze_audio_publishes_calibrated_vad_evidence_and_caption_gap_risks(
             }
         }
     ]
+    alignment = report["formal_evidence"][1]
+    assert alignment["capability"] == "forced_alignment"
+    timing_view_path = Path(alignment["parts"][0]["timing_view"]["path"])
+    timing_view = json.loads(timing_view_path.read_text(encoding="utf-8"))
+    assert timing_view["state"] == "adopted"
+    assert timing_view["cues"] == [
+        {
+            "source_ordinal": 0,
+            "text": "Cue 0",
+            "original_raw_pts_interval": {
+                "start": {"numerator": 0, "denominator": 1},
+                "end": {"numerator": 1, "denominator": 1},
+            },
+            "proposed_raw_pts_interval": {
+                "start": {"numerator": 0, "denominator": 1},
+                "end": {"numerator": 1, "denominator": 1},
+            },
+            "adopted_raw_pts_interval": {
+                "start": {"numerator": 0, "denominator": 1},
+                "end": {"numerator": 1, "denominator": 1},
+            },
+            "adopted": True,
+            "reason": "adopted",
+            "global_reason": None,
+            "vad_indeterminate_risk": False,
+        }
+    ]
+    assert source_candidate_path.read_bytes() == source_candidate_before
     assert not (tmp_path / "outputs").exists()
