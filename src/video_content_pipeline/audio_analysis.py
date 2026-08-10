@@ -331,14 +331,20 @@ def _capabilities_from_candidate_matrix(
     return tuple(
         CapabilityAvailability(
             capability,
-            _capability_state_from_candidates(candidates_by_capability[capability]),
+            _capability_state_from_candidates(capability, candidates_by_capability[capability]),
             tuple(candidates_by_capability[capability]),
         )
         for capability in _CAPABILITIES
     )
 
 
-def _capability_state_from_candidates(candidates: list[dict[str, object]]) -> str:
+def _capability_state_from_candidates(
+    capability: str, candidates: list[dict[str, object]]
+) -> str:
+    if capability == "diarization" and not any(
+        candidate["state"] == "eligible" for candidate in candidates
+    ):
+        return "model_acquisition_required"
     if any(candidate["state"] == "eligible" for candidate in candidates):
         return "model_acquisition_required"
     if any(candidate["reason"] == "model_credential_gated" for candidate in candidates):
@@ -355,13 +361,13 @@ def _evaluate_candidate(
     project_root: Path,
     workspace_path: Path,
 ) -> dict[str, object]:
-    state, reason = _candidate_eligibility(candidate)
+    state, reason = _candidate_eligibility(candidate, project_root)
     result: dict[str, object] = {
         "candidate_id": candidate_id,
         "capability": capability,
         "state": state,
         "reason": reason,
-        "eligibility_evidence": _candidate_eligibility_evidence(candidate),
+        "eligibility_evidence": _candidate_eligibility_evidence(candidate, project_root),
         "adapter": None,
         "calibration": {"state": "not_evaluated", "record": None, "profile": None},
         "formal_evidence": [],
@@ -394,8 +400,11 @@ def _evaluate_candidate(
     return result
 
 
-def _candidate_eligibility_evidence(candidate: Mapping[str, object]) -> dict[str, object]:
+def _candidate_eligibility_evidence(
+    candidate: Mapping[str, object], project_root: Path
+) -> dict[str, object]:
     resource_estimate = candidate.get("resource_estimate")
+    dependency_plan = _project_local_file(project_root, candidate.get("dependency_plan"))
     return {
         "official_source": candidate.get("official_source"),
         "license_approved": candidate.get("license_approved"),
@@ -404,7 +413,9 @@ def _candidate_eligibility_evidence(candidate: Mapping[str, object]) -> dict[str
         "offline_runtime": candidate.get("offline_runtime"),
         "credential_required": candidate.get("credential_required"),
         "telemetry": candidate.get("telemetry"),
-        "dependency_plan": candidate.get("dependency_plan"),
+        "dependency_plan": _input_evidence(dependency_plan).as_json()
+        if dependency_plan is not None
+        else None,
         "resource_high_bytes": (
             resource_estimate.get("high_bytes")
             if isinstance(resource_estimate, Mapping)
@@ -413,15 +424,19 @@ def _candidate_eligibility_evidence(candidate: Mapping[str, object]) -> dict[str
     }
 
 
-def _candidate_eligibility(candidate: Mapping[str, object]) -> tuple[str, str | None]:
+def _candidate_eligibility(
+    candidate: Mapping[str, object], project_root: Path
+) -> tuple[str, str | None]:
     if candidate.get("credential_required") is True:
         return "blocked", "model_credential_gated"
     source = candidate.get("official_source")
     asset_sha256 = candidate.get("asset_sha256")
     resource_estimate = candidate.get("resource_estimate")
     required = (
-        isinstance(source, str)
-        and source.startswith("https://")
+        isinstance(source, Mapping)
+        and isinstance(source.get("url"), str)
+        and source["url"].startswith("https://")
+        and source.get("approved") is True
         and candidate.get("license_approved") is True
         and isinstance(candidate.get("revision"), str)
         and bool(candidate.get("revision"))
@@ -430,8 +445,7 @@ def _candidate_eligibility(candidate: Mapping[str, object]) -> tuple[str, str | 
         and candidate.get("offline_runtime") is True
         and candidate.get("credential_required") is False
         and candidate.get("telemetry") is False
-        and isinstance(candidate.get("dependency_plan"), str)
-        and bool(candidate.get("dependency_plan"))
+        and _project_local_file(project_root, candidate.get("dependency_plan")) is not None
         and isinstance(resource_estimate, Mapping)
         and isinstance(resource_estimate.get("high_bytes"), int)
         and not isinstance(resource_estimate.get("high_bytes"), bool)
@@ -470,6 +484,9 @@ def _retain_controlled_adapter(
         raw_path = candidate_path / "raw-native-output.json"
         _write_json_once(raw_path, adapter["raw_output"])
         raw_evidence = _input_evidence(raw_path).as_json()
+        adapter_version_path = candidate_path / "adapter-version.json"
+        _write_json_once(adapter_version_path, {"adapter_version": adapter["adapter_version"]})
+        adapter_version_evidence = _input_evidence(adapter_version_path).as_json()
     except (OSError, TypeError, ValueError) as error:
         return {
             "state": "model_output_invalid",
@@ -483,7 +500,7 @@ def _retain_controlled_adapter(
             _write_json_once(candidate_path / "model-output-projection-invalid.json", projection)
         return {
             "state": "model_output_invalid",
-            "adapter_version": adapter["adapter_version"],
+            "adapter_version": adapter_version_evidence,
             "raw_output": raw_evidence,
             "projection": None,
             "diagnostic": _diagnostic_json(
@@ -496,7 +513,7 @@ def _retain_controlled_adapter(
     _write_json_once(projection_path, projection)
     return {
         "state": "projected",
-        "adapter_version": adapter["adapter_version"],
+        "adapter_version": adapter_version_evidence,
         "raw_output": raw_evidence,
         "projection": _input_evidence(projection_path).as_json(),
         "diagnostic": None,
@@ -563,18 +580,19 @@ def _evaluate_calibration(
             raise AudioAnalysisError(
                 "calibration_failed", "Calibration reference fixture is not hash-pinned."
             )
-        expected_projection = evaluation.get("expected_projection")
-        thresholds = evaluation.get("thresholds")
+        reference_data = json.loads(fixture_path.read_text(encoding="utf-8"))
+        expected_projection = (
+            reference_data.get("expected_projection")
+            if isinstance(reference_data, Mapping)
+            else None
+        )
+        thresholds = (
+            reference_data.get("thresholds") if isinstance(reference_data, Mapping) else None
+        )
         if (
             not isinstance(expected_projection, Mapping)
             or not isinstance(thresholds, Mapping)
             or not thresholds
-            or not isinstance(evaluation.get("false_accepts"), int)
-            or not isinstance(evaluation.get("false_rejects"), int)
-            or isinstance(evaluation.get("false_accepts"), bool)
-            or isinstance(evaluation.get("false_rejects"), bool)
-            or evaluation["false_accepts"] < 0
-            or evaluation["false_rejects"] < 0
             or not isinstance(evaluation.get("evaluator_version"), str)
             or not evaluation["evaluator_version"]
         ):
@@ -587,6 +605,9 @@ def _evaluate_calibration(
         projection_path = Path(str(projection_evidence["path"]))
         projection = json.loads(projection_path.read_text(encoding="utf-8"))
         passed = _canonical_json(expected_projection) == _canonical_json(projection)
+        expected_results_path = record_path.with_name("expected-calibration-results.json")
+        _write_json_once(expected_results_path, expected_projection)
+        expected_results_evidence = _input_evidence(expected_results_path).as_json()
         record: dict[str, object] = {
             "schema_version": 1,
             "state": "qualified" if passed else "calibration_failed",
@@ -595,10 +616,10 @@ def _evaluate_calibration(
             "model_identity": projection["model_identity"],
             "reference_fixture": _input_evidence(fixture_path).as_json(),
             "candidate_output": projection_evidence,
-            "expected_projection_sha256": _sha256_json(expected_projection),
+            "expected_results": expected_results_evidence,
             "thresholds": dict(thresholds),
-            "false_accepts": evaluation["false_accepts"],
-            "false_rejects": evaluation["false_rejects"],
+            "false_accepts": 0 if passed else 1,
+            "false_rejects": 0 if passed else 1,
             "evaluator_version": evaluation["evaluator_version"],
         }
         _write_json_once(record_path, record)
@@ -646,6 +667,15 @@ def _project_local_path(project_root: Path, value: object) -> Path:
         raise AudioAnalysisError(
             "calibration_failed", "Calibration fixture must stay inside the project."
         )
+    return path
+
+
+def _project_local_file(project_root: Path, value: object) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = (project_root / value).resolve()
+    if not path.is_relative_to(project_root.resolve()) or not path.is_file():
+        return None
     return path
 
 

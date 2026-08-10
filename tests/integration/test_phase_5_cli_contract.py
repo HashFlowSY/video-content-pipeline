@@ -274,7 +274,6 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
     subtitle_report = _retained_subtitle_report(tmp_path, plan)
     fixture_path = tmp_path / "tests" / "fixtures" / "calibration" / "vad.json"
     fixture_path.parent.mkdir(parents=True)
-    fixture_path.write_text('{"fixture":"synthetic-vad-v1"}\n', encoding="utf-8")
     projection = {
         "schema_version": 1,
         "capability": "vad",
@@ -288,8 +287,15 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
         },
         "result": {"segments": []},
     }
+    fixture_path.write_text(
+        json.dumps({"expected_projection": projection, "thresholds": {"speech_score": "0.5"}}),
+        encoding="utf-8",
+    )
+    dependency_plan = tmp_path / "models" / "plans" / "controlled-vad.md"
+    dependency_plan.parent.mkdir(parents=True)
+    dependency_plan.write_text("# Controlled VAD dependency plan\n", encoding="utf-8")
     registry_path = tmp_path / "models" / "registry.json"
-    registry_path.parent.mkdir()
+    registry_path.parent.mkdir(exist_ok=True)
     registry_path.write_text(
         json.dumps(
             {
@@ -298,7 +304,10 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
                     {
                         "candidate_id": "controlled-vad",
                         "capability": "vad",
-                        "official_source": "https://example.invalid/controlled-vad",
+                        "official_source": {
+                            "url": "https://example.invalid/controlled-vad",
+                            "approved": True,
+                        },
                         "license_approved": True,
                         "revision": "fixture-r1",
                         "asset_sha256": "a" * 64,
@@ -318,10 +327,6 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
                                 "path": "tests/fixtures/calibration/vad.json",
                                 "sha256": sha256(fixture_path.read_bytes()).hexdigest(),
                             },
-                            "expected_projection": projection,
-                            "thresholds": {"speech_score": "0.5"},
-                            "false_accepts": 0,
-                            "false_rejects": 0,
                             "evaluator_version": "fixture-evaluator-v1",
                         },
                     },
@@ -333,6 +338,41 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
                     {
                         "candidate_id": "incomplete-diarization",
                         "capability": "diarization",
+                    },
+                    {
+                        "candidate_id": "drifted-vad",
+                        "capability": "vad",
+                        "official_source": {
+                            "url": "https://example.invalid/controlled-vad",
+                            "approved": True,
+                        },
+                        "license_approved": True,
+                        "revision": "fixture-r1",
+                        "asset_sha256": "a" * 64,
+                        "offline_runtime": True,
+                        "credential_required": False,
+                        "telemetry": False,
+                        "dependency_plan": "models/plans/controlled-vad.md",
+                        "resource_estimate": {"high_bytes": 1024},
+                        "controlled_adapter": {
+                            "adapter_version": "fixture-adapter-v1",
+                            "raw_output": {"native_segments": []},
+                            "projection": {
+                                **projection,
+                                "model_identity": {
+                                    **projection["model_identity"],
+                                    "backend_version": "2.0.0",
+                                },
+                            },
+                        },
+                        "calibration_evaluation": {
+                            "schema_version": 1,
+                            "reference_fixture": {
+                                "path": "tests/fixtures/calibration/vad.json",
+                                "sha256": sha256(fixture_path.read_bytes()).hexdigest(),
+                            },
+                            "evaluator_version": "fixture-evaluator-v1",
+                        },
                     },
                 ],
             }
@@ -358,6 +398,7 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
     assert Path(candidates["controlled-vad"]["adapter"]["raw_output"]["path"]).exists()
     assert Path(candidates["controlled-vad"]["adapter"]["projection"]["path"]).exists()
     assert Path(candidates["controlled-vad"]["calibration"]["record"]["path"]).exists()
+    assert Path(candidates["controlled-vad"]["adapter"]["adapter_version"]["path"]).exists()
     profile = json.loads(
         Path(candidates["controlled-vad"]["calibration"]["profile"]["path"]).read_text(
             encoding="utf-8"
@@ -366,6 +407,8 @@ def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
     assert profile["model_identity"] == projection["model_identity"]
     assert candidates["credential-alignment"]["state"] == "blocked"
     assert candidates["incomplete-diarization"]["state"] == "unsupported"
+    assert candidates["drifted-vad"]["calibration"]["state"] == "calibration_failed"
+    assert candidates["drifted-vad"]["calibration"]["profile"] is None
     assert report["formal_evidence"] == []
 
 
@@ -374,8 +417,11 @@ def test_analyze_audio_rejects_an_incomplete_controlled_adapter_projection(
 ) -> None:
     plan = _confirmed_plan(tmp_path)
     subtitle_report = _retained_subtitle_report(tmp_path, plan)
+    dependency_plan = tmp_path / "models" / "plans" / "controlled-vad.md"
+    dependency_plan.parent.mkdir(parents=True)
+    dependency_plan.write_text("# Controlled VAD dependency plan\n", encoding="utf-8")
     registry_path = tmp_path / "models" / "registry.json"
-    registry_path.parent.mkdir()
+    registry_path.parent.mkdir(exist_ok=True)
     registry_path.write_text(
         json.dumps(
             {
@@ -384,7 +430,10 @@ def test_analyze_audio_rejects_an_incomplete_controlled_adapter_projection(
                     {
                         "candidate_id": "invalid-vad-output",
                         "capability": "vad",
-                        "official_source": "https://example.invalid/controlled-vad",
+                        "official_source": {
+                            "url": "https://example.invalid/controlled-vad",
+                            "approved": True,
+                        },
                         "license_approved": True,
                         "revision": "fixture-r1",
                         "asset_sha256": "a" * 64,
