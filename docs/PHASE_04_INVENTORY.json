@@ -34,7 +34,9 @@
     "src/video_content_pipeline/cli.py",
     "src/video_content_pipeline/planning.py",
     "src/video_content_pipeline/subtitle_pipeline.py",
-    "tests/integration/test_phase_4_cli_contract.py"
+    "src/video_content_pipeline/subtitles.py",
+    "tests/integration/test_phase_4_cli_contract.py",
+    "tests/unit/test_subtitles.py"
   ],
   "external_reads": [
     "/Users/shangyang/.agents/skills/grill-with-docs/SKILL.md",
@@ -58,6 +60,16 @@
       "command": "python -m pytest -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
       "result": "116 passed; all static checks passed",
       "mode": "project-local venv after require-project-venv.sh"
+    },
+    {
+      "command": "pytest tests/unit/test_subtitles.py tests/integration/test_phase_4_cli_contract.py -q; mypy src",
+      "result": "25 passed; strict Mypy passed",
+      "mode": "project-local venv after require-project-venv.sh; controlled synthetic subtitle payloads only"
+    },
+    {
+      "command": "pytest -q; ruff check src tests; ruff format --check src tests; mypy src",
+      "result": "119 passed; all static checks passed",
+      "mode": "project-local venv after require-project-venv.sh; controlled localhost proxy only for existing offline acquisition tests"
     }
   ],
   "retention": "All Phase 4 design and implementation records are retained. No source media, model, dependency, cache, or temporary file is deleted by this implementation task. Tests use controlled FFmpeg substitutes only."

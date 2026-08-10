@@ -335,3 +335,37 @@ def test_presentation_output_retains_real_repetition_with_possible_duplicate_evi
             compared_to_source_ordinal=0,
         ),
     )
+
+
+def test_presentation_output_removes_only_closed_whitelisted_markup() -> None:
+    track = parse_srt(
+        "1\n00:00:00,000 --> 00:00:01,000\n<b>bold</b> <c.green>kept</c.green> <i>open\n",
+        part_id="part-a",
+        track_id="captions",
+        coverage=_coverage(),
+    )
+
+    output = presentation_output(track)
+
+    assert output.cues[0].text == "bold <c.green>kept</c.green> <i>open"
+    assert output.corrections == (
+        PresentationCorrection(
+            reason="approved_markup_removed",
+            source_ordinal=0,
+            source_token_range=(0, 1),
+            compared_to_source_ordinal=None,
+            source_character_range=(0, 3),
+        ),
+        PresentationCorrection(
+            reason="approved_markup_removed",
+            source_ordinal=0,
+            source_token_range=(0, 1),
+            compared_to_source_ordinal=None,
+            source_character_range=(7, 11),
+        ),
+    )
+    assert output.diagnostics == (
+        PresentationDiagnostic("unhandled_markup", 0, None, "<c.green>"),
+        PresentationDiagnostic("unhandled_markup", 0, None, "</c.green>"),
+        PresentationDiagnostic("unhandled_markup", 0, None, "<i>"),
+    )

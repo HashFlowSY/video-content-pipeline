@@ -15,6 +15,11 @@ _TIMESTAMP = re.compile(
 )
 _TOKEN = re.compile(r"\s+|\S+")
 _VTT_DIRECTIVE = re.compile(r"^(?:NOTE|STYLE|REGION)(?:[ \t]|$)")
+_MARKUP_TAG = re.compile(
+    r"<(?P<closing>/)?(?P<name>b|i|u|font)(?P<attributes>(?:[ \t]+[^<>]*)?)>",
+    re.IGNORECASE,
+)
+_ANY_MARKUP_TAG = re.compile(r"<[^<>]*>")
 
 
 class SubtitleValidationError(ValueError):
@@ -134,10 +139,11 @@ class SerializationEnvelope:
 class PresentationCorrection:
     """A presentation-only token omission with exact source provenance."""
 
-    reason: Literal["proven_rolling_overlap", "exact_duplicate_omitted"]
+    reason: Literal["proven_rolling_overlap", "exact_duplicate_omitted", "approved_markup_removed"]
     source_ordinal: int
     source_token_range: tuple[int, int]
-    compared_to_source_ordinal: int
+    compared_to_source_ordinal: int | None
+    source_character_range: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
         start, end = self.source_token_range
@@ -145,15 +151,23 @@ class PresentationCorrection:
             raise SubtitleValidationError(
                 "Presentation correction must identify a non-empty token range."
             )
+        if self.reason == "approved_markup_removed":
+            if self.source_character_range is None:
+                raise SubtitleValidationError(
+                    "Markup corrections must identify the removed character range."
+                )
+        elif self.source_character_range is not None:
+            raise SubtitleValidationError("Only markup corrections may identify a character range.")
 
 
 @dataclass(frozen=True)
 class PresentationDiagnostic:
     """A retained ambiguity that did not authorize presentation token removal."""
 
-    reason: Literal["possible_duplicate"]
+    reason: Literal["possible_duplicate", "unhandled_markup"]
     source_ordinal: int
-    compared_to_source_ordinal: int
+    compared_to_source_ordinal: int | None = None
+    markup: str | None = None
 
 
 @dataclass(frozen=True)
@@ -163,13 +177,20 @@ class PresentationCue:
     normalized_cue: NormalizedCue
     source_token_indexes: tuple[int, ...]
     corrections: tuple[PresentationCorrection, ...] = ()
+    display_text: str | None = None
 
     def __post_init__(self) -> None:
         expected_indexes = tuple(range(len(self.normalized_cue.tokens)))
         if self.source_token_indexes == expected_indexes:
-            if self.corrections:
+            if any(
+                correction.reason != "approved_markup_removed" for correction in self.corrections
+            ):
                 raise SubtitleValidationError(
                     "Unchanged presentation cues cannot carry token corrections."
+                )
+            if self.corrections and self.display_text is None:
+                raise SubtitleValidationError(
+                    "Markup corrections require display text with the approved tags removed."
                 )
             return
         if tuple(sorted(set(self.source_token_indexes))) != self.source_token_indexes or any(
@@ -181,6 +202,8 @@ class PresentationCue:
         omitted_indexes = set(expected_indexes) - set(self.source_token_indexes)
         corrected_indexes: set[int] = set()
         for correction in self.corrections:
+            if correction.reason == "approved_markup_removed":
+                continue
             if correction.source_ordinal != self.source_ordinal:
                 raise SubtitleValidationError(
                     "Presentation correction must belong to its presentation cue."
@@ -200,6 +223,8 @@ class PresentationCue:
     def text(self) -> str:
         """Return display text derived from the retained source-token indexes."""
 
+        if self.display_text is not None:
+            return self.display_text
         return "".join(self.normalized_cue.tokens[index] for index in self.source_token_indexes)
 
     @property
@@ -238,6 +263,22 @@ class PresentationOutput:
     cues: tuple[PresentationCue, ...]
     corrections: tuple[PresentationCorrection, ...] = ()
     diagnostics: tuple[PresentationDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class FormatProjectionLoss:
+    """A source-preserving layout setting omitted by an SRT compatibility export."""
+
+    reason: Literal["format_projection_loss"]
+    source_ordinal: int
+    setting: str
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "reason": self.reason,
+            "source_ordinal": self.source_ordinal,
+            "setting": self.setting,
+        }
 
 
 @dataclass(frozen=True)
@@ -655,17 +696,128 @@ def presentation_output(track: SubtitleTrack) -> PresentationOutput:
                 )
             )
 
-    return PresentationOutput(
-        cues=tuple(
-            PresentationCue(
-                cue, visible_indexes[cue.source_ordinal], tuple(cue_corrections[cue.source_ordinal])
-            )
-            for cue in ordered
-            if cue.source_ordinal not in omitted_cues
-        ),
-        corrections=tuple(corrections),
-        diagnostics=tuple(diagnostics),
+    base_cues = tuple(
+        PresentationCue(
+            cue, visible_indexes[cue.source_ordinal], tuple(cue_corrections[cue.source_ordinal])
+        )
+        for cue in ordered
+        if cue.source_ordinal not in omitted_cues
     )
+    readable_cues, markup_corrections, markup_diagnostics = _remove_approved_markup(base_cues)
+    return PresentationOutput(
+        cues=readable_cues,
+        corrections=tuple(corrections) + markup_corrections,
+        diagnostics=tuple(diagnostics) + markup_diagnostics,
+    )
+
+
+def source_presentation_cues(track: SubtitleTrack) -> tuple[PresentationCue, ...]:
+    """Expose every source token for a source-preserving serialized artifact."""
+
+    if not track.valid:
+        raise SubtitleValidationError("Source export requires an accepted subtitle track.")
+    return tuple(
+        PresentationCue(cue, tuple(range(len(cue.tokens))))
+        for cue in sorted(track.normalized_cues, key=_cue_order_key)
+    )
+
+
+def source_srt_projection_losses(track: SubtitleTrack) -> tuple[FormatProjectionLoss, ...]:
+    """Record WebVTT layout settings omitted by the SRT compatibility projection."""
+
+    if not track.valid:
+        raise SubtitleValidationError("Source export requires an accepted subtitle track.")
+    return tuple(
+        FormatProjectionLoss(
+            "format_projection_loss", cue.source_ordinal, cue.raw_cue.timing_settings
+        )
+        for cue in sorted(track.normalized_cues, key=_cue_order_key)
+        if cue.raw_cue.timing_settings
+    )
+
+
+def _remove_approved_markup(
+    cues: tuple[PresentationCue, ...],
+) -> tuple[
+    tuple[PresentationCue, ...],
+    tuple[PresentationCorrection, ...],
+    tuple[PresentationDiagnostic, ...],
+]:
+    readable_cues: list[PresentationCue] = []
+    corrections: list[PresentationCorrection] = []
+    diagnostics: list[PresentationDiagnostic] = []
+    for cue in cues:
+        text = cue.text
+        removable_ranges = _closed_approved_markup_ranges(text)
+        source_offset = _visible_source_offset(cue)
+        cue_corrections = list(cue.corrections)
+        for start, end in removable_ranges:
+            source_start = source_offset + start
+            source_end = source_offset + end
+            correction = PresentationCorrection(
+                "approved_markup_removed",
+                cue.source_ordinal,
+                _token_range_for_characters(cue.normalized_cue.tokens, source_start, source_end),
+                None,
+                (source_start, source_end),
+            )
+            cue_corrections.append(correction)
+            corrections.append(correction)
+        for markup in _ANY_MARKUP_TAG.finditer(text):
+            if (markup.start(), markup.end()) not in removable_ranges:
+                diagnostics.append(
+                    PresentationDiagnostic(
+                        "unhandled_markup", cue.source_ordinal, None, markup.group(0)
+                    )
+                )
+        display_text = text
+        for start, end in reversed(removable_ranges):
+            display_text = display_text[:start] + display_text[end:]
+        readable_cues.append(
+            PresentationCue(
+                cue.normalized_cue,
+                cue.source_token_indexes,
+                tuple(cue_corrections),
+                display_text if removable_ranges else None,
+            )
+        )
+    return tuple(readable_cues), tuple(corrections), tuple(diagnostics)
+
+
+def _closed_approved_markup_ranges(text: str) -> tuple[tuple[int, int], ...]:
+    stack: list[tuple[str, int, int]] = []
+    ranges: list[tuple[int, int]] = []
+    for match in _MARKUP_TAG.finditer(text):
+        name = match.group("name").lower()
+        attributes = match.group("attributes")
+        if name != "font" and attributes:
+            continue
+        if not match.group("closing"):
+            stack.append((name, match.start(), match.end()))
+            continue
+        if stack and stack[-1][0] == name and not attributes:
+            _, start, end = stack.pop()
+            ranges.extend(((start, end), (match.start(), match.end())))
+    return tuple(sorted(ranges))
+
+
+def _visible_source_offset(cue: PresentationCue) -> int:
+    if not cue.source_token_indexes:
+        return 0
+    return sum(len(token) for token in cue.normalized_cue.tokens[: cue.source_token_indexes[0]])
+
+
+def _token_range_for_characters(tokens: tuple[str, ...], start: int, end: int) -> tuple[int, int]:
+    token_start = 0
+    indexes: list[int] = []
+    for index, token in enumerate(tokens):
+        token_end = token_start + len(token)
+        if token_start < end and start < token_end:
+            indexes.append(index)
+        token_start = token_end
+    if not indexes:
+        raise SubtitleValidationError("Markup correction must overlap retained source text.")
+    return indexes[0], indexes[-1] + 1
 
 
 def serialize_srt(cues: tuple[PresentationCue, ...]) -> str:

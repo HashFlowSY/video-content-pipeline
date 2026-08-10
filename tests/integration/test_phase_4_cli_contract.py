@@ -80,7 +80,12 @@ def _confirmed_plan(
     return plan
 
 
-def _configure_cli(project_root: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+def _configure_cli(
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    payload: bytes = b"1\n00:00:00,000 --> 00:00:02,000\n\xe4\xbd\xa0\xe5\xa5\xbd, subtitle.\n",
+) -> list[tuple[str, ...]]:
     (project_root / "config").mkdir()
     (project_root / "config" / "subtitle-rules.json").write_text(
         '{"schema_version": 1, "id": "phase-04-subtitle-rules-v1"}\n', encoding="utf-8"
@@ -90,9 +95,7 @@ def _configure_cli(project_root: Path, monkeypatch: pytest.MonkeyPatch) -> list[
     def controlled_extraction(arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         extraction_calls.append(arguments)
         destination = Path(arguments[-1])
-        destination.write_bytes(
-            b"1\n00:00:00,000 --> 00:00:02,000\n\xe4\xbd\xa0\xe5\xa5\xbd, subtitle.\n"
-        )
+        destination.write_bytes(payload)
         return subprocess.CompletedProcess(arguments, 0, "", "")
 
     monkeypatch.setattr(cli, "assert_runtime_policy", lambda: None)
@@ -179,6 +182,115 @@ def test_subtitles_extracts_and_validates_one_utf8_srt_track_into_a_retained_wor
     report_path = Path(report["report_path"])
     assert json.loads(report_path.read_text(encoding="utf-8")) == report
     assert not (tmp_path / "outputs").exists()
+
+
+def test_subtitles_writes_lossless_source_exports_and_traceable_readable_view(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path, subtitle_codecs=("webvtt",))
+    _configure_cli(
+        tmp_path,
+        monkeypatch,
+        payload=(
+            b"WEBVTT\n\n"
+            b"cue-a\n"
+            b"00:00:00.000 --> 00:00:01.000 line:80%\n"
+            b"<b>Hello</b> need\n\n"
+            b"cue-b\n"
+            b"00:00:00.500 --> 00:00:02.000\n"
+            b"need <i>to act</i>\n"
+        ),
+    )
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    candidate = json.loads(capsys.readouterr().out)["report"]["candidates"][0]
+
+    assert Path(candidate["source_vtt_path"]).read_text(encoding="utf-8") == (
+        "WEBVTT\n\n"
+        "cue-a\n"
+        "00:00:00.000 --> 00:00:01.000 line:80%\n"
+        "<b>Hello</b> need\n\n"
+        "cue-b\n"
+        "00:00:00.500 --> 00:00:02.000\n"
+        "need <i>to act</i>\n"
+    )
+    assert Path(candidate["source_srt_path"]).read_text(encoding="utf-8") == (
+        "cue-a\n"
+        "00:00:00,000 --> 00:00:01,000\n"
+        "<b>Hello</b> need\n\n"
+        "cue-b\n"
+        "00:00:00,500 --> 00:00:02,000\n"
+        "need <i>to act</i>\n"
+    )
+    assert candidate["format_projection_losses"] == [
+        {
+            "reason": "format_projection_loss",
+            "source_ordinal": 0,
+            "setting": "line:80%",
+        }
+    ]
+    assert Path(candidate["readable_vtt_path"]).read_text(encoding="utf-8") == (
+        "WEBVTT\n\n"
+        "cue-a\n"
+        "00:00:00.000 --> 00:00:01.000 line:80%\n"
+        "Hello need\n\n"
+        "cue-b\n"
+        "00:00:00.500 --> 00:00:02.000\n"
+        " to act\n"
+    )
+    correction_path = Path(candidate["readable_corrections_path"])
+    corrections = json.loads(correction_path.read_text(encoding="utf-8"))
+    assert corrections["corrections"] == [
+        {
+            "compared_to_source_ordinal": 0,
+            "reason": "proven_rolling_overlap",
+            "source_character_range": None,
+            "source_ordinal": 1,
+            "source_token_range": [0, 1],
+        },
+        {
+            "compared_to_source_ordinal": None,
+            "reason": "approved_markup_removed",
+            "source_character_range": [0, 3],
+            "source_ordinal": 0,
+            "source_token_range": [0, 1],
+        },
+        {
+            "compared_to_source_ordinal": None,
+            "reason": "approved_markup_removed",
+            "source_character_range": [8, 12],
+            "source_ordinal": 0,
+            "source_token_range": [0, 1],
+        },
+        {
+            "compared_to_source_ordinal": None,
+            "reason": "approved_markup_removed",
+            "source_character_range": [5, 8],
+            "source_ordinal": 1,
+            "source_token_range": [2, 3],
+        },
+        {
+            "compared_to_source_ordinal": None,
+            "reason": "approved_markup_removed",
+            "source_character_range": [14, 18],
+            "source_ordinal": 1,
+            "source_token_range": [4, 5],
+        },
+    ]
+
+
+def test_subtitles_converts_mov_text_to_a_retained_srt_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path, subtitle_codecs=("mov_text",))
+    extraction_calls = _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    candidate = json.loads(capsys.readouterr().out)["report"]["candidates"][0]
+
+    assert candidate["state"] == "valid"
+    assert candidate["source_format"] == "srt"
+    assert extraction_calls[0][-5:] == ("-c:s", "srt", "-f", "srt", candidate["raw_payload_path"])
 
 
 def test_subtitles_rejects_a_drifted_plan_without_reading_subtitle_bytes(

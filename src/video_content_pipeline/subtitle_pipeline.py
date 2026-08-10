@@ -25,7 +25,16 @@ from video_content_pipeline.planning import (
     load_run_plan,
 )
 from video_content_pipeline.source import SourceArtifact, sha256_file
-from video_content_pipeline.subtitles import SubtitleTrack, accept_subtitle_track
+from video_content_pipeline.subtitles import (
+    FormatProjectionLoss,
+    SubtitleTrack,
+    accept_subtitle_track,
+    presentation_output,
+    serialize_srt,
+    serialize_vtt,
+    source_presentation_cues,
+    source_srt_projection_losses,
+)
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 
 
@@ -56,18 +65,43 @@ class RawPayloadEvidence:
 
 
 @dataclass(frozen=True)
+class ExtractionFormat:
+    """The FFmpeg conversion required to parse one supported text subtitle payload."""
+
+    source_format: Literal["srt", "vtt"]
+    ffmpeg_codec: Literal["copy", "srt"]
+    ffmpeg_muxer: Literal["srt", "webvtt"]
+
+
+@dataclass(frozen=True)
+class CandidateArtifacts:
+    """Immutable source and readable exports for one atomically accepted candidate."""
+
+    source_vtt_path: str
+    source_srt_path: str
+    readable_vtt_path: str
+    readable_corrections_path: str
+    projection_losses: tuple[FormatProjectionLoss, ...]
+
+
+@dataclass(frozen=True)
 class SubtitleCandidate:
     """One retained extraction and atomic validation outcome."""
 
     source_id: str
     stream_index: int
     state: CandidateState
-    source_format: Literal["srt"] | None = None
+    source_format: Literal["srt", "vtt"] | None = None
     raw_payload_path: str | None = None
     raw_payload_sha256: str | None = None
     raw_payload_bytes: int | None = None
     source_candidate_path: str | None = None
     source_candidate_sha256: str | None = None
+    source_vtt_path: str | None = None
+    source_srt_path: str | None = None
+    readable_vtt_path: str | None = None
+    readable_corrections_path: str | None = None
+    format_projection_losses: tuple[FormatProjectionLoss, ...] = ()
     cue_count: int | None = None
     coverage_start: dict[str, int] | None = None
     diagnostic: PlanningDiagnostic | None = None
@@ -83,6 +117,11 @@ class SubtitleCandidate:
             "raw_payload_bytes": self.raw_payload_bytes,
             "source_candidate_path": self.source_candidate_path,
             "source_candidate_sha256": self.source_candidate_sha256,
+            "source_vtt_path": self.source_vtt_path,
+            "source_srt_path": self.source_srt_path,
+            "readable_vtt_path": self.readable_vtt_path,
+            "readable_corrections_path": self.readable_corrections_path,
+            "format_projection_losses": [loss.as_json() for loss in self.format_projection_losses],
             "cue_count": self.cue_count,
             "coverage_start": self.coverage_start,
         }
@@ -239,8 +278,8 @@ def _extract_supported_candidates(
 ) -> tuple[SubtitleCandidate, ...]:
     candidates: list[SubtitleCandidate] = []
     for candidate in evidence.subtitle_tracks:
-        source_format = _source_format(evidence, candidate)
-        if not candidate.available or candidate.origin != "embedded" or source_format is None:
+        extraction_format = _source_format(evidence, candidate)
+        if not candidate.available or candidate.origin != "embedded" or extraction_format is None:
             candidates.append(
                 SubtitleCandidate(
                     artifact.source_id,
@@ -248,7 +287,7 @@ def _extract_supported_candidates(
                     CandidateState.UNAVAILABLE,
                     diagnostic=PlanningDiagnostic(
                         "subtitle_format_unsupported",
-                        "Subtitle candidate is not an embedded SRT payload "
+                        "Subtitle candidate is not an embedded SRT, WebVTT, or mov_text payload "
                         "supported by this slice.",
                     ),
                 )
@@ -258,7 +297,7 @@ def _extract_supported_candidates(
             _extract_candidate(
                 artifact,
                 candidate,
-                source_format,
+                extraction_format,
                 evidence.coverage_by_stream,
                 _ffmpeg(plan),
                 report_id,
@@ -270,7 +309,7 @@ def _extract_supported_candidates(
 
 def _source_format(
     evidence: PlanInspectionEvidence, candidate: SubtitleTrackCandidate
-) -> Literal["srt"] | None:
+) -> ExtractionFormat | None:
     if evidence.structural_document is None:
         return None
     try:
@@ -288,14 +327,18 @@ def _source_format(
         ):
             codec = stream.get("codec_name")
             if codec in {"subrip", "srt"}:
-                return "srt"
+                return ExtractionFormat("srt", "copy", "srt")
+            if codec == "webvtt":
+                return ExtractionFormat("vtt", "copy", "webvtt")
+            if codec == "mov_text":
+                return ExtractionFormat("srt", "srt", "srt")
     return None
 
 
 def _extract_candidate(
     artifact: SourceArtifact,
     candidate: SubtitleTrackCandidate,
-    source_format: Literal["srt"],
+    extraction_format: ExtractionFormat,
     coverage_by_stream: tuple[tuple[int, StreamCoverage], ...],
     ffmpeg: PinnedExternalTool | None,
     report_id: str,
@@ -314,7 +357,8 @@ def _extract_candidate(
             ),
         )
     workspace = project_root / "work" / artifact.source_id / report_id
-    raw_payload = workspace / f"stream-{candidate.stream_index}.source.{source_format}"
+    source_format = extraction_format.source_format
+    raw_payload = workspace / f"stream-{candidate.stream_index}.payload.{source_format}"
     raw_payload.parent.mkdir(parents=True, exist_ok=True)
     command = (
         str(ffmpeg.path),
@@ -327,9 +371,9 @@ def _extract_candidate(
         "-map",
         f"0:{candidate.stream_index}",
         "-c:s",
-        "copy",
+        extraction_format.ffmpeg_codec,
         "-f",
-        source_format,
+        extraction_format.ffmpeg_muxer,
         str(raw_payload),
     )
     result = run_tool(command)
@@ -398,6 +442,7 @@ def _extract_candidate(
         track,
         coverage_start,
     )
+    artifacts = _write_candidate_artifacts(raw_payload, track)
     return SubtitleCandidate(
         artifact.source_id,
         candidate.stream_index,
@@ -408,6 +453,11 @@ def _extract_candidate(
         raw_payload_bytes=payload_evidence.byte_count,
         source_candidate_path=source_candidate_path.as_posix(),
         source_candidate_sha256=source_candidate_hash,
+        source_vtt_path=artifacts.source_vtt_path,
+        source_srt_path=artifacts.source_srt_path,
+        readable_vtt_path=artifacts.readable_vtt_path,
+        readable_corrections_path=artifacts.readable_corrections_path,
+        format_projection_losses=artifacts.projection_losses,
         cue_count=len(track.normalized_cues),
         coverage_start=_time_as_json(coverage_start),
     )
@@ -491,6 +541,60 @@ def _write_source_candidate(
     return path, digest
 
 
+def _write_candidate_artifacts(raw_payload: Path, track: SubtitleTrack) -> CandidateArtifacts:
+    """Persist source-preserving and readable exports next to immutable payload evidence."""
+
+    prefix = raw_payload.with_suffix("").with_suffix("")
+    source_vtt_path = prefix.with_name(f"{prefix.name}.source.vtt")
+    source_srt_path = prefix.with_name(f"{prefix.name}.source.srt")
+    readable_vtt_path = prefix.with_name(f"{prefix.name}.readable.vtt")
+    readable_corrections_path = prefix.with_name(f"{prefix.name}.readable.corrections.json")
+    source_cues = source_presentation_cues(track)
+    readable = presentation_output(track)
+    projection_losses = source_srt_projection_losses(track)
+    _write_text_once(source_vtt_path, serialize_vtt(source_cues))
+    _write_text_once(source_srt_path, serialize_srt(source_cues))
+    _write_text_once(readable_vtt_path, serialize_vtt(readable.cues))
+    _write_json_once(
+        readable_corrections_path,
+        {
+            "schema_version": 1,
+            "corrections": [_correction_as_json(correction) for correction in readable.corrections],
+            "diagnostics": [_diagnostic_as_json(diagnostic) for diagnostic in readable.diagnostics],
+        },
+    )
+    return CandidateArtifacts(
+        source_vtt_path.as_posix(),
+        source_srt_path.as_posix(),
+        readable_vtt_path.as_posix(),
+        readable_corrections_path.as_posix(),
+        projection_losses,
+    )
+
+
+def _correction_as_json(correction: object) -> dict[str, object]:
+    return {
+        "reason": getattr(correction, "reason"),
+        "source_ordinal": getattr(correction, "source_ordinal"),
+        "source_token_range": list(getattr(correction, "source_token_range")),
+        "compared_to_source_ordinal": getattr(correction, "compared_to_source_ordinal"),
+        "source_character_range": (
+            list(getattr(correction, "source_character_range"))
+            if getattr(correction, "source_character_range") is not None
+            else None
+        ),
+    }
+
+
+def _diagnostic_as_json(diagnostic: object) -> dict[str, object]:
+    return {
+        "reason": getattr(diagnostic, "reason"),
+        "source_ordinal": getattr(diagnostic, "source_ordinal"),
+        "compared_to_source_ordinal": getattr(diagnostic, "compared_to_source_ordinal"),
+        "markup": getattr(diagnostic, "markup"),
+    }
+
+
 def _persist_blocked_report(
     project_root: Path,
     plan_id: str,
@@ -519,3 +623,12 @@ def _write_json_once(path: Path, payload: dict[str, object]) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(encoded, encoding="utf-8")
+
+
+def _write_text_once(path: Path, text: str) -> None:
+    if path.exists():
+        if path.read_text(encoding="utf-8") != text:
+            raise ValueError(f"subtitle_artifact_conflict: immutable record differs: {path}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
