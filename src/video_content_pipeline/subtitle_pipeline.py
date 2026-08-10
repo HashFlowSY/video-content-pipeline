@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -53,6 +54,15 @@ class CandidateReportState(StrEnum):
 
     BLOCKED = "blocked"
     COMPLETED = "completed"
+    AWAITING_SUBTITLE_SELECTION = "awaiting_subtitle_selection"
+
+
+class SubtitleReportError(ValueError):
+    """A malformed retained subtitle report with a machine-readable reason."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -129,6 +139,52 @@ class SubtitleCandidate:
             result["diagnostic"] = self.diagnostic.as_json()
         return result
 
+    @classmethod
+    def from_json(cls, value: object) -> SubtitleCandidate:
+        """Load candidate evidence without altering its retained outcome."""
+
+        if not isinstance(value, Mapping):
+            raise SubtitleReportError("subtitle_report_invalid", "Candidate must be an object.")
+        try:
+            losses = value.get("format_projection_losses", [])
+            if not isinstance(losses, list):
+                raise ValueError("format projection losses must be a list")
+            diagnostic = value.get("diagnostic")
+            return cls(
+                source_id=_required_string(value, "source_id"),
+                stream_index=_required_positive_int(value, "stream_index"),
+                state=CandidateState(_required_string(value, "state")),
+                source_format=_optional_format(value.get("source_format")),
+                raw_payload_path=_optional_string(value.get("raw_payload_path")),
+                raw_payload_sha256=_optional_string(value.get("raw_payload_sha256")),
+                raw_payload_bytes=_optional_nonnegative_int(value.get("raw_payload_bytes")),
+                source_candidate_path=_optional_string(value.get("source_candidate_path")),
+                source_candidate_sha256=_optional_string(value.get("source_candidate_sha256")),
+                source_vtt_path=_optional_string(value.get("source_vtt_path")),
+                source_srt_path=_optional_string(value.get("source_srt_path")),
+                readable_vtt_path=_optional_string(value.get("readable_vtt_path")),
+                readable_corrections_path=_optional_string(value.get("readable_corrections_path")),
+                format_projection_losses=tuple(_projection_loss(loss) for loss in losses),
+                cue_count=_optional_nonnegative_int(value.get("cue_count")),
+                coverage_start=_optional_time(value.get("coverage_start")),
+                diagnostic=_planning_diagnostic(diagnostic) if diagnostic is not None else None,
+            )
+        except (TypeError, ValueError) as error:
+            raise SubtitleReportError(
+                "subtitle_report_invalid", "Candidate report contains an invalid candidate."
+            ) from error
+
+
+@dataclass(frozen=True)
+class SubtitleTrackSelection:
+    """One explicit user choice retained independently from the immutable RunPlan."""
+
+    source_id: str
+    stream_index: int
+
+    def as_json(self) -> dict[str, object]:
+        return {"source_id": self.source_id, "stream_index": self.stream_index}
+
 
 @dataclass(frozen=True)
 class SubtitleCandidateReport:
@@ -141,17 +197,58 @@ class SubtitleCandidateReport:
     candidates: tuple[SubtitleCandidate, ...]
     diagnostics: tuple[PlanningDiagnostic, ...]
     report_path: Path
+    parent_report_id: str | None = None
+    selections: tuple[SubtitleTrackSelection, ...] = ()
 
     def as_json(self) -> dict[str, object]:
         return {
             "report_id": self.report_id,
+            "parent_report_id": self.parent_report_id,
             "plan_id": self.plan_id,
             "state": self.state.value,
             "subtitle_rules_fingerprint": self.subtitle_rules_fingerprint,
             "candidates": [candidate.as_json() for candidate in self.candidates],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
+            "selections": [selection.as_json() for selection in self.selections],
             "report_path": self.report_path.as_posix(),
         }
+
+    @classmethod
+    def from_json(cls, value: object, report_path: Path) -> SubtitleCandidateReport:
+        """Load an immutable report using its expected project-owned path."""
+
+        if not isinstance(value, Mapping):
+            raise SubtitleReportError(
+                "subtitle_report_invalid", "Candidate report must be an object."
+            )
+        try:
+            candidates = value.get("candidates")
+            diagnostics = value.get("diagnostics")
+            selections = value.get("selections", [])
+            if not all(isinstance(items, list) for items in (candidates, diagnostics, selections)):
+                raise ValueError("Candidate report collections must be lists")
+            assert isinstance(candidates, list)
+            assert isinstance(diagnostics, list)
+            assert isinstance(selections, list)
+            return cls(
+                report_id=_required_string(value, "report_id"),
+                plan_id=_required_string(value, "plan_id"),
+                state=CandidateReportState(_required_string(value, "state")),
+                subtitle_rules_fingerprint=_optional_string(
+                    value.get("subtitle_rules_fingerprint")
+                ),
+                candidates=tuple(
+                    SubtitleCandidate.from_json(candidate) for candidate in candidates
+                ),
+                diagnostics=tuple(_planning_diagnostic(diagnostic) for diagnostic in diagnostics),
+                report_path=report_path,
+                parent_report_id=_optional_string(value.get("parent_report_id")),
+                selections=tuple(_selection_from_json(selection) for selection in selections),
+            )
+        except (TypeError, ValueError) as error:
+            raise SubtitleReportError(
+                "subtitle_report_invalid", "Candidate report has an invalid schema."
+            ) from error
 
 
 def process_subtitles(plan_id: str, project_root: Path) -> dict[str, object]:
@@ -189,10 +286,14 @@ def process_subtitles(plan_id: str, project_root: Path) -> dict[str, object]:
         candidates.extend(
             _extract_supported_candidates(artifact, evidence, plan, report_id, project_root)
         )
-    state = (
-        CandidateReportState.COMPLETED
-        if any(candidate.state is CandidateState.VALID for candidate in candidates)
-        else CandidateReportState.BLOCKED
+    ambiguous_source_ids = _ambiguous_source_ids(candidates)
+    state = _initial_report_state(candidates, ambiguous_source_ids)
+    report_diagnostics = tuple(
+        PlanningDiagnostic(
+            "subtitle_selection_required",
+            f"Part {source_id} has multiple valid embedded subtitle tracks.",
+        )
+        for source_id in ambiguous_source_ids
     )
     report_path = _report_path(project_root, plan.source_artifacts, report_id)
     candidate_report = SubtitleCandidateReport(
@@ -201,11 +302,69 @@ def process_subtitles(plan_id: str, project_root: Path) -> dict[str, object]:
         state,
         rules_fingerprint,
         tuple(candidates),
-        (),
+        report_diagnostics,
         report_path,
     )
     _write_json_once(report_path, candidate_report.as_json())
     return {"status": state.value, "report": candidate_report.as_json()}
+
+
+def resume_subtitles(
+    plan_id: str,
+    parent_report_id: str,
+    requested_selections: tuple[str, ...],
+    project_root: Path,
+) -> dict[str, object]:
+    """Append an explicit choice to a retained ambiguous report after revalidation."""
+
+    report_id = uuid.uuid4().hex
+    try:
+        plan = load_run_plan(project_root / "plans" / plan_id / "run-plan.json")
+        diagnostics = _revalidate_plan(plan, project_root)
+        if diagnostics:
+            return _persist_blocked_report(project_root, plan_id, report_id, diagnostics)
+        expected_parent_report_id = _validated_report_id(parent_report_id)
+        parent_path = _report_path(project_root, plan.source_artifacts, expected_parent_report_id)
+        parent_report = _load_candidate_report(parent_path)
+        if parent_report.report_id != parent_report_id or parent_report.plan_id != plan.plan_id:
+            raise SubtitleReportError(
+                "subtitle_report_mismatch", "Candidate report does not belong to this RunPlan."
+            )
+        if parent_report.state is not CandidateReportState.AWAITING_SUBTITLE_SELECTION:
+            raise SubtitleReportError(
+                "subtitle_selection_not_pending",
+                "Only an awaiting subtitle selection report can be resumed.",
+            )
+        rules_fingerprint = subtitle_rules_fingerprint(project_root)
+        if rules_fingerprint != parent_report.subtitle_rules_fingerprint:
+            raise SubtitleReportError(
+                "subtitle_rules_changed",
+                "Subtitle rules no longer match the retained candidate report.",
+            )
+        selections = tuple(_parse_selection(value) for value in requested_selections)
+        diagnostics = _validate_selections(parent_report.candidates, selections)
+        if diagnostics:
+            return _persist_blocked_report(project_root, plan_id, report_id, diagnostics)
+    except (OSError, ValueError) as error:
+        reason = getattr(error, "reason", "subtitle_report_invalid")
+        return _persist_blocked_report(
+            project_root, plan_id, report_id, (PlanningDiagnostic(reason, str(error)),)
+        )
+
+    report_path = _report_path(project_root, plan.source_artifacts, report_id)
+    resumed_report = SubtitleCandidateReport(
+        report_id=report_id,
+        plan_id=plan.plan_id,
+        state=CandidateReportState.COMPLETED,
+        subtitle_rules_fingerprint=rules_fingerprint,
+        candidates=parent_report.candidates,
+        diagnostics=(),
+        report_path=report_path,
+        parent_report_id=parent_report.report_id,
+        selections=selections,
+    )
+    _write_json_once(report_path, resumed_report.as_json())
+    return {"status": resumed_report.state.value, "report": resumed_report.as_json()}
 
 
 def subtitle_rules_fingerprint(project_root: Path) -> str:
@@ -220,6 +379,114 @@ def subtitle_rules_fingerprint(project_root: Path) -> str:
     if not isinstance(decoded, dict) or decoded.get("schema_version") != 1:
         raise ValueError("subtitle_rules_invalid: subtitle rules have an invalid schema.")
     return hashlib.sha256(raw_rules).hexdigest()
+
+
+def _initial_report_state(
+    candidates: list[SubtitleCandidate], ambiguous_source_ids: tuple[str, ...]
+) -> CandidateReportState:
+    if ambiguous_source_ids:
+        return CandidateReportState.AWAITING_SUBTITLE_SELECTION
+    if any(candidate.state is CandidateState.VALID for candidate in candidates):
+        return CandidateReportState.COMPLETED
+    return CandidateReportState.BLOCKED
+
+
+def _ambiguous_source_ids(candidates: list[SubtitleCandidate]) -> tuple[str, ...]:
+    valid_by_source: dict[str, int] = {}
+    for candidate in candidates:
+        if candidate.state is CandidateState.VALID:
+            valid_by_source[candidate.source_id] = valid_by_source.get(candidate.source_id, 0) + 1
+    return tuple(sorted(source_id for source_id, count in valid_by_source.items() if count > 1))
+
+
+def _validated_report_id(value: str) -> str:
+    try:
+        return uuid.UUID(hex=value).hex
+    except ValueError as error:
+        raise SubtitleReportError(
+            "subtitle_report_invalid", "Candidate report ID must be a UUID."
+        ) from error
+
+
+def _load_candidate_report(path: Path) -> SubtitleCandidateReport:
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise SubtitleReportError(
+            "subtitle_report_invalid", "Candidate report cannot be read."
+        ) from error
+    return SubtitleCandidateReport.from_json(decoded, path)
+
+
+def _parse_selection(value: str) -> SubtitleTrackSelection:
+    source_id, separator, stream_index_text = value.rpartition("=")
+    if not separator or not source_id or not stream_index_text:
+        raise SubtitleReportError(
+            "subtitle_selection_invalid", "Selections must use part-id=stream-index."
+        )
+    try:
+        stream_index = int(stream_index_text)
+    except ValueError as error:
+        raise SubtitleReportError(
+            "subtitle_selection_invalid", "Selection stream index must be a positive integer."
+        ) from error
+    if stream_index <= 0:
+        raise SubtitleReportError(
+            "subtitle_selection_invalid", "Selection stream index must be a positive integer."
+        )
+    return SubtitleTrackSelection(source_id, stream_index)
+
+
+def _validate_selections(
+    candidates: tuple[SubtitleCandidate, ...], selections: tuple[SubtitleTrackSelection, ...]
+) -> tuple[PlanningDiagnostic, ...]:
+    ambiguous_source_ids = _ambiguous_source_ids(list(candidates))
+    selected_by_source: dict[str, SubtitleTrackSelection] = {}
+    diagnostics: list[PlanningDiagnostic] = []
+    for selection in selections:
+        if selection.source_id in selected_by_source:
+            diagnostics.append(
+                PlanningDiagnostic(
+                    "subtitle_selection_duplicate",
+                    f"Part {selection.source_id} has more than one selection.",
+                )
+            )
+        selected_by_source[selection.source_id] = selection
+    for source_id in ambiguous_source_ids:
+        selected = selected_by_source.get(source_id)
+        if selected is None:
+            diagnostics.append(
+                PlanningDiagnostic(
+                    "subtitle_selection_missing",
+                    f"Part {source_id} requires an explicit subtitle stream selection.",
+                )
+            )
+            continue
+        matching_candidate = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate.source_id == source_id
+                and candidate.stream_index == selected.stream_index
+            ),
+            None,
+        )
+        if matching_candidate is None or matching_candidate.state is not CandidateState.VALID:
+            diagnostics.append(
+                PlanningDiagnostic(
+                    "subtitle_selection_invalid",
+                    f"Part {source_id} does not have a valid selected subtitle stream.",
+                )
+            )
+    for source_id in selected_by_source:
+        if source_id not in ambiguous_source_ids:
+            diagnostics.append(
+                PlanningDiagnostic(
+                    "subtitle_selection_not_required",
+                    f"Part {source_id} is not awaiting subtitle selection.",
+                )
+            )
+    return tuple(diagnostics)
 
 
 def _revalidate_plan(plan: RunPlan, project_root: Path) -> tuple[PlanningDiagnostic, ...]:
@@ -592,6 +859,88 @@ def _diagnostic_as_json(diagnostic: object) -> dict[str, object]:
         "compared_to_source_ordinal": getattr(diagnostic, "compared_to_source_ordinal"),
         "markup": getattr(diagnostic, "markup"),
     }
+
+
+def _required_string(value: Mapping[str, object], field: str) -> str:
+    result = value.get(field)
+    if not isinstance(result, str) or not result:
+        raise ValueError(f"{field} must be a non-empty string")
+    return result
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    raise ValueError("Optional string field must be a string or null")
+
+
+def _required_positive_int(value: Mapping[str, object], field: str) -> int:
+    result = value.get(field)
+    if not isinstance(result, int) or isinstance(result, bool) or result <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+    return result
+
+
+def _optional_nonnegative_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("Optional integer field must be a non-negative integer or null")
+    return value
+
+
+def _optional_format(value: object) -> Literal["srt", "vtt"] | None:
+    if value is None:
+        return None
+    if value == "srt":
+        return "srt"
+    if value == "vtt":
+        return "vtt"
+    raise ValueError("Source format must be srt, vtt, or null")
+
+
+def _optional_time(value: object) -> dict[str, int] | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, Mapping)
+        or not isinstance(value.get("numerator"), int)
+        or not isinstance(value.get("denominator"), int)
+        or isinstance(value.get("numerator"), bool)
+        or isinstance(value.get("denominator"), bool)
+        or value["denominator"] == 0
+    ):
+        raise ValueError("Coverage start must be an exact time object or null")
+    return {"numerator": value["numerator"], "denominator": value["denominator"]}
+
+
+def _projection_loss(value: object) -> FormatProjectionLoss:
+    if not isinstance(value, Mapping):
+        raise ValueError("Projection loss must be an object")
+    source_ordinal = value.get("source_ordinal")
+    if source_ordinal is not None and (
+        not isinstance(source_ordinal, int)
+        or isinstance(source_ordinal, bool)
+        or source_ordinal < 0
+    ):
+        raise ValueError("Projection loss source ordinal is invalid")
+    if value.get("reason") != "format_projection_loss" or not isinstance(value.get("setting"), str):
+        raise ValueError("Projection loss is invalid")
+    return FormatProjectionLoss("format_projection_loss", source_ordinal, value["setting"])
+
+
+def _planning_diagnostic(value: object) -> PlanningDiagnostic:
+    if not isinstance(value, Mapping):
+        raise ValueError("Diagnostic must be an object")
+    return PlanningDiagnostic(_required_string(value, "reason"), _required_string(value, "message"))
+
+
+def _selection_from_json(value: object) -> SubtitleTrackSelection:
+    if not isinstance(value, Mapping):
+        raise ValueError("Selection must be an object")
+    return SubtitleTrackSelection(
+        _required_string(value, "source_id"), _required_positive_int(value, "stream_index")
+    )
 
 
 def _persist_blocked_report(

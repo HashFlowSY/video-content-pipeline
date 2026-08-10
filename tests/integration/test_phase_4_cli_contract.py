@@ -395,3 +395,131 @@ def test_subtitles_keeps_an_unsupported_second_track_unavailable_without_extract
         "unavailable",
     ]
     assert len(extraction_calls) == 1
+
+
+def test_subtitles_requires_an_explicit_selection_for_ambiguous_valid_tracks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path, subtitle_codecs=("subrip", "subrip"))
+    extraction_calls = _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    initial = json.loads(capsys.readouterr().out)
+
+    assert initial["status"] == "awaiting_subtitle_selection"
+    report = initial["report"]
+    assert report["state"] == "awaiting_subtitle_selection"
+    assert [candidate["stream_index"] for candidate in report["candidates"]] == [1, 2]
+    assert all(candidate["state"] == "valid" for candidate in report["candidates"])
+    original_report = Path(report["report_path"]).read_text(encoding="utf-8")
+
+    selection = f"{plan.source_artifacts[0].source_id}=2"
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--resume",
+                report["report_id"],
+                "--select",
+                selection,
+                "--json",
+            ]
+        )
+        == 0
+    )
+    resumed = json.loads(capsys.readouterr().out)
+
+    assert resumed["status"] == "completed"
+    assert resumed["report"]["parent_report_id"] == report["report_id"]
+    assert resumed["report"]["selections"] == [
+        {"source_id": plan.source_artifacts[0].source_id, "stream_index": 2}
+    ]
+    assert len(extraction_calls) == 2
+    assert Path(report["report_path"]).read_text(encoding="utf-8") == original_report
+
+
+def test_subtitle_selection_resume_revalidates_before_reusing_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path, subtitle_codecs=("subrip", "subrip"))
+    extraction_calls = _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+    original_report = Path(report["report_path"]).read_text(encoding="utf-8")
+    plan.source_artifacts[0].media_path.write_bytes(b"changed-after-ambiguous-report")
+
+    selection = f"{plan.source_artifacts[0].source_id}=1"
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--resume",
+                report["report_id"],
+                "--select",
+                selection,
+                "--json",
+            ]
+        )
+        == 0
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert response["status"] == "blocked"
+    assert response["report"]["diagnostics"] == [
+        {"reason": "source_artifact_changed", "message": "A SourceArtifact hash no longer matches."}
+    ]
+    assert len(extraction_calls) == 2
+    assert Path(report["report_path"]).read_text(encoding="utf-8") == original_report
+
+
+def test_subtitle_selection_cannot_promote_an_invalid_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path, subtitle_codecs=("subrip", "subrip", "subrip"))
+    _configure_cli(tmp_path, monkeypatch)
+
+    def controlled_extraction(arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        destination = Path(arguments[-1])
+        if arguments[arguments.index("-map") + 1] == "0:3":
+            destination.write_bytes(b"not a subtitle payload")
+        else:
+            destination.write_bytes(b"1\n00:00:00,000 --> 00:00:02,000\nvalid track\n")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(subtitle_pipeline, "run_tool", controlled_extraction)
+    assert cli.main(["subtitles", plan.plan_id, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+
+    selection = f"{plan.source_artifacts[0].source_id}=3"
+    assert (
+        cli.main(
+            [
+                "subtitles",
+                plan.plan_id,
+                "--resume",
+                report["report_id"],
+                "--select",
+                selection,
+                "--json",
+            ]
+        )
+        == 0
+    )
+    response = json.loads(capsys.readouterr().out)
+    source_id = plan.source_artifacts[0].source_id
+
+    assert [candidate["state"] for candidate in report["candidates"]] == [
+        "valid",
+        "valid",
+        "invalid",
+    ]
+    assert response["status"] == "blocked"
+    assert response["report"]["diagnostics"] == [
+        {
+            "reason": "subtitle_selection_invalid",
+            "message": (f"Part {source_id} does not have a valid selected subtitle stream."),
+        }
+    ]

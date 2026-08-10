@@ -1,10 +1,10 @@
 # Phase 4 Atomic Task List
 
-Status: `implementation_in_progress`; task 1 is complete.
+Status: `implementation_in_progress`; tasks 1 through 3 are complete.
 
 1. [x] Process one verified subtitle track end to end.
-2. Produce common-format readable subtitles.
-3. Resolve ambiguous subtitle-track selection explicitly.
+2. [x] Produce common-format readable subtitles.
+3. [x] Resolve ambiguous subtitle-track selection explicitly.
 4. Preserve bounded subtitle-processing failures.
 5. Report partial collections and ASR handoff.
 6. Prove the subtitle CLI contract offline.

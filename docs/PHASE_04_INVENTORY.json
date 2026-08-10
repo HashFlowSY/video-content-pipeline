@@ -75,6 +75,16 @@
       "command": "pytest -q; ruff check src tests; ruff format --check src tests; mypy src",
       "result": "121 passed; all static checks passed after code-review remediation",
       "mode": "project-local venv after require-project-venv.sh; controlled localhost proxy only for existing offline acquisition tests"
+    },
+    {
+      "command": "python -m pytest tests/integration/test_phase_4_cli_contract.py -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
+      "result": "11 passed; all static checks passed for explicit subtitle-track selection",
+      "mode": "project-local venv after require-project-venv.sh; controlled synthetic subtitle payloads only"
+    },
+    {
+      "command": "python -m pytest -q; python -m ruff check src tests; python -m ruff format --check src tests; python -m mypy src",
+      "result": "124 passed; all static checks passed for explicit subtitle-track selection",
+      "mode": "project-local venv after require-project-venv.sh; controlled localhost proxy only for existing offline acquisition tests"
     }
   ],
   "retention": "All Phase 4 design and implementation records are retained. No source media, model, dependency, cache, or temporary file is deleted by this implementation task. Tests use controlled FFmpeg substitutes only."

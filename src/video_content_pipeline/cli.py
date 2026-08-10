@@ -46,7 +46,7 @@ from video_content_pipeline.source import (
     snapshot_local_source,
     validate_local_source_candidate,
 )
-from video_content_pipeline.subtitle_pipeline import process_subtitles
+from video_content_pipeline.subtitle_pipeline import process_subtitles, resume_subtitles
 from video_content_pipeline.url_policy import (
     COLLECTION_CLOSURE_SIGNAL,
     ManualCollectionSession,
@@ -71,6 +71,8 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--json", action="store_true")
     subtitles = subcommands.add_parser("subtitles")
     subtitles.add_argument("plan_id")
+    subtitles.add_argument("--resume", metavar="REPORT_ID")
+    subtitles.add_argument("--select", action="append", default=[], metavar="PART_ID=STREAM_INDEX")
     subtitles.add_argument("--json", action="store_true")
     return parser
 
@@ -108,7 +110,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
     if arguments.command == "subtitles":
-        result = process_subtitles(arguments.plan_id, _project_root())
+        if arguments.resume is None:
+            result = process_subtitles(arguments.plan_id, _project_root())
+        else:
+            result = resume_subtitles(
+                arguments.plan_id,
+                arguments.resume,
+                tuple(arguments.select),
+                _project_root(),
+            )
         print(json.dumps(result, sort_keys=True))
         return 0
     raise AssertionError(f"Unhandled command: {arguments.command}")
