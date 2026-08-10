@@ -4,7 +4,7 @@
 
 日期：`2026-08-02`
 
-当前项目阶段：`source_intake_planning_and_resource_estimation / completed`
+当前项目阶段：`subtitle_track_priority_pipeline / completed`
 
 开发完成后的目标阶段：`real_world_testing`
 
@@ -973,6 +973,8 @@ Phase 2 不新增面向用户媒体的 CLI 命令；核心只通过库 API、显
 - 缺失模型只报告，不自动下载。
 
 ### 阶段 4：字幕轨优先流水线
+
+状态：`completed`
 
 目标：
 

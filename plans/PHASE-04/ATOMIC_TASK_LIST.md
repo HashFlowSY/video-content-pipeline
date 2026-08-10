@@ -1,6 +1,6 @@
 # Phase 4 Atomic Task List
 
-Status: `implementation_in_progress`; tasks 1 through 6 are complete.
+Status: `completed`; all current tasks are complete and verified offline.
 
 1. [x] Process one verified subtitle track end to end.
 2. [x] Produce common-format readable subtitles.

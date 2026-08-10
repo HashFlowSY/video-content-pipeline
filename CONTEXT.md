@@ -147,6 +147,139 @@ language, origin, container format, and availability; it contains no subtitle
 text during Phase 3.
 _Avoid_: acquired subtitle, parsed subtitle, selected subtitle
 
+**Embedded subtitle payload**:
+The raw subtitle bitstream extracted from one embedded SubtitleTrackCandidate
+inside an immutable SourceArtifact; it is the only subtitle-text input in
+Phase 4.
+_Avoid_: fetched platform subtitle, discovered sidecar, external subtitle URL
+
+**Primary subtitle track**:
+The single highest-ranked valid embedded subtitle track for one Part. Invalid
+candidates remain retained evidence and diagnostics; they cannot become a
+fallback through repair, merging, or partial publication.
+_Avoid_: merged track, repaired candidate, collection-wide primary track
+
+**Subtitle track selection ambiguity**:
+The state in which multiple valid embedded subtitle tracks exist but retained
+RunPlan evidence cannot establish a unique preference. It requires the user to
+select a stream index and is never resolved by default disposition or index.
+_Avoid_: automatic tie-break, default-track assumption, lowest-index fallback
+
+**Source subtitle artifact**:
+A deterministic UTF-8 SRT or WebVTT serialization of selected NormalizedCues.
+It permits only format-level normalization and never removes text, style tags,
+or duplicate display tokens; the raw Embedded subtitle payload remains audit
+evidence.
+_Avoid_: original subtitle payload, readable subtitle, corrected transcript
+
+**Readable subtitle artifact**:
+A display-oriented serialization derived from selected PresentationCues. It may
+remove only non-semantic presentation markup and token ranges supported by a
+recorded PresentationCorrection.
+_Avoid_: source subtitle, rewritten transcript, untracked cleanup
+
+**Text subtitle payload**:
+An Embedded subtitle payload with text semantics supported in Phase 4: SRT,
+WebVTT, or `mov_text`. It can be converted to the accepted cue format before
+atomic validation while its original payload is retained.
+_Avoid_: image subtitle, OCR input, unsupported styled subtitle
+
+**Image subtitle payload**:
+An Embedded subtitle payload whose glyphs are encoded as images, such as PGS
+or VobSub. It is unavailable for Phase 4 subtitle processing and remains
+retained source evidence without OCR or approximate text conversion.
+_Avoid_: text subtitle, inferred OCR text, empty subtitle track
+
+**Partial subtitle collection**:
+A MediaCollection whose subtitle artifacts cover only Parts with a Primary
+subtitle track. Unavailable Parts retain their CollectionVirtualTime span in
+reports but contribute no invented cue, silence marker, or subtitle text.
+_Avoid_: complete collection subtitle, caption gap filled with silence, zero-length Part
+
+**Subtitle processing authorization**:
+The Phase 4 authority to process a confirmed RunPlan after its SourceArtifacts,
+Pinned external tool, and versioned subtitle rules still exactly match recorded
+evidence. It appends processing evidence without mutating the RunPlan.
+_Avoid_: implicit processing permission, mutable plan, warning-only revalidation
+
+**Subtitle candidate workspace**:
+The project-owned `work/<source-id>/<subtitle-run-id>/` evidence area holding
+raw subtitle payloads, extraction records, validation results, and candidate
+artifacts before publication. It is not a RunBundle and no artifact inside it
+is rewritten during later publication.
+_Avoid_: output directory, disposable extraction cache, publish-time conversion
+
+**Readable markup whitelist**:
+The closed `b`, `i`, `u`, and `font` tags that Readable subtitle artifacts may
+remove as non-semantic presentation markup. Every other tag is preserved and
+reported as `unhandled_markup`.
+_Avoid_: generic tag stripping, inferred style cleanup, speaker-tag removal
+
+**Subtitle cue clock**:
+The PartRelativeTime coordinate used by an extracted subtitle payload. Each cue
+maps to authoritative RawPtsTime only by adding the Part coverage start; no
+scaling, drift correction, or non-linear timestamp transformation is allowed.
+_Avoid_: subtitle-specific timeline, duration scaling, inferred synchronization
+
+**Part playback coverage**:
+The union of observed DecodedIntervals across every usable audio and video
+stream in one Part. It is the subtitle-validation boundary and retains gaps
+where no usable stream is present.
+_Avoid_: container duration, audio-only coverage, assumed continuous playback
+
+**Caption time coverage**:
+The duration of the union of valid Primary subtitle track cue intervals divided
+by Part playback coverage duration. It measures displayed-caption time only and
+is always reported with `audio_completeness=not_verified`.
+_Avoid_: transcript completeness, speech coverage, subtitle accuracy score
+
+**Subtitle candidate report**:
+The immutable Phase 4 record of every extracted candidate payload, validation
+outcome, and selection eligibility for one confirmed RunPlan. It may enter
+`awaiting_subtitle_selection` when user input is required to choose a Primary
+subtitle track.
+_Avoid_: RunPlan, mutable track list, implicit user preference
+
+**Subtitle workspace preflight**:
+The Phase 4 disk check that estimates retained subtitle-candidate growth from
+packet evidence, reserves the greater of 1 GiB or five percent of that growth,
+and applies a versioned 256 MiB per-candidate extraction byte ceiling. A
+ceiling breach retains failed evidence as `extraction_size_limit` without
+deleting it.
+_Avoid_: Phase 3 source preflight, unbounded extraction, cleanup-on-failure
+
+**Explicit subtitle decoding**:
+The user-recorded decoder selection for a non-UTF-8 Embedded subtitle payload.
+Phase 4 automatically accepts only BOM-marked UTF-8/UTF-16 or strictly valid
+UTF-8; ambiguous bytes remain source evidence and cannot be repaired by
+replacement characters or encoding guesses.
+_Avoid_: charset auto-detection, lossy replacement decoding, best-looking text
+
+**Subtitle unavailable requires ASR plan**:
+The Phase 4 status for a Part with no valid Primary subtitle track after all
+allowed subtitle processing. It reports retained evidence and diagnostics but
+does not estimate, configure, download, or run ASR.
+_Avoid_: automatic ASR fallback, empty transcript, implicit model planning
+
+**Format projection loss**:
+The recorded omission of a cue layout setting that a requested export format
+cannot represent, such as WebVTT positioning in SRT. It never permits loss of
+visible text, timestamps, cue order, or retained source evidence.
+_Avoid_: silent conversion loss, text normalization, unsupported-style deletion
+
+**Subtitle extraction attempt**:
+One immutable write attempt for an Embedded subtitle payload. Only a
+complete, size-bounded, hash-recorded attempt becomes a parseable candidate;
+failed, timed-out, or interrupted writes remain `incomplete` diagnostics and
+are never overwritten or selected.
+_Avoid_: resumable partial payload, overwritten retry, unverified extraction
+
+**Character-preserving subtitle normalization**:
+The lossless conversion of decoded cue line endings to LF while preserving all
+other Unicode code points, whitespace, punctuation, and case. It excludes
+Unicode normalization, width conversion, whitespace collapse, and text repair.
+_Avoid_: typography cleanup, canonical Unicode rewriting, automatic proofreading
+
 **MediaCollection**:
 The ordered set of Parts intentionally supplied for one logical content item;
 its Part order is authoritative for collection virtual time.
