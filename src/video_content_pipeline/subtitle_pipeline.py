@@ -1240,7 +1240,7 @@ def _resolve_decoder_candidates(
                     "subtitle_payload_changed",
                     "The retained subtitle payload no longer matches its recorded evidence.",
                 )
-            if len(payload) > SUBTITLE_MAX_PAYLOAD_BYTES:
+            if len(payload) >= SUBTITLE_MAX_PAYLOAD_BYTES:
                 raise SubtitleReportError(
                     "extraction_size_limit",
                     f"Subtitle payload exceeds the {SUBTITLE_MAX_PAYLOAD_BYTES}-byte limit.",
