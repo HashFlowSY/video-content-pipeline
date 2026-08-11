@@ -7,7 +7,7 @@ times remain auditable throughout.
 
 **Blocked by:** 04 -- Deliver VAD evidence and caption-gap risks.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [x] Alignment can propose only times for existing cue identities; text or cue-cardinality changes return `alignment_text_contract_violation` and never become a transcript or candidate view.
@@ -30,3 +30,8 @@ and the full 150-test suite passed.
 2026-08-11: The implementation and focused acceptance checks remain present,
 but formal closure is blocked by Ticket 04: VAD must first have a provenance-
 bound Analysis audio derivative and immutable PlanReport inspection evidence.
+
+2026-08-11: Ticket 04 is now resolved by the confirmed inspection-evidence
+binding. Alignment implementation and its existing acceptance checks therefore
+meet their dependency boundary; the current 155-test full suite and all static
+checks pass.

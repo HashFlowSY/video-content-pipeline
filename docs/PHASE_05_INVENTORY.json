@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "phase": 5,
-  "status": "implementation_incomplete",
-  "recorded_at": "2026-08-11T06:18:54+0800",
+  "status": "completed",
+  "recorded_at": "2026-08-11T08:05:33+0800",
   "project_root": "/Users/shangyang/Desktop/workspace/projects/video-content-pipeline",
   "summary": {
     "offline_engineering_boundary_confirmed": true,
@@ -66,30 +66,30 @@
     "models_downloaded": false,
     "user_media_accessed": false,
     "network_requests": 0,
+    "phase_5_verified_offline": true,
+    "all_current_phase_5_tickets_resolved": true,
     "production_validated": false
   },
   "implementation_audit": {
-    "head": "f1278dd",
+    "head": "c99914b",
     "ticket_status": {
       "01": "resolved",
       "02": "resolved",
-      "03": "implemented_pending_ticket_02",
-      "04": "implemented_pending_ticket_02_and_inspection_binding",
-      "05": "implemented_pending_ticket_04",
-      "06": "implemented_pending_ticket_04",
-      "07": "implemented_pending_tickets_05_and_06",
-      "08": "verification_passed_pending_phase_completion"
+      "03": "resolved",
+      "04": "resolved",
+      "05": "resolved",
+      "06": "resolved",
+      "07": "resolved",
+      "08": "resolved"
     },
     "completed_work": [
       "Minimum analyze-audio CLI contract, immutable report workspaces, and non-acquiring availability reports.",
       "Stream selection pause/resume and hash-bound selection evidence.",
       "Controlled candidate eligibility, raw/projection retention, calibration, VAD, alignment, diarization, serial pause, and resume contracts."
     ],
-    "open_requirements": [
-      "Ticket 04 must bind immutable PlanReport inspection evidence to the confirmed RunPlan and independently revalidate that evidence before formal VAD publication."
-    ],
+    "open_requirements": [],
     "current_head_verification": {
-      "pytest": "155 passed in 0.93s",
+      "pytest": "155 passed in 0.94s",
       "ruff_check": "passed",
       "ruff_format_check": "39 files already formatted",
       "mypy": "Success: no issues found in 18 source files",
@@ -114,6 +114,8 @@
     "docs/adr/0038-require-explicit-analysis-audio-stream-selection.md",
     "docs/adr/0039-require-deterministic-calibration-evaluation-records.md",
     "docs/PHASE_05_INVENTORY.json",
+    "docs/PHASE_05_COMPLETION_REPORT.md",
+    "project-state.json",
     ".scratch/phase-05-auditable-audio-analysis-prototype/spec.md",
     ".scratch/phase-05-auditable-audio-analysis-prototype/issues/01-add-minimum-audio-analysis-cli-contract.md",
     ".scratch/phase-05-auditable-audio-analysis-prototype/issues/02-select-and-prepare-auditable-analysis-audio.md",
@@ -333,6 +335,79 @@
         "ffmpeg_executed": false,
         "model_execution": false,
         "user_media_accessed": false
+      },
+      "resource_bounds": {
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    },
+    {
+      "ticket": "status-recheck",
+      "status": "passed_with_open_requirements",
+      "commands": [
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff format --check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m mypy src"
+      ],
+      "results": {
+        "pytest_full": "155 passed in 0.89s",
+        "ruff_check": "passed",
+        "ruff_format_check": "39 files already formatted",
+        "mypy": "Success: no issues found in 18 source files",
+        "audit": "Tickets 01 through 03 are resolved; Ticket 04 still lacks immutable PlanReport inspection-evidence binding."
+      },
+      "resource_bounds": {
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    },
+    {
+      "ticket": "phase-completion",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff format --check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m mypy src"
+      ],
+      "results": {
+        "pytest_full": "155 passed in 0.93s",
+        "ruff_check": "passed",
+        "ruff_format_check": "39 files already formatted",
+        "mypy": "Success: no issues found in 18 source files",
+        "inspection_evidence_drift": "rejected before formal evidence publication",
+        "production_validated": false
+      },
+      "resource_bounds": {
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    },
+    {
+      "ticket": "post-completion-recheck",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m pytest -q",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m ruff format --check src tests",
+        "source .venv/bin/activate && scripts/require-project-venv.sh && python -m mypy src"
+      ],
+      "results": {
+        "pytest_full": "155 passed in 0.94s",
+        "ruff_check": "passed",
+        "ruff_format_check": "39 files already formatted",
+        "mypy": "Success: no issues found in 18 source files",
+        "production_validated": false
       },
       "resource_bounds": {
         "network_or_downloads": false,

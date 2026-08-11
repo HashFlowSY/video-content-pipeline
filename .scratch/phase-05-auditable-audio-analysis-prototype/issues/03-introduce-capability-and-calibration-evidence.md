@@ -8,7 +8,7 @@ identity.
 
 **Blocked by:** 02 -- Select and prepare auditable analysis audio.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [x] Each candidate is reported as `eligible`, `blocked`, or `unsupported` using the approved source, license, offline-runtime, credential, telemetry, dependency, and resource rules; Qwen and Silero remain candidates only.
@@ -22,3 +22,8 @@ deterministic calibration gates are implemented and covered by the current
 offline suite. This ticket cannot be closed until Ticket 02 produces and binds
 the actual analysis-audio derivative that those capability projections must
 consume.
+
+2026-08-11: Ticket 02 is now resolved by `f1278dd`, which supplies the
+provenance-bound Analysis audio derivative required by this ticket. Rechecking
+at `f8e0e10` passed the full 155-test suite, Ruff, formatter, and strict Mypy;
+Ticket 03 is resolved.

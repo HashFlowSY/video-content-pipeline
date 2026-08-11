@@ -7,7 +7,7 @@ subtitle coverage without creating a transcript.
 
 **Blocked by:** 03 -- Introduce capability and calibration evidence.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [x] Formal Voice activity intervals completely partition known usable audio in RawPtsTime into `speech_likely`, `non_speech`, or `indeterminate`; missing, rounded, or undecidable segments remain `indeterminate`.
@@ -38,3 +38,9 @@ revalidate it. VAD currently compares a projection against hashes recomputed
 from the currently loaded PlanReport, not an immutable confirmed inspection
 record. Ticket 04 remains open until Ticket 02's derivative boundary and this
 PlanReport inspection-evidence binding are complete.
+
+2026-08-11: Resolved by `c99914b`. The confirmed RunPlan now retains a
+per-Part inspection-evidence fingerprint and `vcp analyze-audio` rejects any
+PlanReport whose inspection evidence differs before selecting streams or
+publishing formal VAD evidence. The explicit drift CLI case and full 155-test
+verification passed, with Ruff, formatter, and strict Mypy also passing.

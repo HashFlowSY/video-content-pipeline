@@ -7,7 +7,7 @@ instead of changing model configuration or recovery behavior on its own.
 
 **Blocked by:** 05 -- Deliver adopted alignment timing views; 06 -- Deliver anonymous speaker-turn evidence.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [x] Stages execute serially and retain output, resource measurement, and unload evidence before loading the next controlled capability.
@@ -31,3 +31,7 @@ download, FFmpeg, FFprobe, or `outputs/` action occurred.
 2026-08-11: Serial-stage implementation and checks remain in place, but this
 ticket cannot remain resolved while Tickets 05 and 06 are formally open behind
 the VAD provenance boundary.
+
+2026-08-11: Tickets 05 and 06 are resolved. The fixed-order stage records,
+pause/resume decisions, and Partial report behavior are therefore complete and
+remain covered by the current full 155-test and static verification.

@@ -7,7 +7,7 @@ evidence.
 
 **Blocked by:** 04 -- Deliver VAD evidence and caption-gap risks.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [x] Formal SpeakerTurns use Part-local anonymous labels, RawPtsTime intervals, and calibration-backed confidence; no cross-Part, cross-run, voiceprint, or real-name association is emitted.
@@ -31,3 +31,7 @@ output publication occurred.
 2026-08-11: The implementation and all local acceptance checks are retained,
 but the ticket is reopened behind Ticket 04. Formal diarization evidence cannot
 be closed while the upstream VAD input provenance remains incomplete.
+
+2026-08-11: Ticket 04 is resolved. The retained diarization implementation and
+all checked acceptance criteria are now unblocked; the current full 155-test
+and static verification passed.
