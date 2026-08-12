@@ -738,6 +738,412 @@ any changed threshold, rule, or candidate combination is a new explicitly
 authorized calibration experiment.
 _Avoid_: automatic threshold search, silent retune, repeated calibration retry
 
+**Phase 6 offline text-verification boundary**:
+The Phase 6 engineering-verification scope that uses only retained synthetic
+structured text fixtures and controlled text-model-adapter substitutes. It
+excludes text-model download or installation, real-model invocation, user-media
+access, and network access; it may prove evidence ownership, schema, and
+unsupported-claim handling but not real-world summary quality.
+_Avoid_: text-model smoke test, implicit model acquisition, real-media summary
+validation
+
+**Phase 6 textual fact source**:
+The subtitle text cited by a Phase 6 factual claim. Phase 5 alignment, VAD,
+speaker-turn, and caption-gap evidence may define segment structure, timing,
+or uncertainty, but cannot independently support a factual claim. OCR remains
+outside this source until explicitly enabled in Phase 8.
+_Avoid_: voice-inferred fact, diarization-supported claim, uncited audio
+conclusion
+
+**Phase 6 evidence input and citation basis**:
+The Phase 6 model may read PresentationCues to avoid proven rolling-display
+duplication, but every formal factual claim cites the corresponding
+NormalizedCue identities and authoritative times. Readable subtitle artifacts
+are human-facing only and are never model input or claim evidence.
+_Avoid_: readable-subtitle citation, presentation-only provenance, model input
+from display artifact
+
+**Cue-level factual citation**:
+The minimum provenance for a Phase 6 factual claim: one or more explicitly
+named NormalizedCue identities. A segment membership or time range alone is
+insufficient; a claim spanning statements cites every needed cue identity.
+_Avoid_: segment-only citation, timestamp-only provenance, inferred nearby
+evidence
+
+**Semantic-segment cue ownership**:
+The requirement that each PresentationCue belongs to exactly one formal
+SemanticSegment, preventing omission and duplicate segment aggregation. This
+does not restrict Cue-level factual citation: the same NormalizedCue may support
+multiple factual claims when each use is explicitly cited.
+_Avoid_: overlapping cue ownership, unassigned cue, single-use factual evidence
+
+**Cue-bound semantic boundary**:
+A formal SemanticSegment boundary selected only between existing PresentationCues.
+A model may propose a natural breakpoint, but deterministic adjudication chooses
+only a cue boundary and never creates a model-authored timestamp or splits a cue.
+_Avoid_: mid-cue segment split, generated timing authority, arbitrary timestamp
+
+**Unsupported generated claim**:
+A Phase 6 factual output whose cited NormalizedCues are absent, invalid, or do
+not support the stated claim. It is excluded from formal reports without
+automatic rewriting, replacement, or guessed citations; its raw output and
+rejection reason remain immutable diagnostic evidence while other verified
+content may proceed.
+_Avoid_: uncited published claim, automatic citation repair, all-or-nothing
+report failure
+
+**Verified segment-derived summary**:
+A chapter or collection summary whose entries cite validated SemanticSegment
+identities rather than repeating every NormalizedCue reference. Each cited
+segment must retain its complete Cue-level factual citation chain; summaries
+cannot cite raw model output or cross a Part boundary to form a segment.
+_Avoid_: summary from unchecked generation, cue-less segment summary,
+cross-Part segment
+
+**Cue-supported segment title**:
+A SemanticSegment title with an explicit NormalizedCue citation. It may be a
+concise topic label rather than a full factual sentence, but cannot introduce
+an unsupported theme. If no subtitle text supports a title, the segment uses a
+deterministic neutral label such as `第 2 段`.
+_Avoid_: inferred thematic title, uncited heading, fabricated segment topic
+
+**Phase 6 immutable text-analysis workspace**:
+The project-owned immutable work area for one Phase 6 attempt. It retains raw
+controlled-adapter output, versioned structured projection, prompt and sampling
+configuration, validation results, and diagnostics without modifying prior
+evidence. It does not write `outputs/`; Phase 9 alone may publish verified
+artifacts without regenerating or rewriting them.
+_Avoid_: mutable text report, direct RunBundle publication, overwritten model
+output
+
+**Explicit text-analysis command boundary**:
+`vcp analyze-text` is the sole public command that starts a Phase 6 text
+analysis attempt from explicitly named retained inputs and emits an immutable
+text analysis report. `vcp resume-text-analysis` is a separate command that
+names the retained report and the user's required decision before continuation.
+_Avoid_: implicit text analysis, automatic resume, hidden recovery choice
+
+**Text-analysis input revalidation**:
+The pre-execution verification of the confirmed RunPlan and SourceArtifact
+hashes, subtitle candidate report and selected Primary subtitle track,
+PresentationCue and NormalizedCue rules and hashes, prompt and schema version,
+and controlled text-adapter identity. An optional Audio analysis report also
+requires its input binding and report hash to match. Any drift blocks the
+attempt and requires a new one.
+_Avoid_: stale text analysis, warning-only input drift, inherited audio report
+
+**Optional audio-analysis context**:
+An optional Phase 5 Audio analysis report that may contribute only its
+validated structural and risk evidence to Phase 6. Its absence permits
+subtitle-based text analysis with `audio_analysis=not_available` and
+`audio_completeness=not_verified`; a partial report contributes no inference
+about any missing stage.
+_Avoid_: required audio analysis, assumed audio completeness, inferred missing
+audio state
+
+**Part-bounded semantic aggregation**:
+The rule that SemanticSegments and chapters remain within one Part. A collection
+summary may cite validated segments from multiple Parts while retaining each
+Part identity, but it cannot create a continuous cross-Part segment or time
+range.
+_Avoid_: cross-Part semantic segment, merged chapter timeline, continuous
+collection timestamp
+
+**Text-model output projection**:
+The shared versioned structured contract for a controlled Phase 6 adapter and
+any future real text model. It contains candidate segment boundaries, titles,
+segment detail, question-and-answer structure, summaries, and each cited cue
+identity, with raw model output retained independently. A missing required field
+or invalid schema is `model_output_invalid`: no defaults, guessed values, or
+partial projection become formal text evidence.
+_Avoid_: model-specific report schema, partial projected output, inferred
+missing field
+
+**Deterministically adjudicated semantic boundary**:
+A formal cue-bound segment boundary selected from model-proposed cue-pair
+candidates by stable versioned rules. The adjudicator rejects out-of-range,
+duplicate, empty, or coverage-breaking candidates and does not invent a theme
+boundary; when no valid candidate remains, it may use only the conservative
+single-segment-per-Part fallback to retain exactly-once cue ownership.
+_Avoid_: generated boundary repair, implicit theme segmentation, unassigned cue
+
+**Two-level text-analysis failure handling**:
+An invalid or incomplete Text-model output projection invalidates the entire
+attempt as `model_output_invalid`. After a valid projection exists, each title,
+factual item, question-and-answer element, or summary entry is validated
+independently; failed items become retained diagnostics while independently
+verified content remains in the same report.
+_Avoid_: partial schema recovery, all-or-nothing validated report, silent item
+repair
+
+**Cue-supported question-and-answer structure**:
+Optional Phase 6 question-and-answer fields emitted only when cited subtitle
+text establishes the question-and-answer relationship. Ordinary narration,
+ambiguous dialogue, or a speaker-label change alone stays as detailed segment
+content and is never forced into a question-and-answer form.
+_Avoid_: inferred Q&A, diarization-created question, mandatory interview schema
+
+**Cue-supported person and role**:
+A person or role emitted in Phase 6 only when cited subtitle text explicitly
+self-identifies or names the person or role, or when explicit user metadata
+supplies it. Anonymous Part-local speaker labels may be retained as labels but
+cannot establish a social role or real identity.
+_Avoid_: voice-inferred role, diarization-based identity, inferred host label
+
+**Cue-supported structured detail**:
+A numeric value, entity, example, condition, caveat, or unresolved item emitted
+as an independent Phase 6 factual field with at least one NormalizedCue
+citation. The model may not perform unit conversion, numeric inference, entity
+disambiguation, or external supplementation; when a citation supports only
+part, only that supported portion is emitted.
+_Avoid_: calculated number, enriched entity, inferred caveat, external fact
+
+**Cue-preserved source contradiction**:
+Two or more incompatible claims in subtitle evidence that Phase 6 reports
+without choosing truth or merging them into a corrected conclusion. The report
+attributes each claim to the video and cites every conflicting NormalizedCue;
+any explicit conflict notice cites both sides.
+_Avoid_: model-resolved contradiction, corrected video claim, one-sided conflict
+
+**Cue-supported unresolved question**:
+A question explicitly raised in cited subtitle text for which the validated
+evidence scope contains no answer or conclusion. It cannot arise solely from a
+model's uncertainty, omitted subtitle coverage, or information it wishes the
+video had supplied.
+_Avoid_: model-invented follow-up, caption-gap question, implicit unknown
+
+**Subtitle-unavailable text Part**:
+A Part with no valid Primary subtitle track after allowed subtitle processing.
+Phase 6 retains its CollectionVirtualTime range and unavailable reason as
+`text_content=unavailable`, but emits no SemanticSegment, content fact, or
+summary for it. Other Parts may proceed, and any collection summary declares
+the omitted range.
+_Avoid_: empty semantic segment, inferred text from audio, silent partial
+collection
+
+**Persistent subtitle audio-completeness limitation**:
+The required `audio_completeness=not_verified` notice on the report front page,
+Part summaries, chapter summaries, and collection summary whenever text content
+derives from a subtitle track rather than a future verified full ASR. Phase 5
+alignment or VAD evidence does not remove this limitation.
+_Avoid_: alignment-proved transcript completeness, VAD-proved caption coverage,
+unqualified subtitle summary
+
+**Controlled offline text adapter**:
+The Phase 6 engineering-verification substitute for a real text model. It is
+identified by its implementation version, fixed input and output fixture hashes,
+projection schema, prompt template, and sampling-configuration hashes. It
+proves only the engineering contract, is not entered as a real model asset, and
+cannot earn `model_audited` status or a real-world quality qualification.
+_Avoid_: synthetic model registration, implied model qualification, fixture-only
+quality claim
+
+**Text-model identity invalidation**:
+The rule that a change to a future real text model asset, revision, quantization,
+inference backend, prompt, sampling configuration, projection schema, or
+evidence rule requires a new Phase 6 text-analysis attempt and new verification.
+Controlled-adapter results cannot be reused as real-model proof or upgraded to
+real-world quality status.
+_Avoid_: inherited model qualification, stale text report, adapter-to-model
+promotion
+
+**Text-analysis unavailable result and offline exit gate**:
+When no controlled adapter or explicitly authorized real model is available,
+`vcp analyze-text` retains an immutable report with
+`model_acquisition_required` or `controlled_adapter_unavailable` and produces
+no SemanticSegments. Phase 6 can exit only after controlled-adapter contract,
+evidence validation, diagnostics, and offline tests pass; its result is
+`passed_offline`, never a domain-quality or production validation claim.
+_Avoid_: empty content report, implied model fallback, offline quality approval
+
+**Phase 6 report language boundary**:
+Semantic-segment titles, detailed content, question-and-answer structures,
+chapter summaries, and collection summaries default to Chinese. NormalizedCue
+text and evidence excerpts retain their source language, including mixed
+Chinese and English; translation cannot alter source subtitles and, if later
+introduced, is a separate artifact.
+_Avoid_: translated source evidence, English-forced mixed-language subtitle,
+embedded translation artifact
+
+**Technical text-processing block**:
+A possibly overlapping cue collection used only to fit Phase 6 model context.
+It is not a SemanticSegment, chapter, or citation range. Cross-block candidates
+are deduplicated by complete cue identities and passed to one adjudicator, so
+each PresentationCue still gains exactly one formal SemanticSegment owner.
+_Avoid_: block-as-segment, block citation, duplicate cross-block ownership
+
+**Length-unconstrained semantic segment**:
+A non-empty SemanticSegment with cue-bound boundaries and exactly-once
+PresentationCue ownership, without a fixed duration, token, or cue-count target.
+Short and long segments are both valid when the adjudicated evidence warrants
+them; the report retains the model proposal and adjudication reason.
+_Avoid_: fixed-window segment, target-length chapter, duration-based split
+
+**Part-local chapter aggregation**:
+An optional chapter formed from one or more consecutive verified SemanticSegments
+in the same Part. It retains every member segment identity, and its title and
+summary cite those members. A chapter may contain one segment or be absent;
+fixed counts, durations, and cosmetic table-of-contents grouping are forbidden.
+_Avoid_: cross-Part chapter, forced chapter count, unreferenced chapter summary
+
+**Text-analysis decision pause boundary**:
+Phase 6 pauses only for a user choice that changes model, configuration, or
+evidence identity, including future model selection or download, a
+resource-envelope configuration change, prompt or schema change, or replacement
+of an invalid adapter. Invalid individual content, absent valid semantic
+candidates, and subtitle-unavailable Parts are evidence outcomes that create a
+partial report without pausing.
+_Avoid_: pause on ordinary validation result, implicit model replacement,
+automatic configuration change
+
+**Serialized text-model execution**:
+A future real Phase 6 text model runs under the global one-large-model rule and
+loads only after Phase 5 heavy audio models have recorded complete release
+evidence. It records resource measurements and its own unload evidence before
+any later large model may load. A controlled offline adapter loads no model but
+still records its execution resource measurement.
+_Avoid_: concurrent audio-and-text model load, unmeasured text execution,
+unverified model release
+
+**Text-analysis resource-envelope pause**:
+When a future real text model's conservative pre-execution estimate exceeds the
+24 GiB envelope, Phase 6 retains an immutable
+`resource_envelope_exceeded` report and pauses for a user decision. It never
+automatically change quantization, context size, model, or sampling. A controlled
+adapter records its own resource result honestly without pretending to trigger a
+real-model downgrade path.
+_Avoid_: automatic quantization downgrade, hidden context reduction, silent
+model replacement
+
+**Text-generation attempt provenance**:
+The immutable record for one Phase 6 generation attempt: complete model
+identity, prompt, sampling configuration, input cue manifest and hashes, raw
+output, and output-projection hash. Text equality across attempts is not
+required, but changing a seed or any sampling setting creates a new attempt
+without overwriting the earlier report.
+_Avoid_: unrecorded generation variance, overwritten retry, deterministic-text
+claim
+
+**No automatic text-generation retry**:
+A failed controlled-adapter or future real-model generation is retained as its
+own immutable attempt and never rerun automatically. Even with identical
+configuration, a retry requires an explicit user-started new attempt so changed
+output or resource state cannot overwrite the original evidence.
+_Avoid_: transparent retry, overwritten failure, automatic model rerun
+
+**Text analysis report**:
+The immutable machine-readable `text-analysis-report.json` for one Phase 6
+attempt. It is the authoritative record of structured segments, chapters,
+collection summary, cue and segment citations, statuses, limitations, and
+diagnostic pointers. Any readable Markdown is deterministically rendered from
+the verified JSON and remains in the same workspace until Phase 9 publication.
+_Avoid_: Markdown-as-authority, independently edited report, pre-publication
+RunBundle
+
+**Text-analysis diagnostic visibility**:
+The readable Phase 6 report exposes only actionable summaries: counts of
+removed unsupported content, subtitle-unavailable Parts, input and audio
+limitations, and decision-pause reasons. Raw model output, rejected text, and
+item-level validation details remain in immutable workspace diagnostics reached
+by stable identifiers, never mixed into formal content prose.
+_Avoid_: raw generated claim in report body, hidden diagnostics, user-facing
+validation dump
+
+**Restricted raw text-model diagnostic**:
+The unmodified raw text-model or controlled-adapter output retained only as
+project-local audit evidence. It is excluded from formal reports and default
+Phase 9 publication; any later export for user inspection requires separate
+explicit authorization because it can contain unverified assertions.
+_Avoid_: published raw generation, implicit diagnostic export, validated-content
+assumption
+
+**Versioned text prompt template**:
+A project-managed complete Phase 6 prompt template retained with a path, version,
+and SHA-256. Each analysis attempt binds that template plus the hash of its
+actual rendered prompt and a cue-input manifest; source subtitle text belongs
+only in the attempt input, never copied into the shared template.
+_Avoid_: prompt hash without template, unversioned prompt change, source text in
+shared configuration
+
+**Versioned Phase 6 generation rules**:
+The independently versioned prompt template, output schema, and evidence rules
+that define one Phase 6 attempt. Any content change creates new versions and a
+new immutable attempt; engineering fixes may add versions but never overwrite a
+past version or reinterpret a retained report.
+_Avoid_: mutable prompt revision, retroactive report change, implicit rule
+upgrade
+
+**Versioned text-report renderer**:
+The hash-recorded renderer that deterministically creates a readable Markdown
+report from one verified Text analysis report JSON. A formatting-only renderer
+update may create and retain an additional Markdown rendition without changing
+the JSON, facts, citations, or states; any semantic rendering change requires a
+new text-analysis attempt.
+_Avoid_: edited Markdown authority, overwritten rendition, semantic formatting
+fix
+
+**Text analysis report status**:
+A Phase 6 report is `complete` when every Part with a valid Primary subtitle
+track has at least one verified SemanticSegment and no user decision is pending.
+It is `partial` when subtitle-unavailable Parts exist, a Part uses the
+conservative single-segment fallback, or a later stage pauses after validated
+content exists. It is `failed` when input revalidation, whole output
+projection, or execution fails before any verified segment exists. Rejected
+individual content remains a diagnostic and does not alone lower report status.
+_Avoid_: failed-on-one-claim, complete-with-unavailable-Part, hidden fallback
+
+**Conservative single-segment fallback**:
+The deterministic one-SemanticSegment-per-Part outcome used only when no valid
+model-proposed semantic boundary remains. It preserves complete cue ownership
+but does not establish semantic segmentation quality, so the Text analysis
+report is always `partial`.
+_Avoid_: successful semantic segmentation, complete fallback report, invented
+boundary
+
+**Offline citation-support oracle**:
+The pre-annotated synthetic-fixture relationship used in Phase 6 offline tests
+to determine whether a cited cue supports a candidate item. Current verification
+checks cue existence, field scope, explicit counterexamples, and structural
+consistency only; it does not add a second model or semantic-similarity threshold.
+Real-model semantic-support review requires separate authorization.
+_Avoid_: synthetic semantic scorer, self-validating model, implicit real-model
+fact check
+
+**Append-only human text-analysis review**:
+An independent immutable review record for a future real-model text analysis. It
+identifies the reviewer, scope, time, reference material, and accepted or
+rejected items; it may label only the reviewed scope `human_verified` and
+cannot rewrite model output, cue evidence, diagnostics, or unreviewed content.
+_Avoid_: edited model report, blanket human approval, mutable review result
+
+**Phase 6 offline human-review boundary**:
+The current Phase 6 scope defines and tests the append-only human-review record
+only with synthetic fixtures. It runs no real review and emits no
+`human_verified` result; real human review waits for separately authorized real
+models and media.
+_Avoid_: synthetic human approval, current-phase real review, implied quality
+certification
+
+**Phase 6 offline fixture coverage**:
+The minimum controlled-fixture set proving mixed Chinese and English, rolling
+repetition, legal overlapping cues, subtitle-unavailable Parts, multi-Part
+collections, valid and invalid cue citations, invalid whole projections,
+individually unsupported claims, question-and-answer/person/number/
+contradiction/unresolved-question structures, technical-block boundaries,
+single-segment fallback, input drift, resource pauses, and unavailable adapters.
+It proves contract behavior only, not real-world content quality.
+_Avoid_: happy-path-only fixture, synthetic quality claim, uncovered failure
+state
+
+**Phase 6 deterministic contract verification**:
+The offline test standard for Phase 6: assert schemas, cue-identity existence,
+fixture-defined citation relationships, exactly-once cue ownership, Part
+boundaries, diagnostic states, hashes, and immutability. It does not score the
+controlled adapter's wording, segmentation taste, or summary quality as a
+real-model capability claim.
+_Avoid_: synthetic prose benchmark, fixture-derived quality score, subjective
+golden summary
+
 **ProbeProjection**:
 The typed projection of a ProbeDocument used for decisions; unknown fields
 remain only in the raw document.
