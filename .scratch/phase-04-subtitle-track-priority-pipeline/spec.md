@@ -1,5 +1,12 @@
 # Phase 4: Subtitle-Track-Priority Pipeline
 
+## Domain routing
+
+Begin with the [Context Map](../../CONTEXT-MAP.md), then read the [Media
+Foundation](../../docs/contexts/media-foundation/CONTEXT.md), [Source
+Planning](../../docs/contexts/source-planning/CONTEXT.md), and
+[Subtitles](../../docs/contexts/subtitles/CONTEXT.md) Contexts.
+
 Type: enhancement
 Status: ready-for-agent
 Labels: ready-for-agent
@@ -95,9 +102,10 @@ emit machine-readable results and retain their workspace evidence.
 ## Further Notes
 
 - This PRD synthesizes the completed Phase 4 grilling decisions and uses the
-  canonical language in `CONTEXT.md`.
+  canonical language routed by the [Context Map](../../CONTEXT-MAP.md).
 - ADR 0025 fixes the strict revalidation boundary. The candidate workspace is
-  intentionally not a RunBundle; future Phase 9 publication can promote only
+  intentionally not a RunBundle; a future separately authorized publication
+  stage can promote only
   already verified artifacts.
 - The implementation remains dependency-free unless a future, separately
   approved decision changes that boundary.

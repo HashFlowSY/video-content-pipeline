@@ -1,5 +1,13 @@
 # Phase 4 Specification: Subtitle-Track-Priority Pipeline
 
+## Domain routing
+
+Begin with the [Context Map](../CONTEXT-MAP.md), then read the required
+[Media Foundation](contexts/media-foundation/CONTEXT.md), [Source
+Planning](contexts/source-planning/CONTEXT.md), and
+[Subtitles](contexts/subtitles/CONTEXT.md) Contexts. Subtitle terms are owned
+by Subtitles; shared clocks, coverage, and plans are linked from their owners.
+
 ## Status
 
 `completed_and_verified_offline`. Implementation and the Phase 4 CLI contract
@@ -56,8 +64,8 @@ text subtitle payloads and never claims audio or transcript completeness.
   and token provenance.
 - Do not write `outputs/` in this phase. Store raw payloads, extraction logs,
   reports, candidate artifacts, diagnostics, and correction logs only in the
-  Subtitle candidate workspace. Phase 9 may promote, but not recreate or
-  rewrite, these artifacts.
+  Subtitle candidate workspace. A future, separately authorized publication
+  stage may promote, but not recreate or rewrite, these artifacts.
 
 ## Reporting And Resource Contract
 

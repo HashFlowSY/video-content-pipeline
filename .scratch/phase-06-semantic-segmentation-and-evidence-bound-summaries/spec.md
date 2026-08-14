@@ -1,5 +1,14 @@
 # Phase 6: Evidence-Bound Semantic Segmentation and Summaries
 
+## Domain routing
+
+Begin with the [Context Map](../../CONTEXT-MAP.md), then read [Media
+Foundation](../../docs/contexts/media-foundation/CONTEXT.md), [Source
+Planning](../../docs/contexts/source-planning/CONTEXT.md), [Subtitles](../../docs/contexts/subtitles/CONTEXT.md),
+and [Text Analysis](../../docs/contexts/text-analysis/CONTEXT.md). [Audio
+Analysis](../../docs/contexts/audio-analysis/CONTEXT.md) is optional for
+subtitle-derived claims.
+
 Type: enhancement
 Status: ready-for-agent
 Labels: ready-for-agent
@@ -20,7 +29,8 @@ immutable Text analysis reports in project workspaces from revalidated confirmed
 plans and subtitle reports. A Controlled offline text adapter proves the public
 contract with synthetic fixtures. Every formal fact and title remains bound to
 NormalizedCue IDs; JSON is authoritative, Markdown is a deterministic workspace
-rendition, and Phase 9 remains solely responsible for publication.
+rendition, and a future separately authorized publication stage remains solely
+responsible for publication.
 
 ## Non-Negotiable Boundaries
 

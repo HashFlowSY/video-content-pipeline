@@ -1,5 +1,12 @@
 # Phase 5: Auditable Audio Analysis Prototype
 
+## Domain routing
+
+Begin with the [Context Map](../../CONTEXT-MAP.md), then read [Media
+Foundation](../../docs/contexts/media-foundation/CONTEXT.md), [Source
+Planning](../../docs/contexts/source-planning/CONTEXT.md), [Subtitles](../../docs/contexts/subtitles/CONTEXT.md),
+and [Audio Analysis](../../docs/contexts/audio-analysis/CONTEXT.md) Contexts.
+
 Type: enhancement
 Status: ready-for-agent
 Labels: ready-for-agent
@@ -143,7 +150,7 @@ or writes `outputs/`.
 ## Further Notes
 
 - This specification synthesizes the Phase 5 grilling record and uses the
-  canonical vocabulary in `CONTEXT.md`.
+  canonical vocabulary routed by the [Context Map](../../CONTEXT-MAP.md).
 - ADRs 0026 through 0039 define the immutable timing, calibration, VAD,
   diarization, resource, revalidation, workspace, CLI, provider-neutral,
   offline-verification, audio-selection, and calibration-evaluation boundaries.

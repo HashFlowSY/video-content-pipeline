@@ -1,5 +1,15 @@
 # Phase 6 Specification: Evidence-Bound Semantic Segmentation and Summaries
 
+## Domain routing
+
+Begin with the [Context Map](../CONTEXT-MAP.md), then read [Media
+Foundation](contexts/media-foundation/CONTEXT.md), [Source
+Planning](contexts/source-planning/CONTEXT.md), [Subtitles](contexts/subtitles/CONTEXT.md),
+and [Text Analysis](contexts/text-analysis/CONTEXT.md). [Audio
+Analysis](contexts/audio-analysis/CONTEXT.md) is an optional context: its
+validated evidence may inform organization and limitations, but it is not
+required for basic subtitle-derived claims.
+
 ## Status
 
 `approved_for_implementation_planning`. Phase 6 is limited to offline
@@ -32,7 +42,7 @@ vcp resume-text-analysis <report-id> --decision <decision> [--json]
   inputs.
 - The authoritative report is JSON. Readable Markdown is deterministically
   rendered from verified JSON, remains in the workspace, and is not published
-  until Phase 9.
+  until the future, separately authorized publication stage.
 
 ## Input And Revalidation Contract
 
@@ -107,7 +117,7 @@ Each attempt writes an immutable workspace that retains input bindings, prompt
 identity, adapter identity, execution-resource measurement, raw output,
 versioned Text-model output projection, validation results, diagnostics, JSON
 report, and rendered Markdown report. The raw output is restricted local audit
-evidence, excluded from formal reports and default Phase 9 publication; any
+evidence, excluded from formal reports and default publication; any
 export requires separate explicit authorization.
 
 The Controlled offline text adapter records implementation version, fixed input
@@ -180,7 +190,8 @@ this phase emits no `human_verified` result.
 
 ## Related Decisions
 
-This specification uses the Phase 6 vocabulary in `CONTEXT.md` and is
+This specification uses the Phase 6 vocabulary in the [Context Map](../CONTEXT-MAP.md)
+and [Text Analysis Context](contexts/text-analysis/CONTEXT.md) and is
 governed in particular by
 [ADR 0040](adr/0040-require-cue-level-evidence-for-phase-6-facts.md) and
 [ADR 0041](adr/0041-keep-phase-6-text-analysis-in-immutable-workspaces.md).

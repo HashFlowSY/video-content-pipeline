@@ -1,0 +1,836 @@
+{
+  "schema_version": 1,
+  "kind": "context-layout-migration",
+  "recorded_at": "2026-08-14",
+  "status": "documented",
+  "canonical_entry_point": "CONTEXT-MAP.md",
+  "created": [
+    "CONTEXT-MAP.md",
+    "docs/contexts/media-foundation/CONTEXT.md",
+    "docs/contexts/source-planning/CONTEXT.md",
+    "docs/contexts/subtitles/CONTEXT.md",
+    "docs/contexts/audio-analysis/CONTEXT.md",
+    "docs/contexts/text-analysis/CONTEXT.md",
+    "docs/RUNTIME_GOVERNANCE.md",
+    "docs/adr/0042-use-context-map-and-domain-owned-glossaries.md",
+    "docs/CONTEXT_LAYOUT_MIGRATION_INVENTORY.json",
+    "tests/acceptance/test_document_layout_contract.py"
+  ],
+  "modified": [
+    "AGENTS.md",
+    "docs/agents/domain.md",
+    "docs/DOMAIN_GLOSSARY.md",
+    "docs/PHASE_04_SPECIFICATION.md",
+    "docs/PHASE_06_SPECIFICATION.md",
+    ".scratch/phase-04-subtitle-track-priority-pipeline/spec.md",
+    ".scratch/phase-05-auditable-audio-analysis-prototype/spec.md",
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/spec.md"
+  ],
+  "retired": [
+    {
+      "artifact": "CONTEXT.md",
+      "reason": "retired monolithic domain glossary; historical copies remain unchanged",
+      "destination": "CONTEXT-MAP.md and docs/contexts/*/CONTEXT.md"
+    },
+    {
+      "artifact": "docs/DOMAIN_GLOSSARY.md definitions",
+      "reason": "retired competing glossary entry point",
+      "destination": "docs/DOMAIN_GLOSSARY.md migration pointer"
+    },
+    {
+      "artifact": "Phase 9 shorthand as an active domain phase",
+      "reason": "not an implemented domain concept",
+      "destination": "Future publication stage in media-foundation Context"
+    }
+  ],
+  "external_reads": [
+    "AGENTS.md",
+    "CONTEXT-MAP.md",
+    "CONTEXT.md",
+    "docs/DOMAIN_GLOSSARY.md",
+    "docs/agents/domain.md",
+    "docs/agents/issue-tracker.md",
+    ".scratch/context-map-domain-owned-glossaries/spec.md",
+    "docs/PHASE_04_SPECIFICATION.md",
+    "docs/PHASE_05_COMPLETION_REPORT.md",
+    "docs/PHASE_06_SPECIFICATION.md",
+    "docs/adr/0001-use-existing-ffmpeg-and-ffprobe.md through docs/adr/0041-keep-phase-6-text-analysis-in-immutable-workspaces.md",
+    "/Users/shangyang/.agents/skills/implement/SKILL.md",
+    "/Users/shangyang/.agents/skills/tdd/SKILL.md",
+    "/Users/shangyang/.agents/skills/code-review/SKILL.md",
+    "/Users/shangyang/.agents/skills/domain-modeling/SKILL.md",
+    "/Users/shangyang/.agents/skills/domain-modeling/CONTEXT-FORMAT.md",
+    "/Users/shangyang/.agents/skills/domain-modeling/ADR-FORMAT.md",
+    "/Users/shangyang/.agents/skills/writing-for-agents/SKILL.md"
+  ],
+  "retired_monolithic_terms": [
+    {
+      "term": "Synthetic media fixture",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Fixture recipe",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Dependency-free Phase 2 core",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Phase 2 library boundary",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Phase 3 source-intake and planning boundary",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Source access authorization",
+      "destination": "source-planning"
+    },
+    {
+      "term": "RunPlan",
+      "destination": "source-planning"
+    },
+    {
+      "term": "PlanReport",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Plan confirmation",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Report revalidation",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Decode preflight confirmation",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Phase-bounded estimate",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Decode throughput profile",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Disk headroom",
+      "destination": "source-planning"
+    },
+    {
+      "term": "URL access mode",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Host escalation",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Insecure HTTP authorization",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Redacted source provenance",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Pinned external tool",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Inspection toolchain",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Full decode validation",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Decode validation toolchain",
+      "destination": "source-planning"
+    },
+    {
+      "term": "SourceArtifact",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Local source candidate",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Media-qualified source",
+      "destination": "source-planning"
+    },
+    {
+      "term": "SubtitleTrackCandidate",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Embedded subtitle payload",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Primary subtitle track",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Subtitle track selection ambiguity",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Source subtitle artifact",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Readable subtitle artifact",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Text subtitle payload",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Image subtitle payload",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Partial subtitle collection",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Subtitle processing authorization",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Subtitle candidate workspace",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Readable markup whitelist",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Subtitle cue clock",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Part playback coverage",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Caption time coverage",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Subtitle candidate report",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Subtitle workspace preflight",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Explicit subtitle decoding",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Subtitle unavailable requires ASR plan",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Format projection loss",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Subtitle extraction attempt",
+      "destination": "subtitles"
+    },
+    {
+      "term": "Character-preserving subtitle normalization",
+      "destination": "subtitles"
+    },
+    {
+      "term": "MediaCollection",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Manual collection session",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Collection closure",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Duplicate Part",
+      "destination": "source-planning"
+    },
+    {
+      "term": "Fixture toolchain",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "RawPtsTime",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "PartRelativeTime",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "CollectionVirtualTime",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Atomic subtitle track",
+      "destination": "subtitles"
+    },
+    {
+      "term": "RawCue",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "NormalizedCue",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "PresentationCue",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Monotonic cue order",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Proven rolling overlap",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Raw PTS",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Serialization envelope",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "DecodedInterval",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "StreamCoverage",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "ProbeDocument",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Coverage ProbeDocument",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Phase 3 test boundary",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Phase 5 offline engineering boundary",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Phase 5 analysis partition",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Adopted alignment timing view",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Cue-level alignment adoption",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Alignment-untrusted Part",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Alignment failure fingerprint",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Alignment failure diagnosis",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Alignment calibration requirement",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Alignment calibration profile",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Synthetic alignment calibration",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Voice activity interval",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Audio-coverage-constrained VAD",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "VAD calibration requirement",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Uncovered-speech risk evidence",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Audio-state-indeterminate risk",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Part-local speaker label",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "SpeakerTurn",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Role candidate",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Diarization calibration requirement",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Diarization calibration profile",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Phase 5 heavy-analysis sequence",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Model-release-unverified pause",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Resource-envelope-exceeded pause",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Phase 5 processing authorization",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Explicit model acquisition approval",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Audio analysis workspace",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Partial audio analysis report",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Long-silence evidence",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Audio analysis clock",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Audio analysis report",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Model-acquisition-required result",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Forced-alignment candidate",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Phase 5 capability contract",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Phase 5 model eligibility",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Credential-gated model candidate",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "VAD candidate",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Diarization capability vacancy",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Phase 5 offline verification boundary",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Model-output projection",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Model-output-invalid result",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Alignment text-contract violation",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Order-preserving alignment view",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Alignment-candidate-rejected cue",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Language-aware alignment duration rule",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Analysis audio stream",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Analysis audio selection record",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Analysis audio derivative",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Analysis audio derivation toolchain",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Derivative-to-source time mapping",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Complete VAD partition",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Diarization-VAD conflict",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Alignment-VAD conflict",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Calibration evaluation record",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Calibration-failed result",
+      "destination": "audio-analysis"
+    },
+    {
+      "term": "Phase 6 offline text-verification boundary",
+      "destination": "media-foundation"
+    },
+    {
+      "term": "Phase 6 textual fact source",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Phase 6 evidence input and citation basis",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Cue-level factual citation",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Semantic-segment cue ownership",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Cue-bound semantic boundary",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Unsupported generated claim",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Verified segment-derived summary",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Cue-supported segment title",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Phase 6 immutable text-analysis workspace",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Explicit text-analysis command boundary",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text-analysis input revalidation",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Optional audio-analysis context",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Part-bounded semantic aggregation",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text-model output projection",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Deterministically adjudicated semantic boundary",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Two-level text-analysis failure handling",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Cue-supported question-and-answer structure",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Cue-supported person and role",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Cue-supported structured detail",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Cue-preserved source contradiction",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Cue-supported unresolved question",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Subtitle-unavailable text Part",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Persistent subtitle audio-completeness limitation",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Controlled offline text adapter",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text-model identity invalidation",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text-analysis unavailable result and offline exit gate",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Phase 6 report language boundary",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Technical text-processing block",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Length-unconstrained semantic segment",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Part-local chapter aggregation",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text-analysis decision pause boundary",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Serialized text-model execution",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text-analysis resource-envelope pause",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text-generation attempt provenance",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "No automatic text-generation retry",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text analysis report",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text-analysis diagnostic visibility",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Restricted raw text-model diagnostic",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Versioned text prompt template",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Versioned Phase 6 generation rules",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Versioned text-report renderer",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Text analysis report status",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Conservative single-segment fallback",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Offline citation-support oracle",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Append-only human text-analysis review",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Phase 6 offline human-review boundary",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Phase 6 offline fixture coverage",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "Phase 6 deterministic contract verification",
+      "destination": "text-analysis"
+    },
+    {
+      "term": "ProbeProjection",
+      "destination": "media-foundation"
+    }
+  ],
+  "runtime_terms": [
+    {
+      "term": "Project root",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#project-root"
+    },
+    {
+      "term": "Managed Python",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#managed-python"
+    },
+    {
+      "term": "Project virtual environment",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#project-virtual-environment"
+    },
+    {
+      "term": "Shell gate",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#shell-gate"
+    },
+    {
+      "term": "In-process gate",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#in-process-gate"
+    },
+    {
+      "term": "Tool registry",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#tool-registry"
+    },
+    {
+      "term": "Model registry",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#model-registry"
+    },
+    {
+      "term": "Runtime download",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#runtime-download"
+    },
+    {
+      "term": "Runtime auto-download",
+      "destination": "docs/RUNTIME_GOVERNANCE.md#runtime-auto-download"
+    }
+  ],
+  "relocated_constraints": [
+    {
+      "constraint": "Exact signed time, half-open intervals, and outward serialization",
+      "destination": "docs/contexts/media-foundation/CONTEXT.md; docs/adr/0002, 0007, 0008, 0009"
+    },
+    {
+      "constraint": "Probe and decoded-coverage evidence replaces guessed duration",
+      "destination": "docs/contexts/media-foundation/CONTEXT.md; docs/adr/0010, 0011, 0023"
+    },
+    {
+      "constraint": "Source snapshot hashes and regular-file authorization",
+      "destination": "docs/contexts/source-planning/CONTEXT.md; docs/adr/0016, 0018"
+    },
+    {
+      "constraint": "Explicit URL mode, host escalation, and HTTP authorization",
+      "destination": "docs/contexts/source-planning/CONTEXT.md; docs/adr/0015, 0017"
+    },
+    {
+      "constraint": "Decode confirmation and exact preflight revalidation",
+      "destination": "docs/contexts/source-planning/CONTEXT.md; docs/adr/0020–0024"
+    },
+    {
+      "constraint": "Atomic subtitle validation, encoding, extraction, and presentation provenance",
+      "destination": "docs/contexts/subtitles/CONTEXT.md; docs/PHASE_04_SPECIFICATION.md; docs/adr/0003–0006, 0025"
+    },
+    {
+      "constraint": "Calibration-bound alignment, VAD, and diarization evidence",
+      "destination": ".scratch/phase-05-auditable-audio-analysis-prototype/spec.md; docs/adr/0026–0039"
+    },
+    {
+      "constraint": "Cue-level citations, Part boundaries, optional audio context, and immutable text workspaces",
+      "destination": "docs/contexts/text-analysis/CONTEXT.md; docs/PHASE_06_SPECIFICATION.md; docs/adr/0040–0041"
+    },
+    {
+      "constraint": "Runtime gates, project-local tools, and explicit-only downloads",
+      "destination": "docs/RUNTIME_GOVERNANCE.md; AGENTS.md; config/runtime-policy.toml"
+    },
+    {
+      "constraint": "Publication remains separately authorized and deferred",
+      "destination": "docs/contexts/media-foundation/CONTEXT.md; docs/adr/0042"
+    }
+  ]
+}

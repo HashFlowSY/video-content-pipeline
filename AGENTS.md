@@ -51,6 +51,8 @@ in `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-This is a single-context repository. Read the root `CONTEXT.md` and relevant
-records under `docs/adr/` before changing a domain boundary. See
-`docs/agents/domain.md`.
+Read the root `CONTEXT-MAP.md` before exploring or changing a domain boundary.
+Then read the affected owner Context and every dependency named by the map; use
+`docs/RUNTIME_GOVERNANCE.md` for runtime/setup vocabulary. Define each term only
+in its owner and name all affected owners and relevant global ADRs in a
+cross-Context change. See `docs/agents/domain.md`.

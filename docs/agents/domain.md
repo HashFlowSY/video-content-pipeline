@@ -2,22 +2,29 @@
 
 How engineering skills should consume this repository's domain documentation.
 
-## Before exploring, read these
+## Before exploring or changing a domain boundary
 
-- `CONTEXT.md` at the repository root.
-- Relevant ADRs under `docs/adr/`.
+1. Read [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md) first.
+2. Select the smallest affected Context, then read every required dependency
+   named by the map. Read `docs/RUNTIME_GOVERNANCE.md` only for environment or
+   setup vocabulary.
+3. Define or revise a term only in its owning Context. Link to an owner from a
+   dependent Context instead of copying its definition.
+4. For a cross-Context change, name every affected owner and relevant global
+   ADR. Add governing decisions to the global `docs/adr/` tree and index them
+   from the map; do not create context-scoped ADR trees.
 
-This is a single-context repository. There is no `CONTEXT-MAP.md` and no
-context-scoped ADR tree. Use the glossary vocabulary in `CONTEXT.md` when
-naming domain concepts in issues, tests, and implementation proposals. If a
-new output would contradict an ADR, surface that conflict instead of silently
-overriding the decision.
+The map is the sole domain-documentation entry point. If a proposed output
+would contradict an ADR, surface that conflict instead of silently overriding
+the decision. Historical inventories and archived records are evidence of their
+original layout and are not rewritten for navigation.
 
 ## Layout
 
 ```text
 /
-|- CONTEXT.md
+|- CONTEXT-MAP.md
+|- docs/contexts/
 |- docs/
 |  `- adr/
 `- src/
