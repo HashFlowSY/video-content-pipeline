@@ -352,6 +352,46 @@ def test_analyze_audio_reports_non_acquiring_registered_capability_states(
     assert response["report"]["guarantees"]["model_acquisition"] == "not_attempted"
 
 
+def test_analyze_audio_ignores_registered_transcription_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    subtitle_report = _retained_subtitle_report(tmp_path, plan)
+    registry_path = tmp_path / "models" / "registry.json"
+    registry_path.parent.mkdir()
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "candidates": [
+                    {"candidate_id": "silero-vad", "capability": "vad"},
+                    {"candidate_id": "qwen3-asr-1-7b", "capability": "asr_primary"},
+                    {"candidate_id": "whisper-large-v3", "capability": "asr_review"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["analyze-audio", plan.plan_id, subtitle_report.report_id, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+
+    # A transcription capability in the shared registry must not invalidate the
+    # audio read: audio still reports exactly its own three capabilities.
+    assert [capability["capability"] for capability in report["capabilities"]] == [
+        "vad",
+        "forced_alignment",
+        "diarization",
+    ]
+    registered_ids = {
+        candidate["candidate_id"]
+        for capability in report["capabilities"]
+        for candidate in capability["candidates"]
+    }
+    assert registered_ids == {"silero-vad"}
+
+
 def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

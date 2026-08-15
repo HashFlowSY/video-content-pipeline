@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -15,6 +14,15 @@ from video_content_pipeline.audio_derivation import (
     AnalysisAudioDerivative,
     PreprocessingProfile,
     prepare_analysis_audio,
+)
+from video_content_pipeline.capabilities import (
+    MAX_MODEL_RESOURCE_BYTES,
+    SHA256_PATTERN,
+    candidate_eligibility,
+    candidate_eligibility_evidence,
+    capability_state_from_grades,
+    load_registry_document,
+    parse_candidate_matrix,
 )
 from video_content_pipeline.coverage import StreamCoverage
 from video_content_pipeline.evidence import (
@@ -794,9 +802,10 @@ def _pause_reason(report: Mapping[str, object]) -> str | None:
     return None
 
 
-_CANDIDATE_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
-_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
-_MAX_MODEL_RESOURCE_BYTES = 24 * 1024**3
+# Eligibility gates are shared, context-neutral policy; keep the historical
+# private names as aliases so existing references stay stable.
+_SHA256_PATTERN = SHA256_PATTERN
+_MAX_MODEL_RESOURCE_BYTES = MAX_MODEL_RESOURCE_BYTES
 _IDENTITY_FIELDS = (
     "asset_sha256",
     "backend",
@@ -816,14 +825,10 @@ def _capabilities_from_registry(
             CapabilityAvailability(capability, "model_acquisition_required")
             for capability in _CAPABILITIES
         )
-    try:
-        decoded = json.loads(registry_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise AudioAnalysisError(
-            "model_registry_invalid", "Model registry cannot be read."
-        ) from error
-    if not isinstance(decoded, Mapping):
-        raise AudioAnalysisError("model_registry_invalid", "Model registry has an invalid schema.")
+    decoded = load_registry_document(
+        registry_path,
+        invalid_error=lambda message: AudioAnalysisError("model_registry_invalid", message),
+    )
     schema_version = decoded.get("schema_version")
     if schema_version == 2:
         return _capabilities_from_candidate_matrix(decoded, project_root, workspace_path)
@@ -863,36 +868,27 @@ def _capabilities_from_registry(
 def _capabilities_from_candidate_matrix(
     registry: Mapping[str, object], project_root: Path, workspace_path: Path
 ) -> tuple[CapabilityAvailability, ...]:
-    candidates = registry.get("candidates")
-    if not isinstance(candidates, list):
-        raise AudioAnalysisError(
-            "model_registry_invalid", "Model registry needs a candidates list."
-        )
-    candidates_by_capability: dict[str, list[dict[str, object]]] = {
-        capability: [] for capability in _CAPABILITIES
+    # The shared parser validates every candidate and returns only the audio
+    # capabilities; transcription (asr_*) candidates in the same registry are
+    # ignored rather than rejected.
+    grouped = parse_candidate_matrix(
+        registry,
+        _CAPABILITIES,
+        invalid_error=lambda message: AudioAnalysisError("model_registry_invalid", message),
+    )
+    candidates_by_capability = {
+        capability: [
+            _evaluate_candidate(
+                candidate,
+                str(candidate["candidate_id"]),
+                capability,
+                project_root,
+                workspace_path,
+            )
+            for candidate in grouped[capability]
+        ]
+        for capability in _CAPABILITIES
     }
-    candidate_ids: set[str] = set()
-    for candidate in candidates:
-        if not isinstance(candidate, Mapping):
-            raise AudioAnalysisError("model_registry_invalid", "Model candidate must be an object.")
-        candidate_id = candidate.get("candidate_id")
-        capability = candidate.get("capability")
-        if (
-            not isinstance(candidate_id, str)
-            or _CANDIDATE_ID_PATTERN.fullmatch(candidate_id) is None
-            or capability not in _CAPABILITIES
-        ):
-            raise AudioAnalysisError(
-                "model_registry_invalid", "Model candidate identity is invalid."
-            )
-        if candidate_id in candidate_ids:
-            raise AudioAnalysisError(
-                "model_registry_invalid", "Model candidate IDs must be unique."
-            )
-        candidate_ids.add(candidate_id)
-        candidates_by_capability[capability].append(
-            _evaluate_candidate(candidate, candidate_id, capability, project_root, workspace_path)
-        )
     return tuple(
         CapabilityAvailability(
             capability,
@@ -904,17 +900,16 @@ def _capabilities_from_candidate_matrix(
 
 
 def _capability_state_from_candidates(capability: str, candidates: list[dict[str, object]]) -> str:
+    # Diarization is optional: without an eligible candidate it stays a plain
+    # acquisition-required state rather than surfacing credential/ineligible
+    # detail. Every other capability shares the common grade aggregation.
     if capability == "diarization" and not any(
         candidate["state"] == "eligible" for candidate in candidates
     ):
         return "model_acquisition_required"
-    if any(candidate["state"] == "eligible" for candidate in candidates):
-        return "model_acquisition_required"
-    if any(candidate["reason"] == "model_credential_gated" for candidate in candidates):
-        return "model_credential_gated"
-    if candidates:
-        return "model_ineligible"
-    return "model_acquisition_required"
+    return capability_state_from_grades(
+        (candidate["state"], candidate["reason"]) for candidate in candidates
+    )
 
 
 def _evaluate_candidate(
@@ -924,13 +919,13 @@ def _evaluate_candidate(
     project_root: Path,
     workspace_path: Path,
 ) -> dict[str, object]:
-    state, reason = _candidate_eligibility(candidate, project_root)
+    state, reason = candidate_eligibility(candidate, project_root)
     result: dict[str, object] = {
         "candidate_id": candidate_id,
         "capability": capability,
         "state": state,
         "reason": reason,
-        "eligibility_evidence": _candidate_eligibility_evidence(candidate, project_root),
+        "eligibility_evidence": candidate_eligibility_evidence(candidate, project_root),
         "execution_controls": candidate.get("execution_controls"),
         "adapter": None,
         "calibration": {"state": "not_evaluated", "record": None, "profile": None},
@@ -962,67 +957,6 @@ def _evaluate_candidate(
         workspace_path,
     )
     return result
-
-
-def _candidate_eligibility_evidence(
-    candidate: Mapping[str, object], project_root: Path
-) -> dict[str, object]:
-    resource_estimate = candidate.get("resource_estimate")
-    dependency_plan = _project_local_file(project_root, candidate.get("dependency_plan"))
-    return {
-        "official_source": candidate.get("official_source"),
-        "license_approved": candidate.get("license_approved"),
-        "revision": candidate.get("revision"),
-        "asset_sha256": candidate.get("asset_sha256"),
-        "offline_runtime": candidate.get("offline_runtime"),
-        "credential_required": candidate.get("credential_required"),
-        "telemetry": candidate.get("telemetry"),
-        "dependency_plan": _input_evidence(dependency_plan).as_json()
-        if dependency_plan is not None
-        else None,
-        "resource_high_bytes": (
-            resource_estimate.get("high_bytes") if isinstance(resource_estimate, Mapping) else None
-        ),
-    }
-
-
-def _candidate_eligibility(
-    candidate: Mapping[str, object], project_root: Path
-) -> tuple[str, str | None]:
-    if candidate.get("credential_required") is True:
-        return "blocked", "model_credential_gated"
-    source = candidate.get("official_source")
-    asset_sha256 = candidate.get("asset_sha256")
-    resource_estimate = candidate.get("resource_estimate")
-    if (
-        isinstance(resource_estimate, Mapping)
-        and isinstance(resource_estimate.get("high_bytes"), int)
-        and not isinstance(resource_estimate.get("high_bytes"), bool)
-        and resource_estimate["high_bytes"] > _MAX_MODEL_RESOURCE_BYTES
-    ):
-        return "blocked", "resource_envelope_exceeded"
-    required = (
-        isinstance(source, Mapping)
-        and isinstance(source.get("url"), str)
-        and source["url"].startswith("https://")
-        and source.get("approved") is True
-        and candidate.get("license_approved") is True
-        and isinstance(candidate.get("revision"), str)
-        and bool(candidate.get("revision"))
-        and isinstance(asset_sha256, str)
-        and _SHA256_PATTERN.fullmatch(asset_sha256) is not None
-        and candidate.get("offline_runtime") is True
-        and candidate.get("credential_required") is False
-        and candidate.get("telemetry") is False
-        and _project_local_file(project_root, candidate.get("dependency_plan")) is not None
-        and isinstance(resource_estimate, Mapping)
-        and isinstance(resource_estimate.get("high_bytes"), int)
-        and not isinstance(resource_estimate.get("high_bytes"), bool)
-        and 0 <= resource_estimate["high_bytes"] <= _MAX_MODEL_RESOURCE_BYTES
-    )
-    if required:
-        return "eligible", None
-    return "unsupported", "model_candidate_evidence_incomplete"
 
 
 def _retain_controlled_adapter(
@@ -1232,15 +1166,6 @@ def _project_local_path(project_root: Path, value: object) -> Path:
         raise AudioAnalysisError(
             "calibration_failed", "Calibration fixture must stay inside the project."
         )
-    return path
-
-
-def _project_local_file(project_root: Path, value: object) -> Path | None:
-    if not isinstance(value, str) or not value:
-        return None
-    path = (project_root / value).resolve()
-    if not path.is_relative_to(project_root.resolve()) or not path.is_file():
-        return None
     return path
 
 

@@ -11,6 +11,14 @@
     {
       "candidate_id": "silero-vad",
       "capability": "vad"
+    },
+    {
+      "candidate_id": "qwen3-asr-1-7b",
+      "capability": "asr_primary"
+    },
+    {
+      "candidate_id": "whisper-large-v3",
+      "capability": "asr_review"
     }
   ]
 }
