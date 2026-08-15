@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "version": "phase-07-asr-projection-schema-v1",
+  "cue": {
+    "required_fields": ["ordinal", "start", "end", "text"],
+    "token": {
+      "required_fields": ["text"],
+      "confidence_range": [0, 1]
+    },
+    "language_span": {
+      "required_fields": ["language", "start_token", "end_token"]
+    }
+  }
+}

@@ -53,7 +53,10 @@ from video_content_pipeline.subtitle_pipeline import (
     subtitle_rules_fingerprint,
 )
 
-ASR_CAPABILITIES = ("asr_primary", "asr_review")
+# The provider-neutral ASR capability pair is defined once in the lower-level
+# transcription-contracts module (its projection and fixture loaders validate
+# against it) and re-exported here for the ticket-01/02 capability evaluation.
+from video_content_pipeline.transcription_contracts import ASR_CAPABILITIES
 
 
 class TranscriptionError(ValueError):

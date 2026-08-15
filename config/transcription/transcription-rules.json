@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "id": "phase-07-transcription-rules-v1",
+  "projection_schema_version": "phase-07-asr-projection-schema-v1",
+  "controlled_adapter_identity": "phase-07-controlled-asr-adapter-v1"
+}
