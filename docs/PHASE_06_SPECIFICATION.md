@@ -12,12 +12,13 @@ required for basic subtitle-derived claims.
 
 ## Status
 
-`approved_for_implementation_planning`. Phase 6 is limited to offline
-engineering verification with retained synthetic structured-text fixtures and a
-Controlled offline text adapter. It must not download or install a model,
-invoke a real model, access user media or a network, write `outputs/`, or
-claim domain quality, `model_audited`, `human_verified`, real-world testing,
-or production validation.
+`completed_and_verified_offline`. Implementation and the Phase 6 CLI contract
+are complete. Verification remained restricted to offline engineering checks
+with retained synthetic structured-text fixtures and a Controlled offline text
+adapter: no model was downloaded, installed, or invoked, no user media or
+network was accessed, `outputs/` was not written, and the phase claims no
+domain quality, `model_audited`, `human_verified`, real-world testing, or
+production validation.
 
 ## Objective
 

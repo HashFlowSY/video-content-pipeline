@@ -5,7 +5,7 @@ NormalizedCue provenance and conforms to the Phase 6 factual boundaries.
 
 **Blocked by:** 04 -- Adjudicate cue-bound semantic segments.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [ ] Require Cue-level factual citations for titles, details, numbers,

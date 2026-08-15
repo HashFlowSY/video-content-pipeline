@@ -242,9 +242,7 @@ def load_cue_inventory(
     ordinals: list[int] = []
     for raw_cue in raw_cues:
         if not isinstance(raw_cue, Mapping):
-            raise TextGenerationError(
-                "cue_inventory_invalid", "A subtitle cue is not an object."
-            )
+            raise TextGenerationError("cue_inventory_invalid", "A subtitle cue is not an object.")
         ordinal = raw_cue.get("source_ordinal")
         if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
             raise TextGenerationError(
@@ -458,9 +456,7 @@ def _index_result_parts(result: Mapping[str, object]) -> dict[str, Mapping[str, 
     return indexed
 
 
-def _proposed_segments(
-    part_id: str, raw_segments: list[object]
-) -> tuple[ProposedSegment, ...]:
+def _proposed_segments(part_id: str, raw_segments: list[object]) -> tuple[ProposedSegment, ...]:
     proposed: list[ProposedSegment] = []
     for raw_segment in raw_segments:
         if not isinstance(raw_segment, Mapping):

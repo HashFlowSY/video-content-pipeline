@@ -7,7 +7,7 @@ offline text adapter is available, the report states
 
 **Blocked by:** None -- can start immediately.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [ ] Add typed domain records for text-analysis reports, workspace identities,

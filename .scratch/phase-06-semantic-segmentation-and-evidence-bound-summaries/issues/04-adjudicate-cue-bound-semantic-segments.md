@@ -5,7 +5,7 @@ SemanticSegments with exactly-once PresentationCue ownership.
 
 **Blocked by:** 03 -- Version text generation and rendering contracts.
 
-**Status:** done
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [x] Permit final boundaries only between PresentationCues; reject duplicate,

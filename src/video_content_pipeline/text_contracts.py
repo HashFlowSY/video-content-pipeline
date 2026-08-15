@@ -271,9 +271,7 @@ def _render_collection_summary(lines: list[str], summary: object) -> None:
     omitted = [item for item in _as_list(summary.get("omitted_parts")) if isinstance(item, Mapping)]
     lines.append(f"不可用分卷 unavailable Parts: {len(omitted)}")
     for item in omitted:
-        lines.append(
-            f"- `{_scalar(item.get('part_id'))}` ({_scalar(item.get('reason'))})"
-        )
+        lines.append(f"- `{_scalar(item.get('part_id'))}` ({_scalar(item.get('reason'))})")
     limitations = _as_list(summary.get("limitations"))
     reasons = sorted(
         {_scalar(item.get("reason")) for item in limitations if isinstance(item, Mapping)}

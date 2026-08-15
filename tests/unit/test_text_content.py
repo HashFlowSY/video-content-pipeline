@@ -47,9 +47,7 @@ def test_fully_supported_segment_verifies_every_item_without_diagnostics() -> No
             {"question": _claim("如何失效?", "n1"), "answer": _claim("按 TTL 过期", "n2")}
         ],
         "people": [{"reference": "讲师 Lin", "role": "presenter", "cue_ids": ["n0"]}],
-        "contradictions": [
-            {"sides": [_claim("延迟下降", "n2"), _claim("延迟上升", "n3")]}
-        ],
+        "contradictions": [{"sides": [_claim("延迟下降", "n2"), _claim("延迟上升", "n3")]}],
         "unresolved_questions": [_claim("能否横向扩展?", "n3")],
     }
 
@@ -221,9 +219,7 @@ def test_as_json_is_deterministic_and_complete() -> None:
     raw = {
         "title": _claim("标题", "n0"),
         "detailed_content": [_claim("细节", "n1")],
-        "questions_and_answers": [
-            {"question": _claim("问?", "n1"), "answer": _claim("答", "n2")}
-        ],
+        "questions_and_answers": [{"question": _claim("问?", "n1"), "answer": _claim("答", "n2")}],
         "people": [{"reference": "Wang", "role": None, "cue_ids": ["n0"]}],
         "contradictions": [{"sides": [_claim("涨", "n1"), _claim("跌", "n2")]}],
         "unresolved_questions": [_claim("悬?", "n3")],
@@ -266,6 +262,5 @@ def test_every_removal_reason_is_the_spec_named_unsupported_reason() -> None:
 
     assert content.diagnostics != ()
     assert all(
-        diagnostic.reason == tc.UNSUPPORTED_GENERATED_CLAIM
-        for diagnostic in content.diagnostics
+        diagnostic.reason == tc.UNSUPPORTED_GENERATED_CLAIM for diagnostic in content.diagnostics
     )

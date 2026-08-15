@@ -299,9 +299,7 @@ def test_resource_plan_over_envelope_pauses_for_a_decision(tmp_path: Path) -> No
     assert report["diagnostics"] == [
         {
             "reason": "resource_envelope_exceeded",
-            "message": (
-                "A conservative text-model resource estimate exceeds the 24 GiB envelope."
-            ),
+            "message": ("A conservative text-model resource estimate exceeds the 24 GiB envelope."),
         }
     ]
     resource = report["attempt_provenance"]["resource_measurement"]

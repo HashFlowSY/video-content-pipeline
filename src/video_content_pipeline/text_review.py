@@ -106,9 +106,7 @@ def load_human_review_records(project_root: Path, report_id: str) -> tuple[dict[
 
 
 def _human_review_dir(project_root: Path, report_id: str) -> Path:
-    workspace = (
-        project_root / "work" / "text-analysis-reports" / _validated_report_id(report_id)
-    )
+    workspace = project_root / "work" / "text-analysis-reports" / _validated_report_id(report_id)
     if not (workspace / "text-analysis-report.json").exists():
         raise HumanReviewError(
             "text_analysis_report_invalid",

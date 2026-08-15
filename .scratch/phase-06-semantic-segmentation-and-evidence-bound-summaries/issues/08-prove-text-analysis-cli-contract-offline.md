@@ -5,7 +5,7 @@ public contract retains correct evidence and makes no external side effects.
 
 **Blocked by:** 04 -- Adjudicate cue-bound semantic segments; 05 -- Validate evidence-bound segment content; 06 -- Aggregate Part-local summaries; 07 -- Retain text-attempt state and diagnostics.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [ ] Cover the approved offline fixture matrix, including mixed-language,

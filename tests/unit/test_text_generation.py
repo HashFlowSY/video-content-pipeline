@@ -94,9 +94,7 @@ def test_generation_produces_complete_status_with_verified_content() -> None:
                         },
                         "content": {
                             "title": {"text": "开场", "cue_ids": [_cue("p1", 0)]},
-                            "detailed_content": [
-                                {"text": "细节", "cue_ids": [_cue("p1", 1)]}
-                            ],
+                            "detailed_content": [{"text": "细节", "cue_ids": [_cue("p1", 1)]}],
                         },
                     },
                     {
@@ -113,9 +111,7 @@ def test_generation_produces_complete_status_with_verified_content() -> None:
             }
         ],
         "collection_summary": {
-            "entries": [
-                {"segment_refs": [{"part_id": "p1", "ordinal": 0}], "text": "摘要"}
-            ]
+            "entries": [{"segment_refs": [{"part_id": "p1", "ordinal": 0}], "text": "摘要"}]
         },
     }
 
@@ -187,9 +183,7 @@ def test_coverage_breaking_boundaries_fall_back_to_partial() -> None:
                             "start_cue_id": _cue("p1", 0),
                             "end_cue_id": _cue("p1", 1),
                         },
-                        "content": {
-                            "title": {"text": "唯一", "cue_ids": [_cue("p1", 2)]}
-                        },
+                        "content": {"title": {"text": "唯一", "cue_ids": [_cue("p1", 2)]}},
                     }
                 ],
                 "chapters": [],

@@ -50,9 +50,7 @@ def validated_report_id(value: str, *, invalid_error: Callable[[], Exception]) -
         raise invalid_error() from error
 
 
-def write_text_once(
-    path: Path, text: str, *, conflict_error: Callable[[str], Exception]
-) -> None:
+def write_text_once(path: Path, text: str, *, conflict_error: Callable[[str], Exception]) -> None:
     """Write a text record once; reject a differing rewrite.
 
     An identical rewrite is a no-op so a repeated write stays idempotent; a

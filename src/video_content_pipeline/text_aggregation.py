@@ -325,8 +325,7 @@ def adjudicate_part_chapters(
 
     ordered = sorted(accepted, key=lambda candidate: candidate.start_ordinal)
     chapters = tuple(
-        _build_chapter(candidate, ordinal, by_ordinal)
-        for ordinal, candidate in enumerate(ordered)
+        _build_chapter(candidate, ordinal, by_ordinal) for ordinal, candidate in enumerate(ordered)
     )
     return PartChapters(part_id=part.part_id, chapters=chapters, rejected=tuple(rejected))
 
@@ -419,9 +418,7 @@ def aggregate_collection(
         entries.append(entry)
 
     omitted_parts = tuple(
-        OmittedPart.from_unavailable(part)
-        for part in parts
-        if isinstance(part, UnavailablePart)
+        OmittedPart.from_unavailable(part) for part in parts if isinstance(part, UnavailablePart)
     )
     limitations = _limitations(parts)
     return CollectionSummary(

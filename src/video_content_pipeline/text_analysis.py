@@ -829,9 +829,7 @@ def _run_controlled_generation(
     chapters, and a collection summary by ``text_generation``.
     """
 
-    manifest_document = input_cue_manifest_document(
-        _selected_track_tuples(selected_primary_tracks)
-    )
+    manifest_document = input_cue_manifest_document(_selected_track_tuples(selected_primary_tracks))
     manifest_sha = input_cue_manifest_sha256(manifest_document)
     controlled = load_controlled_generation(
         contracts.controlled_adapter.document, project_root, manifest_sha
@@ -956,9 +954,7 @@ def _generation_parts(
     return tuple(available), tuple(unavailable)
 
 
-def _unavailable_part(
-    source_id: str, candidates: list[SubtitleCandidate]
-) -> UnavailablePartInfo:
+def _unavailable_part(source_id: str, candidates: list[SubtitleCandidate]) -> UnavailablePartInfo:
     """Build one ``text_content=unavailable`` Part with its retained omitted range."""
 
     intervals = [
@@ -997,8 +993,7 @@ def _selected_track_tuples(
     """Project the selected Primary tracks into the input-cue manifest identity form."""
 
     return [
-        (track.source_id, track.stream_index, track.sha256)
-        for track in selected_primary_tracks
+        (track.source_id, track.stream_index, track.sha256) for track in selected_primary_tracks
     ]
 
 

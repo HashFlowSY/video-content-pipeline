@@ -201,9 +201,7 @@ def _retained_subtitle_report(
     report_id = "1" * 32
     multi = len(plan.source_artifacts) > 1
     if multi:
-        report_path = (
-            project_root / "work" / "subtitle-reports" / report_id / "report.json"
-        )
+        report_path = project_root / "work" / "subtitle-reports" / report_id / "report.json"
     else:
         report_path = (
             project_root
@@ -341,9 +339,7 @@ def test_complete_report_has_verified_segments_chapters_and_summary(
                         },
                         "content": {
                             "title": {"text": "开场白", "cue_ids": [_cue(source_id, 0)]},
-                            "detailed_content": [
-                                {"text": "问候", "cue_ids": [_cue(source_id, 1)]}
-                            ],
+                            "detailed_content": [{"text": "问候", "cue_ids": [_cue(source_id, 1)]}],
                         },
                         "source_languages": ["en", "zh"],
                     },
@@ -352,9 +348,7 @@ def test_complete_report_has_verified_segments_chapters_and_summary(
                             "start_cue_id": _cue(source_id, 2),
                             "end_cue_id": _cue(source_id, 2),
                         },
-                        "content": {
-                            "title": {"text": "收尾", "cue_ids": [_cue(source_id, 2)]}
-                        },
+                        "content": {"title": {"text": "收尾", "cue_ids": [_cue(source_id, 2)]}},
                         "source_languages": ["zh"],
                     },
                 ],
@@ -362,9 +356,7 @@ def test_complete_report_has_verified_segments_chapters_and_summary(
             }
         ],
         "collection_summary": {
-            "entries": [
-                {"segment_refs": [{"part_id": source_id, "ordinal": 0}], "text": "总述"}
-            ]
+            "entries": [{"segment_refs": [{"part_id": source_id, "ordinal": 0}], "text": "总述"}]
         },
     }
     _bind_generation(tmp_path, tracks, result)
@@ -420,9 +412,7 @@ def test_out_of_segment_citation_is_pruned_but_report_stays_complete(
                         },
                         "content": {
                             "title": {"text": "标题", "cue_ids": [_cue(source_id, 0)]},
-                            "numeric_values": [
-                                {"text": "42", "cue_ids": [_cue(source_id, 9)]}
-                            ],
+                            "numeric_values": [{"text": "42", "cue_ids": [_cue(source_id, 9)]}],
                         },
                     }
                 ],
@@ -572,9 +562,7 @@ def test_coverage_breaking_boundaries_fall_back_and_report_is_partial(
                             "start_cue_id": _cue(source_id, 0),
                             "end_cue_id": _cue(source_id, 1),
                         },
-                        "content": {
-                            "title": {"text": "回退", "cue_ids": [_cue(source_id, 2)]}
-                        },
+                        "content": {"title": {"text": "回退", "cue_ids": [_cue(source_id, 2)]}},
                     }
                 ],
                 "chapters": [],
@@ -647,9 +635,7 @@ def test_multi_part_collection_declares_an_unavailable_part(
     plan = _confirmed_plan(tmp_path, [b"part-one", b"part-two"])
     part_a = plan.source_artifacts[0].source_id
     part_b = plan.source_artifacts[1].source_id
-    report, tracks = _retained_subtitle_report(
-        tmp_path, plan, {part_a: ["前", "后"], part_b: None}
-    )
+    report, tracks = _retained_subtitle_report(tmp_path, plan, {part_a: ["前", "后"], part_b: None})
     result = {
         "parts": [
             {

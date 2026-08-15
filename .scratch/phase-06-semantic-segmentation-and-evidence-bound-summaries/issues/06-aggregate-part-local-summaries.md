@@ -5,7 +5,7 @@ and a transparent collection summary without crossing evidence boundaries.
 
 **Blocked by:** 05 -- Validate evidence-bound segment content.
 
-**Status:** done
+**Status:** resolved
 **Labels:** ready-for-agent
 
 - [x] Aggregate only consecutive verified segments within one Part; chapter

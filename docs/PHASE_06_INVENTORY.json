@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "phase": 6,
+  "status": "completed",
+  "recorded_at": "2026-08-15T14:37:50+0800",
+  "project_root": "/Users/apple/Desktop/wp/video-content-pipeline",
+  "summary": {
+    "offline_engineering_boundary_confirmed": true,
+    "formal_segments_not_fixed_time_windows_confirmed": true,
+    "each_evidence_item_owned_by_exactly_one_segment_confirmed": true,
+    "every_factual_output_has_evidence_source_id_confirmed": true,
+    "no_external_knowledge_supplementation_confirmed": true,
+    "subtitle_only_audio_completeness_not_verified_confirmed": true,
+    "engineering_pass_only_domain_quality_not_claimed_confirmed": true,
+    "model_output_is_candidate_never_evidence_authority_confirmed": true,
+    "immutable_text_analysis_workspaces_confirmed": true,
+    "full_input_revalidation_before_attempts_confirmed": true,
+    "controlled_offline_text_adapter_only_confirmed": true,
+    "versioned_generation_and_rendering_contracts_confirmed": true,
+    "unsupported_generated_claims_removed_to_diagnostics_confirmed": true,
+    "part_local_chapters_and_collection_summaries_confirmed": true,
+    "text_attempt_provenance_and_pauses_retained_confirmed": true,
+    "authoritative_report_is_json_confirmed": true,
+    "rendered_markdown_not_published_confirmed": true,
+    "no_model_download_or_invocation_confirmed": true,
+    "no_outputs_written_confirmed": true
+  },
+  "created_or_modified": [
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/issues/01-establish-text-analysis-workspace.md",
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/issues/02-add-text-analysis-cli-and-revalidation.md",
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/issues/03-version-text-generation-and-rendering-contracts.md",
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/issues/04-adjudicate-cue-bound-semantic-segments.md",
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/issues/05-validate-evidence-bound-content.md",
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/issues/06-aggregate-part-local-summaries.md",
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/issues/07-retain-text-attempt-state-and-diagnostics.md",
+    ".scratch/phase-06-semantic-segmentation-and-evidence-bound-summaries/issues/08-prove-text-analysis-cli-contract-offline.md",
+    "AGENTS.md",
+    "config/text-analysis-rules.json",
+    "config/text-analysis/controlled-adapter.json",
+    "config/text-analysis/evidence-rules.json",
+    "config/text-analysis/output-schema.json",
+    "config/text-analysis/prompt-template.json",
+    "docs/PHASE_06_COMPLETION_REPORT.md",
+    "docs/PHASE_06_INVENTORY.json",
+    "docs/PHASE_06_SPECIFICATION.md",
+    "plans/PHASE-06/ATOMIC_TASK_LIST.md",
+    "project-state.json",
+    "src/video_content_pipeline/audio_analysis.py",
+    "src/video_content_pipeline/cli.py",
+    "src/video_content_pipeline/evidence.py",
+    "src/video_content_pipeline/planning.py",
+    "src/video_content_pipeline/text_aggregation.py",
+    "src/video_content_pipeline/text_analysis.py",
+    "src/video_content_pipeline/text_content.py",
+    "src/video_content_pipeline/text_contracts.py",
+    "src/video_content_pipeline/text_generation.py",
+    "src/video_content_pipeline/text_review.py",
+    "src/video_content_pipeline/text_segmentation.py",
+    "tests/acceptance/test_cli_environment.py",
+    "tests/integration/test_phase_6_text_analysis_cli_contract.py",
+    "tests/integration/test_phase_6_text_analysis_generation.py",
+    "tests/integration/test_phase_6_text_analysis_workspace.py",
+    "tests/integration/test_phase_6_text_attempt_provenance.py",
+    "tests/integration/test_shell_gate.py",
+    "tests/unit/test_environment.py",
+    "tests/unit/test_text_aggregation.py",
+    "tests/unit/test_text_analysis.py",
+    "tests/unit/test_text_content.py",
+    "tests/unit/test_text_contracts.py",
+    "tests/unit/test_text_generation.py",
+    "tests/unit/test_text_review.py",
+    "tests/unit/test_text_segmentation.py"
+  ],
+  "execution_records": [
+    {
+      "ticket": "closure",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff format src tests",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff check src tests",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff format --check src tests",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; mypy src"
+      ],
+      "results": {
+        "pytest_full": "289 passed in 1.21s",
+        "ruff_check": "passed",
+        "ruff_format_check": "59 files already formatted",
+        "mypy": "Success: no issues found in 26 source files",
+        "environment_gate": "passed",
+        "closure_note": "Ten Phase 6 files were reformatted at closure (formatting-only). Per-ticket intermediate gate outputs were not retained by the implementing session; verification is anchored to this current-head run."
+      },
+      "resource_bounds": {
+        "memory": "not separately measured; pure-Python offline test suite comparable to Phase 5",
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    }
+  ],
+  "external_reads": [],
+  "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted.",
+  "implementation_audit": {
+    "head": "3b084a8",
+    "ticket_status": {
+      "01": "resolved",
+      "02": "resolved",
+      "03": "resolved",
+      "04": "resolved",
+      "05": "resolved",
+      "06": "resolved",
+      "07": "resolved",
+      "08": "resolved"
+    },
+    "completed_work": [
+      "Immutable text-analysis workspaces, authoritative JSON reports, and the analyze-text / resume-text-analysis CLI with exact input revalidation.",
+      "Versioned generation and rendering contracts, deterministic cue-bound boundary adjudication, and exactly-once evidence ownership validation.",
+      "Part-local chapters, collection summaries, immutable attempt provenance with resource pauses, and the proven offline CLI contract."
+    ],
+    "open_requirements": [],
+    "current_head_verification": {
+      "pytest": "289 passed in 1.21s",
+      "ruff_check": "passed",
+      "ruff_format_check": "59 files already formatted",
+      "mypy": "Success: no issues found in 26 source files",
+      "production_validated": false
+    }
+  }
+}
