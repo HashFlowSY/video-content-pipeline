@@ -61,8 +61,11 @@ _DETECTOR_NAMES = (
 )
 
 # The per-detector machine-readable reasons; a flag carries exactly one, hoisted
-# to constants as the sibling gate module does for its rejection reasons.
-_REASON_TEXT_OVER_SILENCE = "asr_text_over_silence"
+# to constants as the sibling gate module does for its rejection reasons. The
+# text-over-silence reason is public because ticket 06's arbitration keys its
+# drop-silence rule on it: this module owns the token, so the consumer imports it
+# rather than hand-copying the literal (the AGENTS.md "one owner per term" rule).
+REASON_TEXT_OVER_SILENCE = "asr_text_over_silence"
 _REASON_TEXTLESS_SPEECH = "non_silent_but_textless"
 _REASON_LOW_CONFIDENCE = "low_confidence_tokens"
 _REASON_REPETITION = "repeated_text_run"
@@ -337,7 +340,7 @@ def detect_vad_coverage(
                     detector="vad_coverage",
                     part_id=part_id,
                     interval=overlap,
-                    reason=_REASON_TEXT_OVER_SILENCE,
+                    reason=REASON_TEXT_OVER_SILENCE,
                     evidence={
                         "cue_ordinal": cue.ordinal,
                         "cue_text": cue.text,
@@ -896,6 +899,7 @@ def _is_real(value: object) -> TypeGuard[int | float]:
 __all__ = [
     "INDETERMINATE",
     "NON_SPEECH",
+    "REASON_TEXT_OVER_SILENCE",
     "SPEECH_LIKELY",
     "ConfidenceRule",
     "CoverageCheckRule",

@@ -4,5 +4,6 @@
   "projection_schema_version": "phase-07-asr-projection-schema-v1",
   "controlled_adapter_identity": "phase-07-controlled-asr-adapter-v1",
   "timing_gate_version": "phase-07-timing-gate-rules-v1",
-  "suspicion_rules_version": "phase-07-suspicion-rules-v1"
+  "suspicion_rules_version": "phase-07-suspicion-rules-v1",
+  "arbitration_rules_version": "phase-07-arbitration-rules-v1"
 }
