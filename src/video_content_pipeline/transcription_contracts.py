@@ -502,9 +502,7 @@ def _project_cue(raw_cue: object, ruleset: AsrProjectionRuleset) -> ProjectedAsr
     if not isinstance(text, str):
         raise _ProjectionRejected("An ASR cue omits its text.")
     tokens = _project_tokens(raw_cue.get("tokens"), ruleset)
-    language_spans = _project_language_spans(
-        raw_cue.get("language_spans"), len(tokens), ruleset
-    )
+    language_spans = _project_language_spans(raw_cue.get("language_spans"), len(tokens), ruleset)
     return ProjectedAsrCue(
         ordinal=ordinal,
         interval=interval,
@@ -514,9 +512,7 @@ def _project_cue(raw_cue: object, ruleset: AsrProjectionRuleset) -> ProjectedAsr
     )
 
 
-def _require_fields(
-    raw: Mapping[str, object], required_fields: tuple[str, ...], kind: str
-) -> None:
+def _require_fields(raw: Mapping[str, object], required_fields: tuple[str, ...], kind: str) -> None:
     for field in required_fields:
         if field not in raw:
             raise _ProjectionRejected(f"An ASR {kind} is missing the required field {field!r}.")
@@ -641,11 +637,7 @@ def retain_restricted_raw_output(
     """
 
     raw_path = (
-        workspace_path
-        / "restricted"
-        / "asr"
-        / capability
-        / f"{label}-raw-native-output.json"
+        workspace_path / "restricted" / "asr" / capability / f"{label}-raw-native-output.json"
     )
     write_bytes_once(
         raw_path,

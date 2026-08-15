@@ -369,8 +369,7 @@ def arbitrate(
 
     review_is_independent = classification.independent
     decisions = tuple(
-        _arbitrate_one(reviewed, review_is_independent, rules)
-        for reviewed in reviewed_intervals
+        _arbitrate_one(reviewed, review_is_independent, rules) for reviewed in reviewed_intervals
     )
     return ArbitrationResult(
         rules_version=rules.version,
@@ -393,15 +392,11 @@ def _arbitrate_one(
         return _resolved(reviewed, DECISION_AGREEMENT, rule=None, text=reviewed.primary.text)
     fired = _first_firing_rule(reviewed, rules)
     if fired is not None:
-        return _resolved(
-            reviewed, DECISION_REVIEW_ADOPTED, rule=fired, text=reviewed.review.text
-        )
+        return _resolved(reviewed, DECISION_REVIEW_ADOPTED, rule=fired, text=reviewed.review.text)
     return _conflict(reviewed)
 
 
-def _first_firing_rule(
-    reviewed: ReviewedInterval, rules: ArbitrationRuleset
-) -> str | None:
+def _first_firing_rule(reviewed: ReviewedInterval, rules: ArbitrationRuleset) -> str | None:
     """Return the id of the first enabled preference rule that adopts the review."""
 
     for rule in rules.preference_rules:
@@ -603,9 +598,7 @@ def _read_json_mapping(path: Path) -> Mapping[str, object]:
             "arbitration_rules_invalid", f"{path.name} cannot be read."
         ) from error
     if not isinstance(decoded, Mapping):
-        raise ArbitrationError(
-            "arbitration_rules_invalid", f"{path.name} is not a JSON object."
-        )
+        raise ArbitrationError("arbitration_rules_invalid", f"{path.name} is not a JSON object.")
     return decoded
 
 

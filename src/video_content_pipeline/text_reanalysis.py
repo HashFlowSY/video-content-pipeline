@@ -574,9 +574,7 @@ def select_affected_parts(
                 )
             else:
                 classifications.append(
-                    PartClassification(
-                        part_id, Disposition.AFFECTED, ClassificationReason.CHANGED
-                    )
+                    PartClassification(part_id, Disposition.AFFECTED, ClassificationReason.CHANGED)
                 )
         elif in_new:
             classifications.append(
@@ -1013,9 +1011,7 @@ class ReanalysisReport:
             "segments": [dict(segment) for segment in self.segments],
             "chapters": [dict(chapter) for chapter in self.chapters],
             "collection_summary": (
-                self.collection_summary.as_json()
-                if self.collection_summary is not None
-                else None
+                self.collection_summary.as_json() if self.collection_summary is not None else None
             ),
             "unsupported_item_count": self.unsupported_item_count,
             "contract_identity": self.contract_identity,

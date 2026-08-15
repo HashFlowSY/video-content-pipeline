@@ -155,9 +155,7 @@ def _subtitle_report(
         source_candidate_sha256=candidate_sha,
         cue_count=3,
     )
-    part = SubtitlePartReport(
-        source_id, SubtitlePartState.COMPLETED, 1, None, None, (), None
-    )
+    part = SubtitlePartReport(source_id, SubtitlePartState.COMPLETED, 1, None, None, (), None)
     report_path = project_root / "work" / source_id / report_id / "candidate-report.json"
     report = SubtitleCandidateReport(
         report_id=report_id,
@@ -205,9 +203,7 @@ def _bind_fixture(
         source_candidate_sha256=candidate.source_candidate_sha256,
     )
     scope = PartEnhancementScope(part_id, (scope_interval,))
-    manifest = enhancement_input_manifest_document(
-        subtitle_report.report_id, (track,), (scope,)
-    )
+    manifest = enhancement_input_manifest_document(subtitle_report.report_id, (track,), (scope,))
     manifest_sha = enhancement_input_manifest_sha256(manifest)
 
     raw_output = {
@@ -393,6 +389,65 @@ def test_enhance_keeps_originals_when_asr_fails_the_gates(
     assert correction["gate_reasons"] == ["cue_duration_implausible"]
 
 
+# --- Projection invalidity -------------------------------------------------
+
+
+def test_enhance_fails_on_an_invalid_asr_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A schema-invalid ASR projection fails the whole attempt as ``model_output_invalid``.
+
+    ASR text enters only through the versioned output projection. A cue that omits
+    its text makes the *complete* output invalid, so the attempt fails with no
+    gated evidence rather than inventing a default -- and, because the model never
+    ran, the no-side-effect guarantees still hold.
+    """
+
+    plan = _confirmed_plan(tmp_path)
+    _install_config(tmp_path, with_fixture=True)
+    subtitle_report = _subtitle_report(tmp_path, plan)
+    part_id = plan.source_artifacts[0].source_id
+    # A cue with no ``text`` field is not a schema-valid ASR cue.
+    textless_cue: dict[str, object] = {
+        "ordinal": 0,
+        "start": {"numerator": 0, "denominator": 1},
+        "end": {"numerator": 5, "denominator": 1},
+    }
+    _bind_fixture(
+        tmp_path,
+        subtitle_report,
+        part_id=part_id,
+        scope_interval=HalfOpenInterval(ExactTime(0), ExactTime(10)),
+        asr_cues=[textless_cue],
+    )
+
+    code, response = _run(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        [
+            "enhance",
+            plan.plan_id,
+            subtitle_report.report_id,
+            "--range",
+            f"{part_id}:0-10",
+            "--json",
+        ],
+    )
+
+    assert code == 0
+    assert response["status"] == "failed"
+    report = response["report"]
+    assert report["diagnostics"][0]["reason"] == "model_output_invalid"
+    assert report["enhanced_parts"] == []
+    # No gated evidence, but the offline guarantees are still asserted, and the
+    # invalid projection never produced published artifacts.
+    assert report["guarantees"] == _GUARANTEES
+    report_path = Path(report["report_path"])
+    assert json.loads(report_path.read_text(encoding="utf-8")) == report
+    assert not (tmp_path / "outputs").exists()
+
+
 # --- Scope revalidation ----------------------------------------------------
 
 
@@ -537,8 +592,9 @@ def test_enhance_pauses_when_conservative_estimate_exceeds_envelope(
     assert resume_code == 0
     # A fresh attempt is minted from the retained identities; it is never the paused report.
     assert resume_response["report"]["report_id"] != report["report_id"]
-    assert resume_response["report"]["input_evidence"]["resumed_from_report_id"] == (
-        report["report_id"]
+    assert (
+        resume_response["report"]["input_evidence"]["resumed_from_report_id"]
+        == (report["report_id"])
     )
 
 

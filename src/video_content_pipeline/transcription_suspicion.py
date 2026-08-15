@@ -290,9 +290,7 @@ def detect_suspicious_intervals(
     flags.extend(
         detect_language_switching(part_id=part_id, cues=cues, rule=rules.language_switching)
     )
-    flags.extend(
-        detect_numbers_entities(part_id=part_id, cues=cues, rule=rules.numbers_entities)
-    )
+    flags.extend(detect_numbers_entities(part_id=part_id, cues=cues, rule=rules.numbers_entities))
     ordered = tuple(sorted(flags, key=_flag_sort_key))
     return SuspicionDetectionResult(
         part_id=part_id,
@@ -446,9 +444,7 @@ def detect_repetition(
 
     flags: list[SuspiciousInterval] = []
     for cue in cues:
-        units = (
-            [token.text for token in cue.tokens] if cue.tokens else cue.text.split()
-        )
+        units = [token.text for token in cue.tokens] if cue.tokens else cue.text.split()
         unit, run_length = _longest_consecutive_run(units)
         if run_length > rule.maximum_consecutive_repetitions:
             flags.append(
@@ -800,9 +796,7 @@ def _read_json_mapping(path: Path) -> Mapping[str, object]:
             "suspicion_rules_invalid", f"{path.name} cannot be read."
         ) from error
     if not isinstance(decoded, Mapping):
-        raise SuspicionRulesError(
-            "suspicion_rules_invalid", f"{path.name} is not a JSON object."
-        )
+        raise SuspicionRulesError("suspicion_rules_invalid", f"{path.name} is not a JSON object.")
     return decoded
 
 
@@ -850,9 +844,7 @@ def _duration(interval: HalfOpenInterval) -> Fraction:
 
 def _interval_from_json(value: object) -> HalfOpenInterval:
     if not isinstance(value, Mapping):
-        raise SuspicionRulesError(
-            "suspicion_evidence_invalid", "A VAD interval is not an object."
-        )
+        raise SuspicionRulesError("suspicion_evidence_invalid", "A VAD interval is not an object.")
     try:
         return HalfOpenInterval(
             _exact_time_from_json(value.get("start")), _exact_time_from_json(value.get("end"))

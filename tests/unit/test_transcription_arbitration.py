@@ -361,9 +361,7 @@ def test_arbitration_records_the_versioned_ruleset_and_serializes() -> None:
 
 
 def test_verbatim_emits_only_from_a_complete_coverage_checked_run() -> None:
-    decision = arbitration.decide_verbatim_emission(
-        run_complete=True, coverage_checks_passed=True
-    )
+    decision = arbitration.decide_verbatim_emission(run_complete=True, coverage_checks_passed=True)
 
     assert decision.may_emit is True
     assert decision.audio_completeness == "verified"
@@ -374,9 +372,7 @@ def test_verbatim_emits_only_from_a_complete_coverage_checked_run() -> None:
 
 
 def test_an_incomplete_run_never_emits_verbatim_or_upgrades_completeness() -> None:
-    decision = arbitration.decide_verbatim_emission(
-        run_complete=False, coverage_checks_passed=True
-    )
+    decision = arbitration.decide_verbatim_emission(run_complete=False, coverage_checks_passed=True)
 
     assert decision.may_emit is False
     assert decision.audio_completeness == "not_verified"
@@ -385,9 +381,7 @@ def test_an_incomplete_run_never_emits_verbatim_or_upgrades_completeness() -> No
 
 
 def test_a_failed_coverage_check_blocks_verbatim() -> None:
-    decision = arbitration.decide_verbatim_emission(
-        run_complete=True, coverage_checks_passed=False
-    )
+    decision = arbitration.decide_verbatim_emission(run_complete=True, coverage_checks_passed=False)
 
     assert decision.may_emit is False
     assert decision.audio_completeness == "not_verified"

@@ -1,0 +1,311 @@
+{
+  "schema_version": 1,
+  "phase": 7,
+  "status": "in_progress",
+  "ticket_10_verification": "passed_offline",
+  "phase_exit_gates": "all_confirmed",
+  "phase_completion_note": "All ten Phase 7 tickets are resolved and the six 阶段 7 退出门禁 are machine-confirmed below. Marking the phase `completed` in project-state.json is a separate governance decision left to the maintainer; the phase plan's original 'validate candidates locally' work items are an explicitly recorded out-of-scope deviation (see open_requirements).",
+  "recorded_at": "2026-08-15T19:19:10+0800",
+  "project_root": "/Users/apple/Desktop/wp/video-content-pipeline",
+  "summary": {
+    "offline_transcription_verification_boundary_confirmed": true,
+    "asr_not_auto_triggered_in_subtitle_priority_confirmed": true,
+    "subtitle_unavailable_requires_resource_confirmation_confirmed": true,
+    "second_asr_not_full_length_by_default_confirmed": true,
+    "local_enhancement_never_claims_verbatim_completeness_confirmed": true,
+    "verbatim_only_from_complete_full_asr_confirmed": true,
+    "same_model_retry_never_independent_review_confirmed": true,
+    "asr_text_enters_only_through_versioned_projection_confirmed": true,
+    "invalid_projection_fails_attempt_model_output_invalid_confirmed": true,
+    "projected_cues_gated_on_canonical_timeline_confirmed": true,
+    "suspicious_intervals_from_versioned_rules_confirmed": true,
+    "arbitration_deterministic_unresolved_marked_review_needed_confirmed": true,
+    "gate_checked_interval_replacement_with_provenance_confirmed": true,
+    "gate_failure_keeps_original_cues_confirmed": true,
+    "affected_parts_reanalyzed_rest_carried_forward_confirmed": true,
+    "carried_forward_parts_link_to_source_report_confirmed": true,
+    "immutable_transcription_and_enhancement_workspaces_confirmed": true,
+    "full_input_revalidation_before_attempts_confirmed": true,
+    "controlled_offline_asr_adapter_only_confirmed": true,
+    "raw_model_output_restricted_diagnostic_confirmed": true,
+    "provider_neutral_capabilities_with_registry_eligibility_confirmed": true,
+    "mixed_chinese_english_preserved_confirmed": true,
+    "multi_part_collections_recomputed_confirmed": true,
+    "authoritative_report_is_json_confirmed": true,
+    "no_model_download_or_invocation_confirmed": true,
+    "no_outputs_written_confirmed": true
+  },
+  "summary_note": "The `summary` block is the conventional offline-boundary declaration, mirroring prior phase inventories. The machine-checkable proof lives in `exit_gates` (each mapped to the plan's 退出门禁 line and to named proving tests, cross-linked to its summary boolean via `summary_key`) and in `coverage_map` (each ticket-10 coverage item mapped to named tests whose existence is asserted by tests/acceptance/test_phase_07_inventory.py).",
+  "exit_gates": [
+    {
+      "id": "asr_not_auto_triggered",
+      "requirement": "ASR 不会在字幕优先运行中被自动触发。",
+      "confirmed": true,
+      "summary_key": "asr_not_auto_triggered_in_subtitle_priority_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_without_handoff_or_upgrade_is_precondition_unmet",
+        "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_explicit_upgrade_requires_acquisition_without_confirmation_pause"
+      ]
+    },
+    {
+      "id": "resource_plan_confirmed_when_subtitle_unavailable",
+      "requirement": "无字幕时必须先确认资源计划。",
+      "confirmed": true,
+      "summary_key": "subtitle_unavailable_requires_resource_confirmation_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_subtitle_unavailable_pauses_at_full_asr_resource_confirmation",
+        "tests/integration/test_phase_7_transcription_cli_contract.py::test_resume_transcription_records_confirmation_and_requires_acquisition"
+      ]
+    },
+    {
+      "id": "second_asr_not_full_length_by_default",
+      "requirement": "第二 ASR 默认不跑全片。",
+      "confirmed": true,
+      "summary_key": "second_asr_not_full_length_by_default_confirmed",
+      "proving_tests": [
+        "tests/unit/test_transcription_arbitration.py::test_review_scope_defaults_to_the_suspicious_intervals",
+        "tests/unit/test_transcription_arbitration.py::test_full_length_review_requires_the_explicit_recorded_decision"
+      ]
+    },
+    {
+      "id": "local_asr_never_claims_full_verbatim_completeness",
+      "requirement": "局部 ASR 不声称全片逐字完整。",
+      "confirmed": true,
+      "summary_key": "local_enhancement_never_claims_verbatim_completeness_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_replaces_the_display_layer_over_a_named_range",
+        "tests/unit/test_transcription_arbitration.py::test_an_incomplete_run_never_emits_verbatim_or_upgrades_completeness"
+      ]
+    },
+    {
+      "id": "verbatim_only_from_complete_full_asr",
+      "requirement": "完整 ASR 才能生成 `verbatim`。",
+      "confirmed": true,
+      "summary_key": "verbatim_only_from_complete_full_asr_confirmed",
+      "proving_tests": [
+        "tests/unit/test_transcription_arbitration.py::test_verbatim_emits_only_from_a_complete_coverage_checked_run",
+        "tests/unit/test_transcription_arbitration.py::test_a_failed_coverage_check_blocks_verbatim"
+      ]
+    },
+    {
+      "id": "same_model_retry_never_independent_review",
+      "requirement": "同模型重试不被报告为独立复核。",
+      "confirmed": true,
+      "summary_key": "same_model_retry_never_independent_review_confirmed",
+      "proving_tests": [
+        "tests/unit/test_transcription_arbitration.py::test_same_model_retry_is_recorded_as_recovery_never_independent_review",
+        "tests/unit/test_transcription_arbitration.py::test_a_recovery_review_can_never_decide_even_when_texts_match",
+        "tests/unit/test_transcription_capabilities.py::test_same_model_review_is_not_independent"
+      ]
+    }
+  ],
+  "exit_gates_source": "docs/PHASED_EXECUTION_PLAN.md :: ### 阶段 7：完整 ASR 与局部增强 :: 退出门禁",
+  "guarantees_asserted_at_cli": {
+    "model_execution": "not_attempted",
+    "model_acquisition": "not_attempted",
+    "network_access": "not_attempted",
+    "outputs_publication": "not_attempted",
+    "asserted_by": [
+      "tests/integration/test_phase_7_transcription_cli_contract.py",
+      "tests/integration/test_phase_7_enhancement_cli_contract.py",
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py"
+    ]
+  },
+  "coverage_map": {
+    "revalidation_drift": [
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_blocks_on_unconfirmed_run_plan",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_blocks_on_subtitle_report_mismatch",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_blocks_on_subtitle_rules_drift",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_blocks_on_audio_report_for_another_plan",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_blocks_on_missing_audio_report",
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_blocks_on_subtitle_rules_drift",
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_fails_when_the_prior_report_belongs_to_another_run"
+    ],
+    "pauses_and_resumes": [
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_subtitle_unavailable_pauses_at_full_asr_resource_confirmation",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_resume_transcription_records_confirmation_and_requires_acquisition",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_pauses_when_conservative_estimate_exceeds_envelope",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_resume_resource_envelope_rejects_wrong_decision",
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_pauses_when_conservative_estimate_exceeds_envelope"
+    ],
+    "precondition_enforcement": [
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_without_handoff_or_upgrade_is_precondition_unmet",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_explicit_upgrade_requires_acquisition_without_confirmation_pause"
+    ],
+    "projection_invalidity": [
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_fails_on_an_invalid_asr_projection",
+      "tests/unit/test_transcription_contracts.py"
+    ],
+    "six_suspicion_detectors": {
+      "vad_coverage": "tests/unit/test_transcription_suspicion.py::test_vad_coverage_flags_text_overlapping_a_silence_region",
+      "coverage_checks": "tests/unit/test_transcription_suspicion.py::test_coverage_checks_flags_uncovered_speech",
+      "confidence": "tests/unit/test_transcription_suspicion.py::test_confidence_flags_a_cue_with_a_low_confidence_token",
+      "repetition": "tests/unit/test_transcription_suspicion.py::test_repetition_flags_a_within_cue_token_loop",
+      "language_switching": "tests/unit/test_transcription_suspicion.py::test_language_switching_flags_excessive_switching",
+      "numbers_entities": "tests/unit/test_transcription_suspicion.py::test_numbers_entities_flags_a_multi_digit_number"
+    },
+    "timing_gates": {
+      "cue_out_of_coverage": "tests/unit/test_transcription_gates.py::test_rejects_a_cue_starting_before_the_part_coverage",
+      "cue_non_monotonic": "tests/unit/test_transcription_gates.py::test_rejects_a_time_non_monotonic_cue",
+      "cue_processing_duplication": "tests/unit/test_transcription_gates.py::test_rejects_an_overlapping_processing_window_cue",
+      "cue_duration_implausible": "tests/unit/test_transcription_gates.py::test_rejects_an_implausibly_fast_cue_for_its_text_length",
+      "cue_missing_text": "tests/unit/test_transcription_gates.py::test_rejects_an_empty_text_cue_with_a_distinct_missing_text_reason"
+    },
+    "timing_gate_at_cli": [
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_keeps_originals_when_asr_fails_the_gates"
+    ],
+    "interval_scoped_and_full_length_review": [
+      "tests/unit/test_transcription_arbitration.py::test_review_scope_defaults_to_the_suspicious_intervals",
+      "tests/unit/test_transcription_arbitration.py::test_full_length_review_requires_the_explicit_recorded_decision"
+    ],
+    "arbitration_and_retained_conflicts": [
+      "tests/unit/test_transcription_arbitration.py::test_two_different_non_empty_candidates_are_left_review_needed",
+      "tests/unit/test_transcription_arbitration.py::test_identical_candidates_are_recorded_as_agreement"
+    ],
+    "same_model_retry_exclusion": [
+      "tests/unit/test_transcription_arbitration.py::test_same_model_retry_is_recorded_as_recovery_never_independent_review",
+      "tests/unit/test_transcription_capabilities.py::test_same_model_review_is_not_independent"
+    ],
+    "verbatim_enhanced_separation": [
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_replaces_the_display_layer_over_a_named_range",
+      "tests/unit/test_transcription_arbitration.py::test_verbatim_emits_only_from_a_complete_coverage_checked_run"
+    ],
+    "per_cue_provenance": [
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_replaces_the_display_layer_over_a_named_range"
+    ],
+    "gate_failure_fallback": [
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_keeps_originals_when_asr_fails_the_gates"
+    ],
+    "affected_part_selection": [
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_regenerates_affected_and_carries_the_rest_forward",
+      "tests/unit/test_text_reanalysis.py"
+    ],
+    "carry_forward_provenance": [
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_regenerates_affected_and_carries_the_rest_forward",
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_carries_everything_forward_when_nothing_changed"
+    ],
+    "immutability": [
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_resume_transcription_records_confirmation_and_requires_acquisition",
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_replaces_the_display_layer_over_a_named_range",
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_regenerates_affected_and_carries_the_rest_forward"
+    ],
+    "statuses": [
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_replaces_the_display_layer_over_a_named_range",
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_keeps_originals_when_asr_fails_the_gates",
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_fails_on_an_invalid_asr_projection",
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_without_a_fixture_requires_model_acquisition"
+    ],
+    "hashes": [
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_regenerates_affected_and_carries_the_rest_forward",
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_resume_transcription_records_confirmation_and_requires_acquisition",
+      "tests/unit/test_transcription_contracts.py",
+      "tests/unit/test_text_reanalysis.py"
+    ],
+    "mixed_chinese_english": [
+      "tests/integration/test_phase_7_enhancement_cli_contract.py::test_enhance_replaces_the_display_layer_over_a_named_range",
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_regenerates_affected_and_carries_the_rest_forward"
+    ],
+    "multi_part_collections": [
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_regenerates_affected_and_carries_the_rest_forward",
+      "tests/integration/test_phase_7_reanalysis_cli_contract.py::test_reanalyze_carries_everything_forward_when_nothing_changed"
+    ],
+    "subtitle_unavailable_sources": [
+      "tests/integration/test_phase_7_transcription_cli_contract.py::test_transcribe_subtitle_unavailable_pauses_at_full_asr_resource_confirmation",
+      "tests/unit/test_transcription_workspace.py"
+    ]
+  },
+  "created_or_modified": [
+    ".scratch/phase-07-full-asr-and-local-enhancement/issues/01-register-asr-capability-contracts-and-eligibility.md",
+    ".scratch/phase-07-full-asr-and-local-enhancement/issues/02-establish-transcription-workspace-and-transcribe-cli.md",
+    ".scratch/phase-07-full-asr-and-local-enhancement/issues/03-version-asr-adapter-and-output-projection-contracts.md",
+    "config/transcription/arbitration-rules.json",
+    "config/transcription/asr-projection-schema.json",
+    "config/transcription/controlled-adapter.json",
+    "config/transcription/suspicion-rules.json",
+    "config/transcription/timing-gate-rules.json",
+    "config/transcription/transcription-rules.json",
+    "docs/PHASE_07_INVENTORY.json",
+    "docs/PHASE_07_SPECIFICATION.md",
+    "models/registry.json",
+    "src/video_content_pipeline/audio_analysis.py",
+    "src/video_content_pipeline/capabilities.py",
+    "src/video_content_pipeline/cli.py",
+    "src/video_content_pipeline/enhancement.py",
+    "src/video_content_pipeline/text_generation.py",
+    "src/video_content_pipeline/text_reanalysis.py",
+    "src/video_content_pipeline/transcription.py",
+    "src/video_content_pipeline/transcription_arbitration.py",
+    "src/video_content_pipeline/transcription_contracts.py",
+    "src/video_content_pipeline/transcription_gates.py",
+    "src/video_content_pipeline/transcription_suspicion.py",
+    "tests/acceptance/test_phase_07_inventory.py",
+    "tests/integration/test_phase_5_cli_contract.py",
+    "tests/integration/test_phase_7_enhancement_cli_contract.py",
+    "tests/integration/test_phase_7_reanalysis_cli_contract.py",
+    "tests/integration/test_phase_7_transcription_cli_contract.py",
+    "tests/unit/test_capabilities.py",
+    "tests/unit/test_enhancement.py",
+    "tests/unit/test_text_generation.py",
+    "tests/unit/test_text_reanalysis.py",
+    "tests/unit/test_transcription_arbitration.py",
+    "tests/unit/test_transcription_capabilities.py",
+    "tests/unit/test_transcription_contracts.py",
+    "tests/unit/test_transcription_gates.py",
+    "tests/unit/test_transcription_suspicion.py",
+    "tests/unit/test_transcription_workspace.py"
+  ],
+  "execution_records": [
+    {
+      "ticket": "10",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate; scripts/require-project-venv.sh; pytest -q",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff check src tests",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; ruff format --check src tests",
+        "source .venv/bin/activate; scripts/require-project-venv.sh; mypy src"
+      ],
+      "results": {
+        "pytest_full": "519 passed",
+        "closure_note": "Ticket 10 adds the offline projection-invalidity CLI proof and this machine-checkable inventory; the six 阶段 7 退出门禁 booleans are each backed by named tests validated by tests/acceptance/test_phase_07_inventory.py. Per the Phase 7 Testing Decisions, the six suspicion detectors, all timing gates, arbitration, interval-scoped review, and same-model-retry exclusion are proven at the unit seam because the transcribe CLI cannot execute a model offline (it stops at model_acquisition_required). A closure-time `ruff format` pass reflowed a set of already-committed Phase 7 files (formatting-only, no behaviour change) so ruff format --check is green."
+      },
+      "resource_bounds": {
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    }
+  ],
+  "external_reads": [],
+  "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted.",
+  "implementation_audit": {
+    "head": "97b9c6a",
+    "ticket_status": {
+      "01": "resolved",
+      "02": "resolved",
+      "03": "resolved",
+      "04": "resolved",
+      "05": "resolved",
+      "06": "resolved",
+      "07": "resolved",
+      "08": "resolved",
+      "09": "resolved",
+      "10": "resolved"
+    },
+    "completed_work": [
+      "Provider-neutral asr_primary / asr_review capability contracts with offline registry eligibility, the immutable transcription workspace, and the vcp transcribe / resume-transcription CLI with full input revalidation, no-auto-trigger, the Full-ASR resource confirmation pause, and the 24 GiB resource-envelope pause.",
+      "Versioned ASR adapter and output-projection contracts, deterministic timing gates on the canonical timeline, the six versioned suspicion detectors, and deterministic arbitration that leaves undecided conflicts review-needed while excluding same-model retries from independent review.",
+      "Gate-checked interval replacement with per-cue provenance via vcp enhance (enhanced artifacts never claim verbatim completeness), affected-Part re-analysis with carried-forward provenance via vcp reanalyze-text, and the proven offline CLI contract with the machine-checkable exit-gate inventory."
+    ],
+    "open_requirements": [
+      "Real-model local run, language, and memory validation for the registered ASR research candidates remains a recorded deviation, deferred to a separately authorized model-prototype session (out of scope per the Phase 7 spec).",
+      "Registry ASR eligibility fields are deliberately bare pending the real assets the offline boundary forbids.",
+      "Marking Phase 7 `completed` in project-state.json (and any completion report) is a maintainer governance decision, intentionally not performed by ticket 10."
+    ],
+    "current_head_verification": {
+      "pytest": "519 passed",
+      "production_validated": false
+    }
+  }
+}

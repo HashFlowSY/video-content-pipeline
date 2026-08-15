@@ -373,9 +373,7 @@ def _selector_interval(
                 "A --range falls outside the Part's retained subtitle coverage.",
             )
         return interval
-    match = next(
-        (cue for cue in cues if cue.source_ordinal == selector.source_ordinal), None
-    )
+    match = next((cue for cue in cues if cue.source_ordinal == selector.source_ordinal), None)
     if match is None:
         raise EnhancementError(
             "enhancement_cue_unknown",
@@ -504,21 +502,13 @@ def gate_checked_interval_replacement(
     replaced_intervals: list[HalfOpenInterval] = []
 
     for interval in enhancement_intervals:
-        targeting_admitted = tuple(
-            cue for cue in admitted if _within(cue.raw_interval, interval)
-        )
-        targeting_rejected = tuple(
-            cue for cue in rejected if _within(cue.raw_interval, interval)
-        )
+        targeting_admitted = tuple(cue for cue in admitted if _within(cue.raw_interval, interval))
+        targeting_rejected = tuple(cue for cue in rejected if _within(cue.raw_interval, interval))
         # Only cues lying wholly inside the interval are in the user's replacement
         # scope; a cue straddling the boundary reaches beyond it and is kept.
-        enclosed = tuple(
-            cue for cue in retained_cues if _within(cue.interval, interval)
-        )
+        enclosed = tuple(cue for cue in retained_cues if _within(cue.interval, interval))
         if targeting_rejected or not targeting_admitted:
-            corrections.append(
-                _rejection_entry(part_id, interval, enclosed, targeting_rejected)
-            )
+            corrections.append(_rejection_entry(part_id, interval, enclosed, targeting_rejected))
             continue
         replaced_intervals.append(interval)
         for cue in targeting_admitted:
@@ -613,9 +603,7 @@ def render_correction_report(parts: Sequence[EnhancedPart]) -> str:
                 )
             else:
                 detail = "、".join(entry.gate_reasons) if entry.gate_reasons else "无 ASR 候选"
-                lines.append(
-                    f"- 保留 区间 {window}：原字幕保持不变（原因：{detail}）。"
-                )
+                lines.append(f"- 保留 区间 {window}：原字幕保持不变（原因：{detail}）。")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -1010,8 +998,10 @@ def _execute(
     )
     projection = project_asr_output(_decode_output(fixture.raw_output), contracts)
     if projection.state != "projected":
-        message = projection.diagnostic.message if projection.diagnostic is not None else (
-            "The controlled ASR output is invalid."
+        message = (
+            projection.diagnostic.message
+            if projection.diagnostic is not None
+            else ("The controlled ASR output is invalid.")
         )
         raise EnhancementError("model_output_invalid", message)
 
@@ -1398,9 +1388,7 @@ def _enhancement_report_path(project_root: Path, report_id: str) -> Path:
             "enhancement_report_invalid", "Enhancement report ID must be a UUID."
         ),
     )
-    return (
-        project_root / "work" / "enhancement-reports" / validated_id / "enhancement-report.json"
-    )
+    return project_root / "work" / "enhancement-reports" / validated_id / "enhancement-report.json"
 
 
 def _decode_output(raw_output: bytes) -> object:
@@ -1440,9 +1428,7 @@ def _exact_time_from_json(value: object) -> ExactTime:
     numerator = value.get("numerator")
     denominator = value.get("denominator")
     if not _is_int(numerator) or not _is_int(denominator) or denominator <= 0:
-        raise EnhancementError(
-            "enhancement_cue_basis_invalid", "A subtitle cue time is malformed."
-        )
+        raise EnhancementError("enhancement_cue_basis_invalid", "A subtitle cue time is malformed.")
     return ExactTime(numerator, denominator)
 
 

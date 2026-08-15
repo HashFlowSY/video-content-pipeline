@@ -305,9 +305,7 @@ def test_numbers_entities_flags_a_multi_digit_number() -> None:
     rules = _ruleset()
     cues = (_cue(0, 0, 5, text="他在 2026 年出发"),)
 
-    flags = suspicion.detect_numbers_entities(
-        part_id=_PART, cues=cues, rule=rules.numbers_entities
-    )
+    flags = suspicion.detect_numbers_entities(part_id=_PART, cues=cues, rule=rules.numbers_entities)
 
     (flag,) = flags
     assert flag.detector == "numbers_entities"
@@ -318,9 +316,7 @@ def test_numbers_entities_flags_alphanumeric_entities() -> None:
     rules = _ruleset()
     cues = (_cue(0, 0, 5, text="the iPhone15 is here"),)
 
-    flags = suspicion.detect_numbers_entities(
-        part_id=_PART, cues=cues, rule=rules.numbers_entities
-    )
+    flags = suspicion.detect_numbers_entities(part_id=_PART, cues=cues, rule=rules.numbers_entities)
 
     (flag,) = flags
     assert "iPhone15" in flag.evidence["matches"]
@@ -330,9 +326,7 @@ def test_numbers_entities_ignores_a_single_digit() -> None:
     rules = _ruleset()
     cues = (_cue(0, 0, 5, text="chapter 1 begins"),)
 
-    flags = suspicion.detect_numbers_entities(
-        part_id=_PART, cues=cues, rule=rules.numbers_entities
-    )
+    flags = suspicion.detect_numbers_entities(part_id=_PART, cues=cues, rule=rules.numbers_entities)
 
     assert flags == ()
 

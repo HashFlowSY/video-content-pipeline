@@ -139,9 +139,7 @@ def _subtitle_report(
             ),
         )
     else:
-        part = SubtitlePartReport(
-            source_id, SubtitlePartState.COMPLETED, 1, None, None, (), None
-        )
+        part = SubtitlePartReport(source_id, SubtitlePartState.COMPLETED, 1, None, None, (), None)
     report = SubtitleCandidateReport(
         report_id=report_id,
         plan_id=plan_id or plan.plan_id,
@@ -169,11 +167,7 @@ def _audio_report(
     bound_subtitle_report_id: str | None = None,
 ) -> tuple[str, Path]:
     report_path = (
-        project_root
-        / "work"
-        / "audio-analysis-reports"
-        / report_id
-        / "audio-analysis-report.json"
+        project_root / "work" / "audio-analysis-reports" / report_id / "audio-analysis-report.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
@@ -449,9 +443,7 @@ def test_transcribe_pauses_when_conservative_estimate_exceeds_envelope(
         "reason": "resource_envelope_exceeded",
         "decision": _RESOURCE_DECISION,
     }
-    primary = next(
-        item for item in report["capabilities"] if item["capability"] == "asr_primary"
-    )
+    primary = next(item for item in report["capabilities"] if item["capability"] == "asr_primary")
     assert primary["candidates"][0]["reason"] == "resource_envelope_exceeded"
     assert report["diagnostics"][0]["reason"] == "resource_envelope_exceeded"
 
@@ -494,9 +486,7 @@ def test_transcribe_blocks_on_unconfirmed_run_plan(
     audio_id, _ = _audio_report(tmp_path, plan, subtitle_report.report_id)
     _write_registry(tmp_path, _bare_asr_candidates())
     # Drift the confirmed PlanReport so the RunPlan no longer matches it.
-    report_json_path = (
-        tmp_path / "plans" / "reports" / plan.report_id / "plan-report.json"
-    )
+    report_json_path = tmp_path / "plans" / "reports" / plan.report_id / "plan-report.json"
     drifted = json.loads(report_json_path.read_text(encoding="utf-8"))
     drifted["configuration_fingerprint"] = "drifted-fingerprint"
     report_json_path.write_text(
@@ -520,9 +510,7 @@ def test_transcribe_blocks_on_subtitle_report_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     plan = _confirmed_plan(tmp_path)
-    subtitle_report = _subtitle_report(
-        tmp_path, plan, unavailable=True, plan_id="a-different-plan"
-    )
+    subtitle_report = _subtitle_report(tmp_path, plan, unavailable=True, plan_id="a-different-plan")
     audio_id, _ = _audio_report(tmp_path, plan, subtitle_report.report_id)
     _write_registry(tmp_path, _bare_asr_candidates())
 

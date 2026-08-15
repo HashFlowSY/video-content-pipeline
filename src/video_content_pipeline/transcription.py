@@ -223,9 +223,7 @@ def _assess_candidate(
     # schema, rule versions) binds later, at the model-output projection (ADR
     # 0036), which enters in tickets 03+. Independence here is asset-level.
     asset_sha256 = candidate.get("asset_sha256")
-    model_identity = (
-        asset_sha256 if state == "eligible" and isinstance(asset_sha256, str) else None
-    )
+    model_identity = asset_sha256 if state == "eligible" and isinstance(asset_sha256, str) else None
     return AsrCandidateAssessment(
         candidate_id=str(candidate["candidate_id"]),
         capability=capability,
@@ -478,18 +476,14 @@ class TranscriptionReport:
                 "resumption_decision": self.resumption_decision,
             },
             "start_precondition": (
-                self.start_precondition.as_json()
-                if self.start_precondition is not None
-                else None
+                self.start_precondition.as_json() if self.start_precondition is not None else None
             ),
             "revalidation": self.revalidation.as_json(),
             "audio_analysis": self.audio_analysis.as_json(),
             "audio_completeness": "not_verified",
             "capabilities": [capability.as_json() for capability in self.capabilities],
             "independent_review": (
-                self.independent_review.as_json()
-                if self.independent_review is not None
-                else None
+                self.independent_review.as_json() if self.independent_review is not None else None
             ),
             "required_decision": self.required_decision,
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
@@ -736,9 +730,7 @@ def resume_transcription(
             "transcription_report_invalid", "Transcription report cannot be read."
         ) from error
     if not isinstance(prior_document, Mapping) or prior_document.get("report_id") != report_id:
-        raise TranscriptionError(
-            "transcription_report_invalid", "Transcription report is invalid."
-        )
+        raise TranscriptionError("transcription_report_invalid", "Transcription report is invalid.")
     if decision is None:
         raise TranscriptionError(
             "transcription_resume_invalid", "Resume requires an explicit user decision."
@@ -758,10 +750,7 @@ def resume_transcription(
             "A Full-ASR resource confirmation pause requires "
             "--decision full_asr_resource_plan_confirmed.",
         )
-    if (
-        pause_reason == "resource_envelope_exceeded"
-        and decision != RESOURCE_ENVELOPE_DECISION
-    ):
+    if pause_reason == "resource_envelope_exceeded" and decision != RESOURCE_ENVELOPE_DECISION:
         raise TranscriptionError(
             "transcription_resume_invalid",
             "A resource-envelope pause requires --decision resource_configuration_changed.",
@@ -961,11 +950,7 @@ def _transcription_report_path(project_root: Path, report_id: str) -> Path:
         ),
     )
     return (
-        project_root
-        / "work"
-        / "transcription-reports"
-        / validated_id
-        / "transcription-report.json"
+        project_root / "work" / "transcription-reports" / validated_id / "transcription-report.json"
     )
 
 
@@ -973,7 +958,5 @@ def _write_json_once(path: Path, payload: object) -> None:
     write_json_once(
         path,
         payload,
-        conflict_error=lambda message: TranscriptionError(
-            "transcription_report_conflict", message
-        ),
+        conflict_error=lambda message: TranscriptionError("transcription_report_conflict", message),
     )

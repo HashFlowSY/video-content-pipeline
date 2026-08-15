@@ -163,9 +163,7 @@ def parse_candidate_matrix(
     candidates = registry.get("candidates")
     if not isinstance(candidates, list):
         raise invalid_error("Model registry needs a candidates list.")
-    grouped: dict[str, list[Mapping[str, object]]] = {
-        capability: [] for capability in capabilities
-    }
+    grouped: dict[str, list[Mapping[str, object]]] = {capability: [] for capability in capabilities}
     seen_ids: set[str] = set()
     for candidate in candidates:
         if not isinstance(candidate, Mapping):

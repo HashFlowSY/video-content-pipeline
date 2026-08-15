@@ -63,9 +63,7 @@ def _eligible_candidate(
 
 
 def _capability(report_json: dict[str, object], capability: str) -> dict[str, object]:
-    return next(
-        item for item in report_json["capabilities"] if item["capability"] == capability
-    )
+    return next(item for item in report_json["capabilities"] if item["capability"] == capability)
 
 
 def test_missing_registry_requires_acquisition_for_both_capabilities(tmp_path: Path) -> None:
@@ -262,9 +260,7 @@ def test_legacy_schema_registry_has_no_asr_candidates(tmp_path: Path) -> None:
 def test_invalid_registry_is_rejected(tmp_path: Path) -> None:
     registry_path = tmp_path / "models" / "registry.json"
     registry_path.parent.mkdir(parents=True)
-    registry_path.write_text(
-        json.dumps({"schema_version": 2, "candidates": {}}), encoding="utf-8"
-    )
+    registry_path.write_text(json.dumps({"schema_version": 2, "candidates": {}}), encoding="utf-8")
 
     with pytest.raises(TranscriptionError) as error:
         evaluate_asr_capabilities(tmp_path)
@@ -301,6 +297,4 @@ def test_foreign_audio_capabilities_are_ignored(tmp_path: Path) -> None:
         "asr_review",
     ]
     primary = _capability(document, "asr_primary")
-    assert [candidate["candidate_id"] for candidate in primary["candidates"]] == [
-        "qwen3-asr-1-7b"
-    ]
+    assert [candidate["candidate_id"] for candidate in primary["candidates"]] == ["qwen3-asr-1-7b"]

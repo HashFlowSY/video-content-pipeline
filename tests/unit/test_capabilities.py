@@ -38,9 +38,7 @@ def test_parse_returns_only_requested_capabilities() -> None:
     )
 
     assert set(grouped) == {"asr_primary", "asr_review"}
-    assert [candidate["candidate_id"] for candidate in grouped["asr_primary"]] == [
-        "qwen3-asr-1-7b"
-    ]
+    assert [candidate["candidate_id"] for candidate in grouped["asr_primary"]] == ["qwen3-asr-1-7b"]
     assert [candidate["candidate_id"] for candidate in grouped["asr_review"]] == [
         "whisper-large-v3"
     ]

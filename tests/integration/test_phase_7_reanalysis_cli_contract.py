@@ -362,9 +362,7 @@ def _write_enhancement_report(
             }
         ],
     }
-    path = (
-        project_root / "work" / "enhancement-reports" / report_id / "enhancement-report.json"
-    )
+    path = project_root / "work" / "enhancement-reports" / report_id / "enhancement-report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return report_id
