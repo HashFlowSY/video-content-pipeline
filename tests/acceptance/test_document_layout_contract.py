@@ -20,6 +20,7 @@ REQUIRED_CONTEXTS = {
     "subtitles": "subtitles/CONTEXT.md",
     "audio-analysis": "audio-analysis/CONTEXT.md",
     "text-analysis": "text-analysis/CONTEXT.md",
+    "transcription": "transcription/CONTEXT.md",
 }
 
 REQUIRED_DOMAIN_TERMS = {
@@ -38,6 +39,7 @@ EXPECTED_DEPENDENCIES = {
     "subtitles": {"media-foundation", "source-planning"},
     "audio-analysis": {"media-foundation", "source-planning", "subtitles"},
     "text-analysis": {"media-foundation", "source-planning", "subtitles"},
+    "transcription": {"media-foundation", "source-planning", "subtitles", "audio-analysis"},
 }
 
 EXPECTED_DIRECT_DEPENDENCIES = {
@@ -46,6 +48,38 @@ EXPECTED_DIRECT_DEPENDENCIES = {
     "subtitles": {"source-planning"},
     "audio-analysis": {"subtitles"},
     "text-analysis": {"subtitles"},
+    "transcription": {"subtitles", "audio-analysis"},
+}
+
+# Terms introduced by domain work after the Context-layout migration; they are
+# owned by their Contexts but intentionally absent from the migration
+# inventory's retired monolithic terms.
+POST_MIGRATION_TERMS = {
+    # Phase 7 (transcription)
+    "Transcription capability contract",
+    "Independent-model review requirement",
+    "Model-acquisition-required transcription result",
+    "Controlled offline ASR adapter",
+    "Verbatim transcription artifact",
+    "Enhanced subtitle artifact",
+    "Cue-level transcription provenance",
+    "Audio-completeness upgrade",
+    "Transcription attempt provenance",
+    "Immutable transcription workspace",
+    "Suspicious interval",
+    "Versioned suspicion detection rules",
+    "Deterministic transcription arbitration",
+    "Unresolved transcription conflict",
+    "Gate-checked interval replacement",
+    "Explicit transcription command boundary",
+    "Full-ASR resource confirmation pause",
+    "Transcription resource-envelope pause",
+    "Serialized ASR execution",
+    # Phase 7 (text-analysis additions)
+    "Affected-Part re-analysis",
+    "Carried-forward analysis Part",
+    # Phase 7 (media-foundation addition)
+    "Phase 7 offline transcription-verification boundary",
 }
 
 RUNTIME_TERMS = {
@@ -217,6 +251,14 @@ def test_active_phase_specs_route_through_the_map_and_owned_contexts() -> None:
             "audio-analysis",
             "text-analysis",
         },
+        "docs/PHASE_07_SPECIFICATION.md": {
+            "media-foundation",
+            "source-planning",
+            "subtitles",
+            "audio-analysis",
+            "transcription",
+            "text-analysis",
+        },
     }
     for relative_path, contexts in required_routes.items():
         path = PROJECT_ROOT / relative_path
@@ -291,7 +333,7 @@ def test_runtime_migration_pointer_and_inventory_are_complete() -> None:
         "Primary subtitle coverage",
         "Publication boundary",
         "Future publication stage",
-    } == set(retired_by_term)
+    } - POST_MIGRATION_TERMS == set(retired_by_term)
     for entry in retired_terms + inventory["runtime_terms"]:
         assert entry["term"] and entry["destination"]
     assert {entry["term"] for entry in inventory["runtime_terms"]} == RUNTIME_TERMS

@@ -65,7 +65,22 @@ governed separately in [Runtime Governance](docs/RUNTIME_GOVERNANCE.md).
   `audio-analysis` and its dependencies
 * Context file: [contexts/text-analysis/CONTEXT.md](docs/contexts/text-analysis/CONTEXT.md)
 * Owned vocabulary: see the owner index below.
-* Relevant global ADRs: ADRs 0026, 0034–0039, 0040–0042.
+* Relevant global ADRs: ADRs 0026, 0034–0039, 0040–0042, 0046.
+
+### transcription
+
+* Purpose: turns confirmed plans and retained subtitle and audio-analysis
+  evidence into gate-checked ASR text evidence — full verbatim transcripts and
+  interval-scoped enhanced subtitles — through suspicious-interval detection,
+  independent review, and deterministic arbitration.
+* Dependencies: `media-foundation`, `source-planning`, `subtitles`, `audio-analysis`
+* Direct dependencies: `subtitles`, `audio-analysis`
+* Transitive dependencies: `media-foundation`, `source-planning`
+* Dependency note: `audio-analysis` is a required dependency (ADR 0043), not
+  optional as it is for `text-analysis`.
+* Context file: [contexts/transcription/CONTEXT.md](docs/contexts/transcription/CONTEXT.md)
+* Owned vocabulary: see the owner index below.
+* Relevant global ADRs: ADRs 0026, 0036–0037, 0042–0046.
 
 ## Dependency routing
 
@@ -74,6 +89,12 @@ subtitles → audio-analysis → text-analysis`. Text analysis consumes the firs
 three contexts and may optionally consume audio-analysis evidence; audio
 analysis is therefore not a required prerequisite for subtitle-derived text
 claims. The direct and transitive fields above make that exception explicit.
+
+The transcription route is `subtitles + audio-analysis → transcription →
+text-analysis`. Transcription requires audio-analysis evidence (ADR 0043) and
+produces a changed cue basis; text-analysis consumes that basis through
+affected-Part re-analysis (ADR 0046) while remaining fully usable without
+transcription for subtitle-derived claims.
 
 When a change crosses contexts, name every affected owner and read each owner's
 relevant ADR index. Add a new global ADR to `docs/adr/` and this map's index when
@@ -111,6 +132,7 @@ definition may be changed.
 - `Phase 5 offline engineering boundary` → `media-foundation`
 - `Phase 5 offline verification boundary` → `media-foundation`
 - `Phase 6 offline text-verification boundary` → `media-foundation`
+- `Phase 7 offline transcription-verification boundary` → `media-foundation`
 - `RunBundle` → `media-foundation`
 - `Publication boundary` → `media-foundation`
 - `Future publication stage` → `media-foundation`
@@ -280,6 +302,30 @@ definition may be changed.
 - `Phase 6 offline human-review boundary` → `text-analysis`
 - `Phase 6 offline fixture coverage` → `text-analysis`
 - `Phase 6 deterministic contract verification` → `text-analysis`
+- `Affected-Part re-analysis` → `text-analysis`
+- `Carried-forward analysis Part` → `text-analysis`
+
+### transcription
+
+- `Transcription capability contract` → `transcription`
+- `Independent-model review requirement` → `transcription`
+- `Model-acquisition-required transcription result` → `transcription`
+- `Controlled offline ASR adapter` → `transcription`
+- `Verbatim transcription artifact` → `transcription`
+- `Enhanced subtitle artifact` → `transcription`
+- `Cue-level transcription provenance` → `transcription`
+- `Audio-completeness upgrade` → `transcription`
+- `Transcription attempt provenance` → `transcription`
+- `Immutable transcription workspace` → `transcription`
+- `Suspicious interval` → `transcription`
+- `Versioned suspicion detection rules` → `transcription`
+- `Deterministic transcription arbitration` → `transcription`
+- `Unresolved transcription conflict` → `transcription`
+- `Gate-checked interval replacement` → `transcription`
+- `Explicit transcription command boundary` → `transcription`
+- `Full-ASR resource confirmation pause` → `transcription`
+- `Transcription resource-envelope pause` → `transcription`
+- `Serialized ASR execution` → `transcription`
 
 ## Reading and writing protocol
 
@@ -343,3 +389,7 @@ future ADR can be routed without creating a context-local tree.
 - [ADR 0040](docs/adr/0040-require-cue-level-evidence-for-phase-6-facts.md)
 - [ADR 0041](docs/adr/0041-keep-phase-6-text-analysis-in-immutable-workspaces.md)
 - [ADR 0042](docs/adr/0042-use-context-map-and-domain-owned-glossaries.md)
+- [ADR 0043](docs/adr/0043-introduce-a-transcription-context-with-required-audio-analysis.md)
+- [ADR 0044](docs/adr/0044-use-deterministic-transcription-arbitration-with-retained-conflicts.md)
+- [ADR 0045](docs/adr/0045-use-gate-checked-interval-replacement-for-enhanced-subtitles.md)
+- [ADR 0046](docs/adr/0046-recompute-affected-parts-with-carried-forward-analysis.md)

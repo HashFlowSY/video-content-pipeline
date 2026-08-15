@@ -7,8 +7,9 @@ Operational mechanics and exact thresholds remain in the linked specifications
 and ADRs.
 
 Relevant global decisions include [ADR 0040](../../adr/0040-require-cue-level-evidence-for-phase-6-facts.md),
-[ADR 0041](../../adr/0041-keep-phase-6-text-analysis-in-immutable-workspaces.md), and
-[ADR 0042](../../adr/0042-use-context-map-and-domain-owned-glossaries.md).
+[ADR 0041](../../adr/0041-keep-phase-6-text-analysis-in-immutable-workspaces.md),
+[ADR 0042](../../adr/0042-use-context-map-and-domain-owned-glossaries.md), and
+[ADR 0046](../../adr/0046-recompute-affected-parts-with-carried-forward-analysis.md).
 
 ## Language
 
@@ -250,3 +251,13 @@ _Avoid_: happy-path-only fixture
 The repeatable verification of text-analysis evidence structure without judging
 prose quality.
 _Avoid_: subjective summary benchmark
+
+**Affected-Part re-analysis**:
+A new text-analysis attempt that regenerates only the Parts whose cue evidence
+basis changed after transcription or enhancement.
+_Avoid_: whole-collection re-run
+
+**Carried-forward analysis Part**:
+A Part whose verified prior analysis is reused in a new attempt with an
+explicit provenance link to the retained source report.
+_Avoid_: silently copied segments

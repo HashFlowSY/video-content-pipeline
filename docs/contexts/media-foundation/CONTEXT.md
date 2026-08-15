@@ -123,6 +123,11 @@ The synthetic structured-text boundary that proves text-analysis contracts
 without a real model or external knowledge.
 _Avoid_: semantic quality benchmark
 
+**Phase 7 offline transcription-verification boundary**:
+The synthetic boundary that proves transcription and enhancement contracts
+without a real ASR model, user media, or network.
+_Avoid_: accuracy benchmark
+
 **RunBundle**:
 The immutable bundle that a future authorized publication stage may promote
 from verified evidence and reports.
