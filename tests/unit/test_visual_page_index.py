@@ -27,11 +27,14 @@ from video_content_pipeline.visual_page_index import (
     UNSELECTED_DUPLICATE_OF_SELECTED,
     UNSELECTED_TRANSITION_FRAME,
     FrameMetric,
+    OcrResourcePolicy,
     PageIndexRules,
     build_part_page_index,
     frames_in_scope,
     load_frame_metric_fixture,
+    load_ocr_resource_policy,
     load_page_index_rules,
+    plan_ocr_resources,
 )
 from video_content_pipeline.visual_text import VisualTextError
 
@@ -312,3 +315,104 @@ def test_fixture_loader_rejects_a_malformed_frame(tmp_path: Path) -> None:
     with pytest.raises(VisualTextError) as excinfo:
         load_frame_metric_fixture(path, "part-1")
     assert excinfo.value.reason == "visual_text_frame_metrics_invalid"
+
+
+# --- OCR resource plan ------------------------------------------------------
+
+_POLICY = OcrResourcePolicy(
+    version="plan-v1",
+    seconds_per_selected_frame=3,
+    disk_bytes_per_selected_frame=100,
+    peak_working_set_bytes=2048,
+    max_selected_frames=2,
+    max_disk_bytes=1000,
+    max_peak_bytes=4096,
+)
+
+
+def test_plan_counts_one_selected_frame_per_text_bearing_page() -> None:
+    # aaa selects a representative, bbb has no text-bearing frame and selects none.
+    index = build_part_page_index(
+        "part-1",
+        (
+            _frame(0, "aaa", edge_density=90),
+            _frame(1, "bbb", region_diff=90),  # transition into bbb
+            _frame(2, "bbb", edge_density=5),  # bbb settled but below text value
+        ),
+        _RULES,
+    )
+    plan = plan_ocr_resources((index,), _POLICY)
+    assert plan.selected_frame_count == 1
+    assert plan.total_frame_count == 3
+    assert plan.estimated_seconds == 3
+    assert plan.estimated_disk_bytes == 100
+    assert plan.estimated_peak_bytes == 2048
+    assert plan.within_envelope is True
+    assert plan.serialized_execution is True
+    assert plan.policy_version == "plan-v1"
+
+
+def test_plan_sums_selected_frames_across_parts() -> None:
+    first = build_part_page_index("part-1", (_frame(0, "aaa", edge_density=90),), _RULES)
+    second = build_part_page_index("part-2", (_frame(0, "zzz", edge_density=90),), _RULES)
+    plan = plan_ocr_resources((first, second), _POLICY)
+    assert plan.selected_frame_count == 2
+    assert plan.within_envelope is True
+
+
+def test_plan_exceeds_envelope_when_selected_frames_pass_the_ceiling() -> None:
+    # Three distinct text-bearing pages -> 3 selected frames, above max_selected_frames=2.
+    index = build_part_page_index(
+        "part-1",
+        (
+            _frame(0, "aaa", edge_density=90),
+            _frame(1, "bbb", region_diff=90),
+            _frame(2, "bbb", edge_density=90),
+            _frame(3, "ccc", region_diff=90),
+            _frame(4, "ccc", edge_density=90),
+        ),
+        _RULES,
+    )
+    plan = plan_ocr_resources((index,), _POLICY)
+    assert plan.selected_frame_count == 3
+    assert plan.within_envelope is False
+
+
+def test_plan_is_within_envelope_with_no_selected_frames() -> None:
+    index = build_part_page_index("part-1", (_frame(0, "aaa", edge_density=5),), _RULES)
+    plan = plan_ocr_resources((index,), _POLICY)
+    assert plan.selected_frame_count == 0
+    assert plan.within_envelope is True
+
+
+def test_ocr_resource_policy_loads_from_the_repository_rules() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    policy = load_ocr_resource_policy(repo_root)
+    assert policy.version == "phase-08-ocr-resource-plan-v1"
+    assert policy.seconds_per_selected_frame > 0
+    assert policy.max_selected_frames > 0
+    assert policy.max_peak_bytes > 0
+
+
+def test_ocr_resource_policy_rejects_a_non_positive_constant(tmp_path: Path) -> None:
+    path = tmp_path / "config" / "visual-text" / "rules.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "ocr_execution": {
+                    "version": "p",
+                    "seconds_per_selected_frame": 0,
+                    "disk_bytes_per_selected_frame": 1,
+                    "peak_working_set_bytes": 1,
+                    "max_selected_frames": 1,
+                    "max_disk_bytes": 1,
+                    "max_peak_bytes": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(VisualTextError) as excinfo:
+        load_ocr_resource_policy(tmp_path)
+    assert excinfo.value.reason == "visual_text_rules_invalid"

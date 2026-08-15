@@ -73,7 +73,7 @@ from video_content_pipeline.url_policy import (
     authorize_public_url,
 )
 from video_content_pipeline.visual_text import VisualTextError
-from video_content_pipeline.visual_text_command import run_visual_text
+from video_content_pipeline.visual_text_command import resume_visual_text, run_visual_text
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -173,6 +173,10 @@ def _parser() -> argparse.ArgumentParser:
         "--range", action="append", default=[], metavar="PART_ID:START-END"
     )
     visual_text_command.add_argument("--json", action="store_true")
+    resume_visual_text_command = subcommands.add_parser("resume-visual-text")
+    resume_visual_text_command.add_argument("report_id")
+    resume_visual_text_command.add_argument("--decision", metavar="DECISION")
+    resume_visual_text_command.add_argument("--json", action="store_true")
     return parser
 
 
@@ -319,6 +323,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 part_selectors=tuple(arguments.part),
                 range_selectors=tuple(getattr(arguments, "range")),
             )
+        except VisualTextError as error:
+            print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
+            return 2
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "resume-visual-text":
+        try:
+            result = resume_visual_text(arguments.report_id, arguments.decision, _project_root())
         except VisualTextError as error:
             print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
             return 2

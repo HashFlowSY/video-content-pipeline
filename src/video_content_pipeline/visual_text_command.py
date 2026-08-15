@@ -29,7 +29,12 @@ from fractions import Fraction
 from hashlib import sha256
 from pathlib import Path
 
-from video_content_pipeline.evidence import InputEvidence, input_evidence, write_json_once
+from video_content_pipeline.evidence import (
+    InputEvidence,
+    input_evidence,
+    validated_report_id,
+    write_json_once,
+)
 from video_content_pipeline.inspection import PlanInspectionEvidence
 from video_content_pipeline.planning import (
     PlanningDiagnostic,
@@ -45,12 +50,16 @@ from video_content_pipeline.probe import project_probe_document
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval, TimeValidationError
 from video_content_pipeline.visual_page_index import (
     FrameMetricFixture,
+    OcrResourcePlan,
+    OcrResourcePolicy,
     PageIndexRules,
     PartPageIndex,
     build_part_page_index,
     frames_in_scope,
     load_frame_metric_fixture,
+    load_ocr_resource_policy,
     load_page_index_rules,
+    plan_ocr_resources,
 )
 from video_content_pipeline.visual_text import (
     VisualTextCapabilityReport,
@@ -58,6 +67,18 @@ from video_content_pipeline.visual_text import (
     evaluate_ocr_capabilities,
     offline_guarantees,
 )
+
+# The explicit decisions that continue a retained visual-text decision pause. The
+# affirmative OCR decision runs OCR; the declining decision keeps the page index at
+# zero cost; the resource-envelope decision follows the Phase 7 resume convention.
+OCR_RESOURCE_CONFIRMATION_DECISION = "ocr_resource_confirmed"
+OCR_DECLINE_DECISION = "ocr_declined"
+RESOURCE_ENVELOPE_DECISION = "resource_configuration_changed"
+
+# The recorded pause reasons carried in a report's ``required_decision`` block.
+_OCR_RESOURCE_CONFIRMATION_REASON = "ocr_resource_confirmation"
+_RESOURCE_ENVELOPE_REASON = "resource_envelope_exceeded"
+
 
 # --- Scope selectors --------------------------------------------------------
 
@@ -388,14 +409,21 @@ class VisualTextReportStatus(StrEnum):
     """The recorded outcome of one visual-text attempt.
 
     ``failed`` retains revalidation drift or an invalid scope before any evidence
-    exists; ``model_acquisition_required`` is the terminal outcome when no eligible
-    OCR capability is locally available. ``complete`` and ``partial`` are produced
-    once detection, the OCR pause, and OCR land in later tickets.
+    exists. ``awaiting_ocr_resource_confirmation`` and ``resource_envelope_exceeded``
+    are the immutable decision pauses that stop the attempt after detection: the
+    first presents the OCR resource plan for an explicit affirmative decision, the
+    second reports a plan over the approved envelope. ``partial`` retains a page
+    index after the user declined OCR (zero visual facts), and
+    ``model_acquisition_required`` is the terminal outcome once OCR is authorized but
+    no eligible OCR capability is locally available. ``complete`` arrives once OCR
+    executes in a later ticket.
     """
 
     COMPLETE = "complete"
     PARTIAL = "partial"
     FAILED = "failed"
+    AWAITING_OCR_RESOURCE_CONFIRMATION = "awaiting_ocr_resource_confirmation"
+    RESOURCE_ENVELOPE_EXCEEDED = "resource_envelope_exceeded"
     MODEL_ACQUISITION_REQUIRED = "model_acquisition_required"
 
 
@@ -408,6 +436,7 @@ class _VisualTextInputs:
     confirmed_report_path: Path
     rule_versions: VisualTextRuleVersions
     page_index_rules: PageIndexRules
+    ocr_resource_policy: OcrResourcePolicy
     scope: tuple[PartVisualScope, ...]
     limitations: tuple[PlanningDiagnostic, ...]
     capability_report: VisualTextCapabilityReport
@@ -452,10 +481,15 @@ class VisualTextReport:
     report_path: Path
     plan_evidence: InputEvidence | None
     confirmed_report_evidence: InputEvidence | None
+    resumed_from_report: InputEvidence | None
+    resumed_from_report_id: str | None
+    resumption_decision: str | None
     rule_versions: VisualTextRuleVersions | None
     scope: tuple[PartVisualScope, ...]
     capability: VisualTextCapabilityReport | None
     page_index: tuple[_PartFrameInventory, ...]
+    ocr_resource_plan: OcrResourcePlan | None
+    required_decision: dict[str, object] | None
     limitations: tuple[PlanningDiagnostic, ...]
     diagnostics: tuple[PlanningDiagnostic, ...]
 
@@ -469,6 +503,9 @@ class VisualTextReport:
             "input_evidence": {
                 "run_plan": _evidence_json(self.plan_evidence),
                 "confirmed_plan_report": _evidence_json(self.confirmed_report_evidence),
+                "resumed_from_report": _evidence_json(self.resumed_from_report),
+                "resumed_from_report_id": self.resumed_from_report_id,
+                "resumption_decision": self.resumption_decision,
             },
             "scope": {
                 "requested": self.scope_mode,
@@ -481,6 +518,11 @@ class VisualTextReport:
             "page_index": {
                 "parts": [inventory.as_json() for inventory in self.page_index],
             },
+            "ocr_resource": (
+                self.ocr_resource_plan.as_json() if self.ocr_resource_plan is not None else None
+            ),
+            "ocr_evidence": None,
+            "required_decision": self.required_decision,
             "limitations": [limitation.as_json() for limitation in self.limitations],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
             "guarantees": offline_guarantees(),
@@ -494,6 +536,9 @@ class _ReportBuilder:
     scope_mode: str
     workspace_path: Path
     report_path: Path
+    resumed_from_report: InputEvidence | None = None
+    resumed_from_report_id: str | None = None
+    resumption_decision: str | None = None
     status: VisualTextReportStatus = VisualTextReportStatus.FAILED
     plan_evidence: InputEvidence | None = None
     confirmed_report_evidence: InputEvidence | None = None
@@ -501,6 +546,8 @@ class _ReportBuilder:
     scope: tuple[PartVisualScope, ...] = ()
     capability: VisualTextCapabilityReport | None = None
     page_index: tuple[_PartFrameInventory, ...] = ()
+    ocr_resource_plan: OcrResourcePlan | None = None
+    required_decision: dict[str, object] | None = None
     limitations: tuple[PlanningDiagnostic, ...] = ()
     diagnostics: tuple[PlanningDiagnostic, ...] = ()
 
@@ -515,6 +562,8 @@ class _ReportBuilder:
 
     def fail(self, error: Exception) -> None:
         self.status = VisualTextReportStatus.FAILED
+        self.ocr_resource_plan = None
+        self.required_decision = None
         self.diagnostics = (
             PlanningDiagnostic(getattr(error, "reason", "visual_text_input_invalid"), str(error)),
         )
@@ -529,10 +578,15 @@ class _ReportBuilder:
             report_path=self.report_path,
             plan_evidence=self.plan_evidence,
             confirmed_report_evidence=self.confirmed_report_evidence,
+            resumed_from_report=self.resumed_from_report,
+            resumed_from_report_id=self.resumed_from_report_id,
+            resumption_decision=self.resumption_decision,
             rule_versions=self.rule_versions,
             scope=self.scope,
             capability=self.capability,
             page_index=self.page_index,
+            ocr_resource_plan=self.ocr_resource_plan,
+            required_decision=self.required_decision,
             limitations=self.limitations,
             diagnostics=self.diagnostics,
         )
@@ -545,6 +599,9 @@ def run_visual_text(
     all_parts: bool = False,
     part_selectors: Sequence[str] = (),
     range_selectors: Sequence[str] = (),
+    resumed_from_report: InputEvidence | None = None,
+    resumed_from_report_id: str | None = None,
+    resumption_decision: str | None = None,
 ) -> dict[str, object]:
     """Run one immutable visual-text attempt over an explicitly given scope.
 
@@ -553,10 +610,15 @@ def run_visual_text(
     attempt mints a fresh Immutable visual-text workspace, revalidates the confirmed
     RunPlan and SourceArtifact hashes, the retained inspection evidence, the
     versioned rules, and every named Part and range against retained Part identities
-    and actual video coverage, then evaluates the OCR capability. Any drift or
-    invalid scope retains a ``failed`` report with a structured reason; with no
-    eligible OCR capability the terminal outcome is ``model_acquisition_required``.
-    Each attempt owns a fresh workspace and never overwrites prior evidence.
+    and actual video coverage, then builds the deterministic page index. After
+    detection the attempt plans OCR resources: with frames to recognize it stops at
+    the OCR resource confirmation pause (or the Visual-text resource-envelope pause
+    when the plan exceeds the approved envelope), and OCR runs only after
+    ``resume-visual-text`` records an explicit affirmative decision. A declining
+    decision retains the page index with zero visual facts; an affirmative decision
+    with no eligible OCR capability reaches ``model_acquisition_required``. Any drift
+    or invalid scope retains a ``failed`` report. Each attempt owns a fresh workspace
+    and never overwrites prior evidence, so there is no automatic retry.
     """
 
     selectors = parse_visual_text_scope(all_parts, part_selectors, range_selectors)
@@ -570,6 +632,9 @@ def run_visual_text(
         scope_mode=scope_mode,
         workspace_path=workspace_path,
         report_path=report_path,
+        resumed_from_report=resumed_from_report,
+        resumed_from_report_id=resumed_from_report_id,
+        resumption_decision=resumption_decision,
     )
     try:
         inputs = _revalidate_inputs(plan_id, selectors, project_root)
@@ -585,6 +650,178 @@ def run_visual_text(
         conflict_error=lambda message: VisualTextError("visual_text_report_conflict", message),
     )
     return {"status": report.status.value, "report": report.as_json()}
+
+
+def resume_visual_text(
+    report_id: str, decision: str | None, project_root: Path
+) -> dict[str, object]:
+    """Resume one retained visual-text decision pause from an explicit user decision.
+
+    Resumption never auto-resumes and never changes identity-bound inputs: it
+    requires an explicit report ID and an explicit decision, and it may continue only
+    a retained report whose decision pause it recognizes -- the OCR resource
+    confirmation pause (continued with ``ocr_resource_confirmed`` to run OCR or
+    ``ocr_declined`` to keep the page index at zero cost) or the Visual-text
+    resource-envelope pause (continued with ``resource_configuration_changed``). A
+    resume starts a fresh attempt from the retained plan and scope identities and
+    never overwrites the paused report, so there is no automatic retry.
+    """
+
+    prior_path = _visual_text_report_path(project_root, report_id)
+    try:
+        prior = json.loads(prior_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise VisualTextError(
+            "visual_text_report_invalid", "Visual-text report cannot be read."
+        ) from error
+    if not isinstance(prior, Mapping) or prior.get("report_id") != report_id:
+        raise VisualTextError("visual_text_report_invalid", "Visual-text report is invalid.")
+    if decision is None:
+        raise VisualTextError(
+            "visual_text_resume_invalid", "Resume requires an explicit user decision."
+        )
+    pause_reason = _resumable_pause_reason(prior)
+    if pause_reason is None:
+        raise VisualTextError(
+            "visual_text_resume_invalid",
+            "Only a retained visual-text decision pause can be resumed.",
+        )
+    _reject_mismatched_decision(pause_reason, decision)
+    plan_id, all_parts, range_selectors = _resumed_request(prior)
+    return run_visual_text(
+        plan_id,
+        project_root,
+        all_parts=all_parts,
+        range_selectors=range_selectors,
+        resumed_from_report=input_evidence(prior_path),
+        resumed_from_report_id=report_id,
+        resumption_decision=decision,
+    )
+
+
+def _reject_mismatched_decision(pause_reason: str, decision: str) -> None:
+    """Reject a decision that does not match the retained pause it claims to continue."""
+
+    if pause_reason == _OCR_RESOURCE_CONFIRMATION_REASON and decision not in (
+        OCR_RESOURCE_CONFIRMATION_DECISION,
+        OCR_DECLINE_DECISION,
+    ):
+        raise VisualTextError(
+            "visual_text_resume_invalid",
+            "An OCR resource confirmation pause requires --decision ocr_resource_confirmed or "
+            "ocr_declined.",
+        )
+    if pause_reason == _RESOURCE_ENVELOPE_REASON and decision != RESOURCE_ENVELOPE_DECISION:
+        raise VisualTextError(
+            "visual_text_resume_invalid",
+            "A resource-envelope pause requires --decision resource_configuration_changed.",
+        )
+
+
+def _resumable_pause_reason(report: Mapping[str, object]) -> str | None:
+    """Return the resumable decision-pause reason of a retained report, if any."""
+
+    required_decision = report.get("required_decision")
+    if not isinstance(required_decision, Mapping):
+        return None
+    reason = required_decision.get("reason")
+    status = report.get("status")
+    if (
+        status == VisualTextReportStatus.AWAITING_OCR_RESOURCE_CONFIRMATION.value
+        and reason == _OCR_RESOURCE_CONFIRMATION_REASON
+    ):
+        return _OCR_RESOURCE_CONFIRMATION_REASON
+    if (
+        status == VisualTextReportStatus.RESOURCE_ENVELOPE_EXCEEDED.value
+        and reason == _RESOURCE_ENVELOPE_REASON
+    ):
+        return _RESOURCE_ENVELOPE_REASON
+    return None
+
+
+def _resumed_request(report: Mapping[str, object]) -> tuple[str, bool, tuple[str, ...]]:
+    """Read the identity-bound plan and scope from a paused report.
+
+    The paused report retains its resolved scope intervals, so the resume rebuilds
+    the exact same scope as explicit ``--range`` selectors -- the identity-bound
+    inputs are never re-derived from anything but the retained report. An ``--all``
+    request is replayed as ranges over the same retained coverage, which resolves to
+    the same Parts. A malformed or empty retained scope is rejected rather than
+    silently narrowed.
+    """
+
+    plan_id = report.get("plan_id")
+    if not isinstance(plan_id, str) or not plan_id:
+        raise VisualTextError(
+            "visual_text_report_invalid", "Paused report omits its identity-bound plan ID."
+        )
+    scope = report.get("scope")
+    parts = scope.get("parts") if isinstance(scope, Mapping) else None
+    if not isinstance(parts, list) or not parts:
+        raise VisualTextError(
+            "visual_text_report_invalid", "Paused report omits its retained scope."
+        )
+    ranges = tuple(_scope_range_selectors(parts))
+    return plan_id, False, ranges
+
+
+def _scope_range_selectors(parts: Sequence[object]) -> list[str]:
+    selectors: list[str] = []
+    for part in parts:
+        if not isinstance(part, Mapping):
+            raise VisualTextError("visual_text_report_invalid", "A paused scope Part is malformed.")
+        part_id = part.get("part_id")
+        intervals = part.get("intervals")
+        if not isinstance(part_id, str) or not part_id or not isinstance(intervals, list):
+            raise VisualTextError("visual_text_report_invalid", "A paused scope Part is malformed.")
+        for interval in intervals:
+            selectors.append(f"{part_id}:{_interval_range_text(interval)}")
+    if not selectors:
+        raise VisualTextError(
+            "visual_text_report_invalid", "Paused report retains no scope interval."
+        )
+    return selectors
+
+
+def _interval_range_text(interval: object) -> str:
+    if not isinstance(interval, Mapping):
+        raise VisualTextError("visual_text_report_invalid", "A paused scope interval is malformed.")
+    start = _seconds_text(_exact_time_from_json(interval.get("start")))
+    end = _seconds_text(_exact_time_from_json(interval.get("end")))
+    return f"{start}-{end}"
+
+
+def _exact_time_from_json(value: object) -> ExactTime:
+    if not isinstance(value, Mapping):
+        raise VisualTextError("visual_text_report_invalid", "A paused scope time is malformed.")
+    numerator = value.get("numerator")
+    denominator = value.get("denominator")
+    if (
+        not isinstance(numerator, int)
+        or isinstance(numerator, bool)
+        or not isinstance(denominator, int)
+        or isinstance(denominator, bool)
+        or denominator <= 0
+    ):
+        raise VisualTextError("visual_text_report_invalid", "A paused scope time is malformed.")
+    return ExactTime(numerator, denominator)
+
+
+def _seconds_text(value: ExactTime) -> str:
+    # Exact rational rendering (``5`` or ``7/2``), never float division: the resume
+    # path re-parses this through ``Fraction`` to rebuild the identity-bound --range
+    # scope, so a lossy ``0.3333...`` would drift off the retained interval.
+    return str(value.as_fraction())
+
+
+def _visual_text_report_path(project_root: Path, report_id: str) -> Path:
+    validated = validated_report_id(
+        report_id,
+        invalid_error=lambda: VisualTextError(
+            "visual_text_report_invalid", "Visual-text report ID must be a UUID."
+        ),
+    )
+    return project_root / "work" / "visual-text-reports" / validated / "visual-report.json"
 
 
 def _revalidate_inputs(
@@ -616,6 +853,7 @@ def _revalidate_inputs(
     )
     rule_versions = load_visual_text_rule_versions(project_root)
     page_index_rules = load_page_index_rules(project_root)
+    ocr_resource_policy = load_ocr_resource_policy(project_root)
     coverage_by_part = part_video_coverage(confirmed_report)
     plan_part_ids = {artifact.source_id for artifact in plan.source_artifacts}
     scope = resolve_visual_text_scope(
@@ -629,6 +867,7 @@ def _revalidate_inputs(
         confirmed_report_path=confirmed_report_path,
         rule_versions=rule_versions,
         page_index_rules=page_index_rules,
+        ocr_resource_policy=ocr_resource_policy,
         scope=scope,
         limitations=limitations,
         capability_report=capability_report,
@@ -659,22 +898,72 @@ def _uncovered_part_limitations(
 
 
 def _finalize(builder: _ReportBuilder, inputs: _VisualTextInputs, project_root: Path) -> None:
-    """Build the deterministic page index, then derive the terminal status.
+    """Build the deterministic page index, plan OCR resources, then derive the status.
 
     Detection and sampling are deterministic and carry no model capability, so the
-    Part-local page index is always built when frame metrics exist -- even when no
-    OCR capability is available, matching the Model-acquisition-required outcome that
-    retains a page index with no OCR evidence (ticket 04 adds the OCR pause). Each
-    Part in scope consumes its hash-pinned frame-metric fixture; a Part with no
-    fixture records an auditable limitation rather than a silent gap, and a fixture
-    naming stale rule versions is rule drift that blocks the attempt. The OCR
-    resource confirmation pause and OCR itself arrive in later tickets, so at this
-    boundary the status still follows the evaluated capability directly.
+    Part-local page index is always built when frame metrics exist. Each Part in scope
+    consumes its hash-pinned frame-metric fixture; a Part with no fixture records an
+    auditable limitation rather than a silent gap, and a fixture naming stale rule
+    versions is rule drift that blocks the attempt. With the index built, the
+    conservative OCR resource plan is derived and the terminal status follows the two
+    internal gates.
     """
 
     builder.page_index, absences = _build_page_index(inputs, project_root, builder.workspace_path)
     builder.limitations = inputs.limitations + absences
-    builder.status = VisualTextReportStatus(inputs.capability_report.result)
+    plan = plan_ocr_resources(
+        tuple(inventory.index for inventory in builder.page_index), inputs.ocr_resource_policy
+    )
+    builder.ocr_resource_plan = plan
+    _derive_terminal_status(builder, inputs, plan)
+
+
+def _derive_terminal_status(
+    builder: _ReportBuilder, inputs: _VisualTextInputs, plan: OcrResourcePlan
+) -> None:
+    """Choose the status from the OCR resource plan and any explicit resume decision.
+
+    The two internal gates sequence as: nothing to recognize resolves straight to the
+    capability outcome; a plan over the approved envelope is the immutable Visual-text
+    resource-envelope pause (never silently altering candidate, resolution, or batch);
+    a declining decision retains the page index as ``partial`` with zero visual facts;
+    an affirmative decision authorizes OCR, which -- absent an eligible capability in
+    this phase -- reaches ``model_acquisition_required`` with the page index retained;
+    and any other attempt (a fresh run, or a resource-envelope resume that now fits)
+    stops at the OCR resource confirmation pause. The plan is deterministic, so a
+    resume rebuilds the same page index and re-plans the same OCR work.
+    """
+
+    capability_status = VisualTextReportStatus(inputs.capability_report.result)
+    decision = builder.resumption_decision
+    if plan.selected_frame_count == 0:
+        builder.status = capability_status
+        return
+    if not plan.within_envelope:
+        builder.status = VisualTextReportStatus.RESOURCE_ENVELOPE_EXCEEDED
+        builder.required_decision = {
+            "reason": _RESOURCE_ENVELOPE_REASON,
+            "decision": RESOURCE_ENVELOPE_DECISION,
+        }
+        builder.diagnostics = (
+            PlanningDiagnostic(
+                _RESOURCE_ENVELOPE_REASON,
+                "The planned OCR run exceeds the approved resource envelope; reconfigure rather "
+                "than silently change candidate, resolution, or batch.",
+            ),
+        )
+        return
+    if decision == OCR_DECLINE_DECISION:
+        builder.status = VisualTextReportStatus.PARTIAL
+        return
+    if decision == OCR_RESOURCE_CONFIRMATION_DECISION:
+        builder.status = capability_status
+        return
+    builder.status = VisualTextReportStatus.AWAITING_OCR_RESOURCE_CONFIRMATION
+    builder.required_decision = {
+        "reason": _OCR_RESOURCE_CONFIRMATION_REASON,
+        "decision": OCR_RESOURCE_CONFIRMATION_DECISION,
+    }
 
 
 def _build_page_index(

@@ -175,6 +175,117 @@ class PartPageIndex:
         }
 
 
+# --- OCR resource plan ------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OcrResourcePolicy:
+    """The versioned deterministic OCR resource estimate and approved envelope.
+
+    OCR runs one selected representative frame per Visual page; the per-frame
+    constants turn a selected-frame count into conservative (high) time, memory,
+    and disk estimates, and the ceilings define the approved envelope a planned
+    attempt may not silently exceed. The version is recorded in provenance.
+    """
+
+    version: str
+    seconds_per_selected_frame: int
+    disk_bytes_per_selected_frame: int
+    peak_working_set_bytes: int
+    max_selected_frames: int
+    max_disk_bytes: int
+    max_peak_bytes: int
+
+
+@dataclass(frozen=True)
+class OcrResourcePlan:
+    """The conservative OCR resource estimate for one attempt against its envelope.
+
+    ``selected_frame_count`` is the number of Visual pages that selected an OCR
+    representative across every Part in scope; the estimates are conservative highs
+    and ``within_envelope`` is false when any estimate exceeds an approved ceiling,
+    which is what makes the attempt pause rather than silently shrink its plan.
+    ``serialized_execution`` records that OCR shares the single heavy-task queue and
+    releases its evidence before any other heavy model may load.
+    """
+
+    policy_version: str
+    selected_frame_count: int
+    total_frame_count: int
+    estimated_seconds: int
+    estimated_peak_bytes: int
+    estimated_disk_bytes: int
+    max_selected_frames: int
+    max_disk_bytes: int
+    max_peak_bytes: int
+    within_envelope: bool
+    serialized_execution: bool = True
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "policy_version": self.policy_version,
+            "selected_frame_count": self.selected_frame_count,
+            "total_frame_count": self.total_frame_count,
+            "estimates": {
+                "seconds": self.estimated_seconds,
+                "peak_bytes": self.estimated_peak_bytes,
+                "disk_bytes": self.estimated_disk_bytes,
+            },
+            "envelope": {
+                "max_selected_frames": self.max_selected_frames,
+                "max_disk_bytes": self.max_disk_bytes,
+                "max_peak_bytes": self.max_peak_bytes,
+            },
+            "within_envelope": self.within_envelope,
+            "serialized_execution": self.serialized_execution,
+        }
+
+
+def plan_ocr_resources(
+    indices: Sequence[PartPageIndex], policy: OcrResourcePolicy
+) -> OcrResourcePlan:
+    """Derive the conservative OCR resource plan from the selected representatives.
+
+    Exactly one frame per Visual page is handed to OCR -- the page's selected
+    representative -- so ``selected_frame_count`` sums the pages that selected one
+    across every Part; a page with no text-bearing frame selects none and costs
+    nothing. Estimates are conservative highs and the plan is within the envelope
+    only when every estimate is at or under its approved ceiling. The same page
+    indices and policy always yield the same plan.
+    """
+
+    selected = sum(
+        1 for index in indices for page in index.pages if page.selected_frame_pts is not None
+    )
+    total = sum(len(index.retained_frames) for index in indices)
+    estimated_seconds = selected * policy.seconds_per_selected_frame
+    estimated_disk = selected * policy.disk_bytes_per_selected_frame
+    # Peak memory is frame-count-independent by design: OCR is a Serialized OCR
+    # execution over one representative frame at a time, so the working set is the
+    # single-frame model footprint regardless of how many frames are queued. The
+    # ceiling therefore guards a policy misconfiguration (a working set that alone
+    # overflows the envelope), not the per-run frame count, which the selected-frame
+    # and disk ceilings bound.
+    estimated_peak = policy.peak_working_set_bytes
+    within = (
+        selected <= policy.max_selected_frames
+        and estimated_disk <= policy.max_disk_bytes
+        and estimated_peak <= policy.max_peak_bytes
+    )
+    return OcrResourcePlan(
+        policy_version=policy.version,
+        selected_frame_count=selected,
+        total_frame_count=total,
+        estimated_seconds=estimated_seconds,
+        estimated_peak_bytes=estimated_peak,
+        estimated_disk_bytes=estimated_disk,
+        max_selected_frames=policy.max_selected_frames,
+        max_disk_bytes=policy.max_disk_bytes,
+        max_peak_bytes=policy.max_peak_bytes,
+        within_envelope=within,
+    )
+
+
 # --- Detection and sampling engine ------------------------------------------
 
 
@@ -400,6 +511,42 @@ def load_page_index_rules(project_root: Path) -> PageIndexRules:
     )
 
 
+def load_ocr_resource_policy(project_root: Path) -> OcrResourcePolicy:
+    """Load the versioned OCR resource estimate and approved envelope, or reject it.
+
+    Shares ``config/visual-text/rules.json`` with the other rule loaders; the
+    ``ocr_execution`` section carries the version, the conservative per-frame
+    estimate constants, and the envelope ceilings. Any missing or non-positive
+    field raises ``visual_text_rules_invalid`` before an attempt plans OCR, so the
+    resource confirmation pause never presents an estimate derived from a malformed
+    policy.
+    """
+
+    path = project_root / "config" / "visual-text" / "rules.json"
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise VisualTextError(
+            "visual_text_rules_invalid", f"Visual-text rules cannot be read: {path}"
+        ) from error
+    if not isinstance(decoded, Mapping):
+        raise VisualTextError("visual_text_rules_invalid", "Visual-text rules must be an object.")
+    section = _rules_section(decoded, "ocr_execution")
+    return OcrResourcePolicy(
+        version=_rules_string(section, "ocr_execution", "version"),
+        seconds_per_selected_frame=_rules_positive(
+            section, "ocr_execution", "seconds_per_selected_frame"
+        ),
+        disk_bytes_per_selected_frame=_rules_positive(
+            section, "ocr_execution", "disk_bytes_per_selected_frame"
+        ),
+        peak_working_set_bytes=_rules_positive(section, "ocr_execution", "peak_working_set_bytes"),
+        max_selected_frames=_rules_positive(section, "ocr_execution", "max_selected_frames"),
+        max_disk_bytes=_rules_positive(section, "ocr_execution", "max_disk_bytes"),
+        max_peak_bytes=_rules_positive(section, "ocr_execution", "max_peak_bytes"),
+    )
+
+
 def _rules_section(document: Mapping[str, object], key: str) -> Mapping[str, object]:
     section = document.get(key)
     if not isinstance(section, Mapping):
@@ -434,6 +581,18 @@ def _rules_threshold(section: Mapping[str, object], key: str, field: str) -> int
             f"Visual-text {key!r} rules need an integer {field!r} in [0, 100].",
         )
     assert isinstance(value, int)
+    return value
+
+
+def _rules_positive(section: Mapping[str, object], key: str, field: str) -> int:
+    """Read a positive integer resource constant (a ``bool`` is rejected)."""
+
+    value = section.get(field)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise VisualTextError(
+            "visual_text_rules_invalid",
+            f"Visual-text {key!r} rules need a positive integer {field!r}.",
+        )
     return value
 
 

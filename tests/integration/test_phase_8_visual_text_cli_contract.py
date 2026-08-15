@@ -118,6 +118,22 @@ def _install_rules(project_root: Path) -> None:
     destination.write_text(repo_rules.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def _install_rules_with_envelope(project_root: Path, *, max_selected_frames: int) -> None:
+    """Install the shipped rules with a lowered OCR selected-frame envelope ceiling.
+
+    Only the ``ocr_execution.max_selected_frames`` ceiling changes; the detection and
+    sampling rule versions stay identical, so hash-pinned frame-metric fixtures remain
+    valid and a small fixture can trip the Visual-text resource-envelope pause.
+    """
+
+    repo_rules = Path(__file__).resolve().parents[2] / "config" / "visual-text" / "rules.json"
+    document = json.loads(repo_rules.read_text(encoding="utf-8"))
+    document["ocr_execution"]["max_selected_frames"] = max_selected_frames
+    destination = project_root / "config" / "visual-text" / "rules.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(document), encoding="utf-8")
+
+
 def _install_frame_metrics(
     project_root: Path,
     part_id: str,
@@ -581,3 +597,284 @@ def test_stale_frame_fixture_rule_version_blocks_the_attempt(
     assert response["report"]["diagnostics"][0]["reason"] == "visual_text_frame_metrics_stale"
     # A blocked attempt leaves no partial inventory behind.
     assert response["report"]["page_index"]["parts"] == []
+
+
+# --- Ticket 04: the OCR resource confirmation pause and resume --------------
+
+
+def _resume(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    project_root: Path,
+    report_id: str,
+    decision: str | None,
+) -> tuple[int, dict[str, object]]:
+    argv = ["resume-visual-text", report_id]
+    if decision is not None:
+        argv += ["--decision", decision]
+    return _run(monkeypatch, capsys, project_root, argv)
+
+
+def test_detection_pauses_at_the_ocr_resource_confirmation_with_estimates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+
+    code, response = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+
+    assert code == 0
+    # After detection the attempt stops at the OCR resource confirmation pause.
+    assert response["status"] == "awaiting_ocr_resource_confirmation"
+    report = response["report"]
+    assert report["required_decision"] == {
+        "reason": "ocr_resource_confirmation",
+        "decision": "ocr_resource_confirmed",
+    }
+    # The pause presents selected frame counts and conservative time/memory/disk.
+    resource = report["ocr_resource"]
+    assert resource["selected_frame_count"] == 2  # aaa and bbb each select a representative
+    assert resource["estimates"]["seconds"] > 0
+    assert resource["estimates"]["peak_bytes"] > 0
+    assert resource["estimates"]["disk_bytes"] > 0
+    assert resource["within_envelope"] is True
+    # OCR never started: the page index is retained but there are zero visual facts.
+    assert report["ocr_evidence"] is None
+    assert len(report["page_index"]["parts"]) == 1
+    assert report["guarantees"] == _GUARANTEES
+
+
+def test_empty_page_index_needs_no_pause_and_stays_model_acquisition_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # No frame fixture -> nothing to recognize -> no OCR pause, the terminal outcome.
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+
+    code, response = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+
+    assert code == 0
+    assert response["status"] == "model_acquisition_required"
+    assert response["report"]["required_decision"] is None
+    assert response["report"]["ocr_resource"]["selected_frame_count"] == 0
+
+
+def test_affirmative_resume_reaches_model_acquisition_required_with_page_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _, paused = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+    report_id = paused["report"]["report_id"]
+
+    code, response = _resume(monkeypatch, capsys, tmp_path, report_id, "ocr_resource_confirmed")
+
+    assert code == 0
+    # An affirmative decision authorizes OCR; with no eligible model it acquisition-gates,
+    # keeping the retained page index and zero visual facts.
+    assert response["status"] == "model_acquisition_required"
+    report = response["report"]
+    assert report["ocr_evidence"] is None
+    assert len(report["page_index"]["parts"]) == 1
+    # The resume is a fresh attempt that records what it continued from.
+    assert report["report_id"] != report_id
+    assert report["input_evidence"]["resumed_from_report_id"] == report_id
+    assert report["input_evidence"]["resumption_decision"] == "ocr_resource_confirmed"
+    assert report["input_evidence"]["resumed_from_report"]["sha256"]
+
+
+def test_declining_resume_retains_the_page_index_as_partial_with_zero_visual_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _, paused = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+    report_id = paused["report"]["report_id"]
+
+    code, response = _resume(monkeypatch, capsys, tmp_path, report_id, "ocr_declined")
+
+    assert code == 0
+    assert response["status"] == "partial"
+    report = response["report"]
+    # The cheap structural result survives declining OCR: page index and inventory kept.
+    (index,) = report["page_index"]["parts"]
+    assert {page["visual_page_id"] for page in index["pages"]} == {"page-01", "page-02"}
+    assert Path(index["inventory_artifact"]["path"]).exists()
+    assert report["ocr_evidence"] is None
+    assert report["required_decision"] is None
+
+
+def test_resume_requires_an_explicit_decision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _, paused = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+    report_id = paused["report"]["report_id"]
+
+    code, response = _resume(monkeypatch, capsys, tmp_path, report_id, None)
+
+    assert code == 2
+    assert response["reason"] == "visual_text_resume_invalid"
+
+
+def test_resume_rejects_a_report_that_is_not_a_decision_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A no-frame run reaches model_acquisition_required, which is not a resumable pause.
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _, terminal = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+    report_id = terminal["report"]["report_id"]
+
+    code, response = _resume(monkeypatch, capsys, tmp_path, report_id, "ocr_resource_confirmed")
+
+    assert code == 2
+    assert response["reason"] == "visual_text_resume_invalid"
+
+
+def test_resume_rejects_an_unknown_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _install_rules(tmp_path)
+
+    code, response = _resume(
+        monkeypatch, capsys, tmp_path, "0" * 32, "ocr_resource_confirmed"
+    )
+
+    assert code == 2
+    assert response["reason"] == "visual_text_report_invalid"
+
+
+def test_a_plan_over_the_envelope_records_the_resource_envelope_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules_with_envelope(tmp_path, max_selected_frames=1)
+    part_id = plan.source_artifacts[0].source_id
+    # Two text-bearing pages -> two selected frames, over the ceiling of one.
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+
+    code, response = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+
+    assert code == 0
+    assert response["status"] == "resource_envelope_exceeded"
+    report = response["report"]
+    assert report["required_decision"] == {
+        "reason": "resource_envelope_exceeded",
+        "decision": "resource_configuration_changed",
+    }
+    assert report["ocr_resource"]["within_envelope"] is False
+    assert report["diagnostics"][0]["reason"] == "resource_envelope_exceeded"
+    # The candidate/resolution/batch is never silently altered: the page index is
+    # retained exactly, and nothing is published.
+    assert len(report["page_index"]["parts"]) == 1
+    assert not (tmp_path / "outputs").exists()
+
+
+def test_envelope_pause_rejects_the_ocr_confirmation_decision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules_with_envelope(tmp_path, max_selected_frames=1)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _, paused = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+    report_id = paused["report"]["report_id"]
+
+    code, response = _resume(monkeypatch, capsys, tmp_path, report_id, "ocr_resource_confirmed")
+
+    assert code == 2
+    assert response["reason"] == "visual_text_resume_invalid"
+
+
+def test_envelope_resume_after_reconfiguration_reaches_the_ocr_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules_with_envelope(tmp_path, max_selected_frames=1)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _, paused = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+    report_id = paused["report"]["report_id"]
+    # The user reconfigures the approved envelope; the resume picks up the new ceiling.
+    _install_rules_with_envelope(tmp_path, max_selected_frames=10)
+
+    code, response = _resume(
+        monkeypatch, capsys, tmp_path, report_id, "resource_configuration_changed"
+    )
+
+    assert code == 0
+    assert response["status"] == "awaiting_ocr_resource_confirmation"
+    assert response["report"]["input_evidence"]["resumption_decision"] == (
+        "resource_configuration_changed"
+    )
+
+
+def test_resume_never_overwrites_the_paused_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _, paused = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+    paused_path = Path(paused["report"]["report_path"])
+    paused_before = json.loads(paused_path.read_text(encoding="utf-8"))
+
+    _, resumed = _resume(
+        monkeypatch, capsys, tmp_path, paused["report"]["report_id"], "ocr_declined"
+    )
+
+    # Both attempts stay retained side by side; the paused report is byte-for-byte intact.
+    assert Path(resumed["report"]["report_path"]).exists()
+    assert json.loads(paused_path.read_text(encoding="utf-8")) == paused_before
+    assert paused["report"]["report_id"] != resumed["report"]["report_id"]
+
+
+def test_ocr_resource_plan_records_serialized_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+
+    code, response = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+
+    assert code == 0
+    # OCR shares the single heavy-task queue and releases before another heavy model loads.
+    assert response["report"]["ocr_resource"]["serialized_execution"] is True
+    assert response["report"]["guarantees"]["model_execution"] == "not_attempted"

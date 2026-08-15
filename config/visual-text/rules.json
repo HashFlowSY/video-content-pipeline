@@ -12,5 +12,14 @@
   },
   "classification": {
     "version": "phase-08-ocr-item-classification-v1"
+  },
+  "ocr_execution": {
+    "version": "phase-08-ocr-resource-plan-v1",
+    "seconds_per_selected_frame": 3,
+    "disk_bytes_per_selected_frame": 4194304,
+    "peak_working_set_bytes": 2147483648,
+    "max_selected_frames": 2000,
+    "max_disk_bytes": 8589934592,
+    "max_peak_bytes": 25769803776
   }
 }
