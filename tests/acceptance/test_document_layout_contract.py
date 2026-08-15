@@ -21,6 +21,7 @@ REQUIRED_CONTEXTS = {
     "audio-analysis": "audio-analysis/CONTEXT.md",
     "text-analysis": "text-analysis/CONTEXT.md",
     "transcription": "transcription/CONTEXT.md",
+    "visual-text": "visual-text/CONTEXT.md",
 }
 
 REQUIRED_DOMAIN_TERMS = {
@@ -40,6 +41,10 @@ EXPECTED_DEPENDENCIES = {
     "audio-analysis": {"media-foundation", "source-planning", "subtitles"},
     "text-analysis": {"media-foundation", "source-planning", "subtitles"},
     "transcription": {"media-foundation", "source-planning", "subtitles", "audio-analysis"},
+    # visual-text depends on source-planning (transitively media-foundation);
+    # audio-analysis is an optional informing context and does not count as a
+    # hard dependency, and there is no subtitles dependency (ADR 0047).
+    "visual-text": {"media-foundation", "source-planning"},
 }
 
 EXPECTED_DIRECT_DEPENDENCIES = {
@@ -49,6 +54,7 @@ EXPECTED_DIRECT_DEPENDENCIES = {
     "audio-analysis": {"subtitles"},
     "text-analysis": {"subtitles"},
     "transcription": {"subtitles", "audio-analysis"},
+    "visual-text": {"source-planning"},
 }
 
 # Terms introduced by domain work after the Context-layout migration; they are
@@ -80,6 +86,34 @@ POST_MIGRATION_TERMS = {
     "Carried-forward analysis Part",
     # Phase 7 (media-foundation addition)
     "Phase 7 offline transcription-verification boundary",
+    # Phase 8 (visual-text)
+    "Visual-text capability contract",
+    "Controlled offline OCR adapter",
+    "Model-acquisition-required visual-text result",
+    "Deterministic page-change detection",
+    "Versioned frame-sampling rules",
+    "Text-value proxy metric",
+    "Visual page",
+    "Part-local visual page identity",
+    "Page appearance record",
+    "OCR evidence item",
+    "Versioned OCR-item classification rules",
+    "Excluded visual item",
+    "Classification-uncertain visual item",
+    "Suspected embedded-media interval",
+    "Retained frame inventory",
+    "Unpublished internal frame",
+    "Explicit visual-text command boundary",
+    "OCR resource confirmation pause",
+    "Visual-text resource-envelope pause",
+    "Immutable visual-text workspace",
+    "Serialized OCR execution",
+    "OCR-not-requested record",
+    # Phase 8 (text-analysis additions)
+    "Optional visual-text context",
+    "Host-read comment upgrade",
+    # Phase 8 (media-foundation addition)
+    "Phase 8 offline visual-verification boundary",
 }
 
 RUNTIME_TERMS = {
