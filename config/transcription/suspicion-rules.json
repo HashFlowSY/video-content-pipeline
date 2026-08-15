@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "version": "phase-07-suspicion-rules-v1",
+  "calibration_required": true,
+  "detectors": {
+    "vad_coverage": {
+      "calibration_required": true,
+      "minimum_silence_overlap_seconds": {"numerator": 1, "denominator": 1}
+    },
+    "coverage_checks": {
+      "calibration_required": true,
+      "minimum_textless_speech_seconds": {"numerator": 1, "denominator": 1}
+    },
+    "confidence": {
+      "calibration_required": true,
+      "minimum_token_confidence": 0.5
+    },
+    "repetition": {
+      "calibration_required": true,
+      "maximum_consecutive_repetitions": 3
+    },
+    "language_switching": {
+      "calibration_required": true,
+      "maximum_language_switches": 2
+    },
+    "numbers_entities": {
+      "calibration_required": true,
+      "minimum_digit_run": 2
+    }
+  }
+}
