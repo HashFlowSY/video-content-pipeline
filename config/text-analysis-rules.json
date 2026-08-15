@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "phase-06-text-analysis-rules-v1",
+  "cue_rules_version": "phase-06-cue-rules-v1",
+  "prompt_template_version": "phase-06-prompt-template-v1",
+  "output_schema_version": "phase-06-output-schema-v1",
+  "evidence_rules_version": "phase-06-evidence-rules-v1",
+  "controlled_adapter_identity": "phase-06-controlled-text-adapter-v1"
+}

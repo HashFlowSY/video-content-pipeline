@@ -15,10 +15,15 @@ from pathlib import Path
 import pytest
 
 from video_content_pipeline import text_analysis
+from video_content_pipeline.inspection import PlanInspectionEvidence
 from video_content_pipeline.planning import (
+    PlanState,
     RunPlan,
+    create_plan_report,
     inspection_evidence_fingerprints,
+    persist_plan_report,
 )
+from video_content_pipeline.probe import ProbeDocument
 from video_content_pipeline.source import (
     SourceArtifact,
     calculate_disk_headroom,
@@ -34,7 +39,12 @@ from video_content_pipeline.subtitle_pipeline import (
 
 
 def _retained_plan(project_root: Path) -> RunPlan:
-    """Write a minimal retained RunPlan with one snapshotted SourceArtifact."""
+    """Write a confirmed RunPlan and its PlanReport with one SourceArtifact.
+
+    Ticket 02 completes input revalidation, so the retained RunPlan must match a
+    ``ready_for_confirmation`` PlanReport with hash-pinned inspection evidence
+    for the attempt to reach the adapter-availability outcome.
+    """
 
     media_path = project_root / "input" / "source" / "synthetic-media"
     media_path.parent.mkdir(parents=True)
@@ -43,14 +53,32 @@ def _retained_plan(project_root: Path) -> RunPlan:
     artifact = SourceArtifact(
         digest, digest, byte_count, media_path, origin_kind="synthetic_fixture"
     )
+    evidence = PlanInspectionEvidence(
+        source_id=artifact.source_id,
+        structural_document=ProbeDocument(
+            json.dumps({"streams": [{"index": 1, "codec_type": "subtitle"}]})
+        ),
+        coverage_document=ProbeDocument('{"packets": []}'),
+        coverage_by_stream=(),
+        subtitle_tracks=(),
+    )
+    plan_report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=0,
+        configuration_fingerprint="phase-03-fixture",
+        inspection_evidence=(evidence,),
+    )
+    persist_plan_report(plan_report, project_root / "plans")
     plan = RunPlan(
         plan_id="confirmed-phase-6-fixture-plan",
-        report_id="0" * 32,
+        report_id=plan_report.report_id,
         source_artifacts=(artifact,),
         tools=(),
         disk_headroom=calculate_disk_headroom(0),
-        configuration_fingerprint="phase-03-fixture",
-        inspection_evidence_fingerprints=inspection_evidence_fingerprints(()),
+        configuration_fingerprint=plan_report.configuration_fingerprint,
+        inspection_evidence_fingerprints=inspection_evidence_fingerprints((evidence,)),
     )
     plan_path = project_root / "plans" / plan.plan_id / "run-plan.json"
     plan_path.parent.mkdir(parents=True)
@@ -75,6 +103,10 @@ def _retained_subtitle_report(project_root: Path, plan: RunPlan) -> SubtitleCand
     rules_path.parent.mkdir(parents=True, exist_ok=True)
     rules_path.write_text(
         '{"schema_version": 1, "id": "phase-04-fixture-rules"}\n', encoding="utf-8"
+    )
+    text_rules_path = project_root / "config" / "text-analysis-rules.json"
+    text_rules_path.write_text(
+        '{"schema_version": 1, "id": "phase-06-fixture-rules"}\n', encoding="utf-8"
     )
     source_artifact_path = report_path.parent / "source.vtt"
     readable_artifact_path = report_path.parent / "readable.vtt"
