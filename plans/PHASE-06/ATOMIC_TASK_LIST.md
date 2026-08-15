@@ -11,7 +11,7 @@ model, reads user media, accesses a network, or writes `outputs/`.
    contracts with complete input revalidation.
 3. [x] Define versioned prompt, schema, evidence-rule, adapter-projection, and
    deterministic Markdown-renderer contracts.
-4. [ ] Implement cue-bound semantic-boundary adjudication, exactly-once cue
+4. [x] Implement cue-bound semantic-boundary adjudication, exactly-once cue
    ownership, technical-block deduplication, and conservative fallback.
 5. [ ] Validate evidence-bound segment detail, titles, Q&A, people/roles,
    structured details, contradictions, unresolved questions, and diagnostics.
