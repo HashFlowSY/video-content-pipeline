@@ -17,6 +17,11 @@ from video_content_pipeline.audio_derivation import (
     prepare_analysis_audio,
 )
 from video_content_pipeline.coverage import StreamCoverage
+from video_content_pipeline.evidence import (
+    InputEvidence,
+    validated_report_id,
+    write_json_once,
+)
 from video_content_pipeline.external_tools import revalidate_external_tool
 from video_content_pipeline.inspection import PlanInspectionEvidence
 from video_content_pipeline.planning import (
@@ -218,22 +223,6 @@ class AnalysisAudioStreamSelection:
             "disposition": self.disposition,
             "structural_evidence_sha256": self.structural_evidence_sha256,
             "coverage_evidence_sha256": self.coverage_evidence_sha256,
-        }
-
-
-@dataclass(frozen=True)
-class InputEvidence:
-    """Hash-recorded read-only evidence for a required retained input."""
-
-    path: Path
-    sha256: str
-    byte_count: int
-
-    def as_json(self) -> dict[str, object]:
-        return {
-            "path": self.path.as_posix(),
-            "sha256": self.sha256,
-            "byte_count": self.byte_count,
         }
 
 
@@ -1301,12 +1290,12 @@ def _capability_message(capability: str, state: str) -> str:
 
 
 def _validated_report_id(value: str) -> str:
-    try:
-        return uuid.UUID(hex=value).hex
-    except ValueError as error:
-        raise AudioAnalysisError(
+    return validated_report_id(
+        value,
+        invalid_error=lambda: AudioAnalysisError(
             "subtitle_report_invalid", "Subtitle candidate report ID must be a UUID."
-        ) from error
+        ),
+    )
 
 
 def _subtitle_report_path(
@@ -1339,15 +1328,13 @@ def _input_evidence(path: Path) -> InputEvidence:
 
 
 def _write_json_once(path: Path, payload: object) -> None:
-    encoded = json.dumps(payload, sort_keys=True, indent=2) + "\n"
-    if path.exists():
-        if path.read_text(encoding="utf-8") != encoded:
-            raise AudioAnalysisError(
-                "audio_analysis_report_conflict", f"Immutable record differs: {path}"
-            )
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(encoded, encoding="utf-8")
+    write_json_once(
+        path,
+        payload,
+        conflict_error=lambda message: AudioAnalysisError(
+            "audio_analysis_report_conflict", message
+        ),
+    )
 
 
 def derive_vad_part_evidence(

@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from video_content_pipeline.evidence import (
+    InputEvidence,
+    validated_report_id,
+    write_json_once,
+)
 from video_content_pipeline.planning import (
     PlanningDiagnostic,
     PlanningError,
@@ -51,22 +56,6 @@ class TextAnalysisError(ValueError):
     def __init__(self, reason: str, message: str) -> None:
         super().__init__(message)
         self.reason = reason
-
-
-@dataclass(frozen=True)
-class InputEvidence:
-    """Hash-recorded read-only evidence for a required retained input."""
-
-    path: Path
-    sha256: str
-    byte_count: int
-
-    def as_json(self) -> dict[str, object]:
-        return {
-            "path": self.path.as_posix(),
-            "sha256": self.sha256,
-            "byte_count": self.byte_count,
-        }
 
 
 @dataclass(frozen=True)
@@ -131,9 +120,7 @@ class TextAnalysisReport:
             "report_path": self.report_path.as_posix(),
             "input_evidence": {
                 "run_plan": (
-                    self.run_plan_evidence.as_json()
-                    if self.run_plan_evidence is not None
-                    else None
+                    self.run_plan_evidence.as_json() if self.run_plan_evidence is not None else None
                 ),
                 "subtitle_candidate_report": (
                     self.subtitle_report_evidence.as_json()
@@ -253,12 +240,12 @@ def analyze_text(
 
 
 def _validated_report_id(value: str) -> str:
-    try:
-        return uuid.UUID(hex=value).hex
-    except ValueError as error:
-        raise TextAnalysisError(
+    return validated_report_id(
+        value,
+        invalid_error=lambda: TextAnalysisError(
             "subtitle_report_invalid", "Subtitle candidate report ID must be a UUID."
-        ) from error
+        ),
+    )
 
 
 def _subtitle_report_path(
@@ -291,12 +278,8 @@ def _input_evidence(path: Path) -> InputEvidence:
 
 
 def _write_json_once(path: Path, payload: object) -> None:
-    encoded = json.dumps(payload, sort_keys=True, indent=2) + "\n"
-    if path.exists():
-        if path.read_text(encoding="utf-8") != encoded:
-            raise TextAnalysisError(
-                "text_analysis_report_conflict", f"Immutable record differs: {path}"
-            )
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(encoded, encoding="utf-8")
+    write_json_once(
+        path,
+        payload,
+        conflict_error=lambda message: TextAnalysisError("text_analysis_report_conflict", message),
+    )

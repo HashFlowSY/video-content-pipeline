@@ -182,9 +182,7 @@ def test_analyze_text_records_input_evidence_hashes(tmp_path: Path) -> None:
     subtitle_report = _retained_subtitle_report(tmp_path, plan)
     plan_path = tmp_path / "plans" / plan.plan_id / "run-plan.json"
 
-    report = text_analysis.analyze_text(
-        plan.plan_id, subtitle_report.report_id, tmp_path
-    )["report"]
+    report = text_analysis.analyze_text(plan.plan_id, subtitle_report.report_id, tmp_path)["report"]
 
     input_evidence = report["input_evidence"]
     assert input_evidence["run_plan"]["sha256"] == sha256(plan_path.read_bytes()).hexdigest()
@@ -220,9 +218,7 @@ def test_analyze_text_rejects_a_subtitle_report_for_another_plan(tmp_path: Path)
         json.dumps(invalid_report, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
 
-    report = text_analysis.analyze_text(
-        plan.plan_id, subtitle_report.report_id, tmp_path
-    )["report"]
+    report = text_analysis.analyze_text(plan.plan_id, subtitle_report.report_id, tmp_path)["report"]
 
     assert report["status"] == "failed"
     assert report["controlled_text_adapter"]["state"] == "controlled_adapter_unavailable"
@@ -243,9 +239,7 @@ def test_analyze_text_rejects_a_run_plan_identity_mismatch(tmp_path: Path) -> No
     drifted["plan_id"] = "a-different-plan-id"
     plan_path.write_text(json.dumps(drifted, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
-    report = text_analysis.analyze_text(
-        plan.plan_id, subtitle_report.report_id, tmp_path
-    )["report"]
+    report = text_analysis.analyze_text(plan.plan_id, subtitle_report.report_id, tmp_path)["report"]
 
     assert report["status"] == "failed"
     assert report["diagnostics"][0]["reason"] == "run_plan_not_confirmed"
@@ -284,9 +278,7 @@ def test_analyze_text_workspace_is_write_once_immutable(tmp_path: Path) -> None:
     plan = _retained_plan(tmp_path)
     subtitle_report = _retained_subtitle_report(tmp_path, plan)
 
-    report = text_analysis.analyze_text(
-        plan.plan_id, subtitle_report.report_id, tmp_path
-    )["report"]
+    report = text_analysis.analyze_text(plan.plan_id, subtitle_report.report_id, tmp_path)["report"]
     report_path = Path(report["report_path"])
 
     with pytest.raises(text_analysis.TextAnalysisError) as excinfo:
