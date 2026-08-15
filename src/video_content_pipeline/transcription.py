@@ -24,11 +24,10 @@ from enum import StrEnum
 from pathlib import Path
 
 from video_content_pipeline.capabilities import (
-    candidate_eligibility,
-    candidate_eligibility_evidence,
+    CandidateAssessment,
+    assess_candidate,
     capability_state_from_grades,
-    load_registry_document,
-    parse_candidate_matrix,
+    load_candidate_matrix,
 )
 from video_content_pipeline.evidence import (
     InputEvidence,
@@ -68,34 +67,12 @@ class TranscriptionError(ValueError):
 
 
 @dataclass(frozen=True)
-class AsrCandidateAssessment:
-    """The eligibility grade of one registered ASR candidate."""
-
-    candidate_id: str
-    capability: str
-    state: str
-    reason: str | None
-    model_identity: str | None
-    eligibility_evidence: dict[str, object]
-
-    def as_json(self) -> dict[str, object]:
-        return {
-            "candidate_id": self.candidate_id,
-            "capability": self.capability,
-            "state": self.state,
-            "reason": self.reason,
-            "model_identity": self.model_identity,
-            "eligibility_evidence": self.eligibility_evidence,
-        }
-
-
-@dataclass(frozen=True)
 class AsrCapabilityAvailability:
     """The explicit availability state for one provider-neutral ASR capability."""
 
     capability: str
     state: str
-    candidates: tuple[AsrCandidateAssessment, ...]
+    candidates: tuple[CandidateAssessment, ...]
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -174,7 +151,11 @@ def evaluate_asr_capabilities(project_root: Path) -> TranscriptionCapabilityRepo
             registry_evidence=None,
         )
 
-    grouped = _load_asr_candidate_matrix(registry_path)
+    grouped = load_candidate_matrix(
+        registry_path,
+        ASR_CAPABILITIES,
+        invalid_error=lambda message: TranscriptionError("model_registry_invalid", message),
+    )
     capabilities = tuple(
         _availability(capability, grouped[capability], project_root)
         for capability in ASR_CAPABILITIES
@@ -182,56 +163,20 @@ def evaluate_asr_capabilities(project_root: Path) -> TranscriptionCapabilityRepo
     return _report(capabilities, registry_evidence=input_evidence(registry_path))
 
 
-def _load_asr_candidate_matrix(
-    registry_path: Path,
-) -> dict[str, list[Mapping[str, object]]]:
-    decoded = load_registry_document(
-        registry_path,
-        invalid_error=lambda message: TranscriptionError("model_registry_invalid", message),
-    )
-    schema_version = decoded.get("schema_version")
-    if schema_version == 2:
-        return parse_candidate_matrix(
-            decoded,
-            ASR_CAPABILITIES,
-            invalid_error=lambda message: TranscriptionError("model_registry_invalid", message),
-        )
-    if schema_version == 1:
-        # The legacy models list holds no ASR entries; treat it as no candidates.
-        return {capability: [] for capability in ASR_CAPABILITIES}
-    raise TranscriptionError("model_registry_invalid", "Model registry has an invalid schema.")
-
-
 def _availability(
     capability: str, candidates: list[Mapping[str, object]], project_root: Path
 ) -> AsrCapabilityAvailability:
+    # The asset-level model identity assess_candidate binds for an eligible
+    # candidate is what the Independent-model review requirement compares; the
+    # finer identity the spec names binds later at the model-output projection
+    # (ADR 0036, tickets 03+).
     assessments = tuple(
-        _assess_candidate(candidate, capability, project_root) for candidate in candidates
+        assess_candidate(candidate, capability, project_root) for candidate in candidates
     )
     state = capability_state_from_grades(
         (assessment.state, assessment.reason) for assessment in assessments
     )
     return AsrCapabilityAvailability(capability, state, assessments)
-
-
-def _assess_candidate(
-    candidate: Mapping[str, object], capability: str, project_root: Path
-) -> AsrCandidateAssessment:
-    state, reason = candidate_eligibility(candidate, project_root)
-    # At the registry layer a model is identified by its pinned asset hash; the
-    # finer identity the spec names (backend, quantization, decoding, projection
-    # schema, rule versions) binds later, at the model-output projection (ADR
-    # 0036), which enters in tickets 03+. Independence here is asset-level.
-    asset_sha256 = candidate.get("asset_sha256")
-    model_identity = asset_sha256 if state == "eligible" and isinstance(asset_sha256, str) else None
-    return AsrCandidateAssessment(
-        candidate_id=str(candidate["candidate_id"]),
-        capability=capability,
-        state=state,
-        reason=reason,
-        model_identity=model_identity,
-        eligibility_evidence=candidate_eligibility_evidence(candidate, project_root),
-    )
 
 
 def _resolve_independent_review(

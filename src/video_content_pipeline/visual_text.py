@@ -26,11 +26,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from video_content_pipeline.capabilities import (
-    candidate_eligibility,
-    candidate_eligibility_evidence,
+    CandidateAssessment,
+    assess_candidate,
     capability_state_from_grades,
-    load_registry_document,
-    parse_candidate_matrix,
+    load_candidate_matrix,
 )
 from video_content_pipeline.evidence import InputEvidence, input_evidence
 
@@ -61,34 +60,12 @@ class VisualTextError(ValueError):
 
 
 @dataclass(frozen=True)
-class OcrCandidateAssessment:
-    """The eligibility grade of one registered ``ocr_primary`` candidate."""
-
-    candidate_id: str
-    capability: str
-    state: str
-    reason: str | None
-    model_identity: str | None
-    eligibility_evidence: dict[str, object]
-
-    def as_json(self) -> dict[str, object]:
-        return {
-            "candidate_id": self.candidate_id,
-            "capability": self.capability,
-            "state": self.state,
-            "reason": self.reason,
-            "model_identity": self.model_identity,
-            "eligibility_evidence": self.eligibility_evidence,
-        }
-
-
-@dataclass(frozen=True)
 class OcrCapabilityAvailability:
     """The explicit availability state for the ``ocr_primary`` capability."""
 
     capability: str
     state: str
-    candidates: tuple[OcrCandidateAssessment, ...]
+    candidates: tuple[CandidateAssessment, ...]
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -144,7 +121,11 @@ def evaluate_ocr_capabilities(project_root: Path) -> VisualTextCapabilityReport:
             registry_evidence=None,
         )
 
-    grouped = _load_ocr_candidate_matrix(registry_path)
+    grouped = load_candidate_matrix(
+        registry_path,
+        VISUAL_TEXT_CAPABILITIES,
+        invalid_error=lambda message: VisualTextError("model_registry_invalid", message),
+    )
     capabilities = tuple(
         _availability(capability, grouped[capability], project_root)
         for capability in VISUAL_TEXT_CAPABILITIES
@@ -152,54 +133,19 @@ def evaluate_ocr_capabilities(project_root: Path) -> VisualTextCapabilityReport:
     return _report(capabilities, registry_evidence=input_evidence(registry_path))
 
 
-def _load_ocr_candidate_matrix(registry_path: Path) -> dict[str, list[Mapping[str, object]]]:
-    decoded = load_registry_document(
-        registry_path,
-        invalid_error=lambda message: VisualTextError("model_registry_invalid", message),
-    )
-    schema_version = decoded.get("schema_version")
-    if schema_version == 2:
-        return parse_candidate_matrix(
-            decoded,
-            VISUAL_TEXT_CAPABILITIES,
-            invalid_error=lambda message: VisualTextError("model_registry_invalid", message),
-        )
-    if schema_version == 1:
-        # A legacy schema-1 registry (a models list, no candidate matrix) holds
-        # no OCR entries; treat it as no candidates rather than rejecting it.
-        return {capability: [] for capability in VISUAL_TEXT_CAPABILITIES}
-    raise VisualTextError("model_registry_invalid", "Model registry has an invalid schema.")
-
-
 def _availability(
     capability: str, candidates: list[Mapping[str, object]], project_root: Path
 ) -> OcrCapabilityAvailability:
+    # The asset-level model identity for an eligible OCR candidate binds later at
+    # the OCR output projection (ADR 0036, ticket 05); assess_candidate exposes
+    # it only when eligible.
     assessments = tuple(
-        _assess_candidate(candidate, capability, project_root) for candidate in candidates
+        assess_candidate(candidate, capability, project_root) for candidate in candidates
     )
     state = capability_state_from_grades(
         (assessment.state, assessment.reason) for assessment in assessments
     )
     return OcrCapabilityAvailability(capability, state, assessments)
-
-
-def _assess_candidate(
-    candidate: Mapping[str, object], capability: str, project_root: Path
-) -> OcrCandidateAssessment:
-    state, reason = candidate_eligibility(candidate, project_root)
-    # At the registry layer a model is identified by its pinned asset hash; the
-    # finer identity (backend, projection schema, rule versions) binds later at
-    # the OCR output projection (ADR 0036), which enters in ticket 05.
-    asset_sha256 = candidate.get("asset_sha256")
-    model_identity = asset_sha256 if state == "eligible" and isinstance(asset_sha256, str) else None
-    return OcrCandidateAssessment(
-        candidate_id=str(candidate["candidate_id"]),
-        capability=capability,
-        state=state,
-        reason=reason,
-        model_identity=model_identity,
-        eligibility_evidence=candidate_eligibility_evidence(candidate, project_root),
-    )
 
 
 def _report(

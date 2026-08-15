@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Collection, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from video_content_pipeline.evidence import input_evidence
@@ -183,3 +184,82 @@ def parse_candidate_matrix(
         if capability in grouped:
             grouped[capability].append(candidate)
     return grouped
+
+
+@dataclass(frozen=True)
+class CandidateAssessment:
+    """The eligibility grade of one registered model candidate.
+
+    Shared across Contexts that evaluate a provider-neutral capability from the
+    registry (transcription's ``asr_*``, visual-text's ``ocr_primary``): the
+    fields and their JSON shape are identical, so they live here rather than
+    being re-declared per Context. The report a Context wraps around these
+    assessments -- its statuses, diagnostics, and guarantees -- stays
+    Context-local.
+    """
+
+    candidate_id: str
+    capability: str
+    state: str
+    reason: str | None
+    model_identity: str | None
+    eligibility_evidence: dict[str, object]
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "candidate_id": self.candidate_id,
+            "capability": self.capability,
+            "state": self.state,
+            "reason": self.reason,
+            "model_identity": self.model_identity,
+            "eligibility_evidence": self.eligibility_evidence,
+        }
+
+
+def assess_candidate(
+    candidate: Mapping[str, object], capability: str, project_root: Path
+) -> CandidateAssessment:
+    """Grade one registry candidate and bind its asset-level model identity.
+
+    At the registry layer a model is identified by its pinned asset hash; the
+    finer identity a Context may later name (backend, quantization, decoding,
+    projection schema, rule versions) binds at the model-output projection
+    (ADR 0036), not here. Independence at this layer is asset-level, so a
+    ``model_identity`` is exposed only for an eligible candidate.
+    """
+
+    state, reason = candidate_eligibility(candidate, project_root)
+    asset_sha256 = candidate.get("asset_sha256")
+    model_identity = asset_sha256 if state == "eligible" and isinstance(asset_sha256, str) else None
+    return CandidateAssessment(
+        candidate_id=str(candidate["candidate_id"]),
+        capability=capability,
+        state=state,
+        reason=reason,
+        model_identity=model_identity,
+        eligibility_evidence=candidate_eligibility_evidence(candidate, project_root),
+    )
+
+
+def load_candidate_matrix(
+    registry_path: Path,
+    capabilities: Collection[str],
+    *,
+    invalid_error: Callable[[str], Exception],
+) -> dict[str, list[Mapping[str, object]]]:
+    """Load and group the requested capabilities, tolerating the legacy schema.
+
+    A schema-2 registry is validated and grouped (:func:`parse_candidate_matrix`).
+    A legacy schema-1 registry (a ``models`` list, no candidate matrix) is a
+    valid registry that simply carries no candidates for these capabilities, so
+    it yields empty groups rather than an error. Any other schema is rejected
+    through the caller's ``invalid_error`` factory.
+    """
+
+    decoded = load_registry_document(registry_path, invalid_error=invalid_error)
+    schema_version = decoded.get("schema_version")
+    if schema_version == 2:
+        return parse_candidate_matrix(decoded, capabilities, invalid_error=invalid_error)
+    if schema_version == 1:
+        return {capability: [] for capability in capabilities}
+    raise invalid_error("Model registry has an invalid schema.")
