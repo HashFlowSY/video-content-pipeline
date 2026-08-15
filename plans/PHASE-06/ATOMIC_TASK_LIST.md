@@ -13,7 +13,7 @@ model, reads user media, accesses a network, or writes `outputs/`.
    deterministic Markdown-renderer contracts.
 4. [x] Implement cue-bound semantic-boundary adjudication, exactly-once cue
    ownership, technical-block deduplication, and conservative fallback.
-5. [ ] Validate evidence-bound segment detail, titles, Q&A, people/roles,
+5. [x] Validate evidence-bound segment detail, titles, Q&A, people/roles,
    structured details, contradictions, unresolved questions, and diagnostics.
 6. [ ] Aggregate Part-local chapters and collection summaries while preserving
    limitations, unavailable Parts, and source-language boundaries.
