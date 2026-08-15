@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "phase-08-visual-text-rules",
+  "detection": {
+    "version": "phase-08-page-change-detection-v1"
+  },
+  "sampling": {
+    "version": "phase-08-frame-sampling-v1"
+  },
+  "classification": {
+    "version": "phase-08-ocr-item-classification-v1"
+  }
+}

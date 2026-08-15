@@ -51,6 +51,16 @@ _OFFLINE_GUARANTEES: dict[str, str] = {
 }
 
 
+def offline_guarantees() -> dict[str, str]:
+    """Return a fresh copy of the offline guarantees every visual-text record asserts.
+
+    Both the capability evaluation and the command boundary assert the same block,
+    so it lives here once and callers copy it into their own report JSON.
+    """
+
+    return dict(_OFFLINE_GUARANTEES)
+
+
 class VisualTextError(ValueError):
     """A visual-text evaluation failure that names a stable diagnostic reason."""
 
@@ -98,7 +108,7 @@ class VisualTextCapabilityReport:
                 if self.model_registry_evidence is not None
                 else None
             ),
-            "guarantees": dict(_OFFLINE_GUARANTEES),
+            "guarantees": offline_guarantees(),
         }
 
 

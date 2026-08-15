@@ -72,6 +72,8 @@ from video_content_pipeline.url_policy import (
     URLPolicyError,
     authorize_public_url,
 )
+from video_content_pipeline.visual_text import VisualTextError
+from video_content_pipeline.visual_text_command import run_visual_text
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -163,6 +165,14 @@ def _parser() -> argparse.ArgumentParser:
     resume_enhancement_command.add_argument("report_id")
     resume_enhancement_command.add_argument("--decision", metavar="DECISION")
     resume_enhancement_command.add_argument("--json", action="store_true")
+    visual_text_command = subcommands.add_parser("visual-text")
+    visual_text_command.add_argument("plan_id")
+    visual_text_command.add_argument("--all", action="store_true")
+    visual_text_command.add_argument("--part", action="append", default=[], metavar="PART_ID")
+    visual_text_command.add_argument(
+        "--range", action="append", default=[], metavar="PART_ID:START-END"
+    )
+    visual_text_command.add_argument("--json", action="store_true")
     return parser
 
 
@@ -296,6 +306,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             result = resume_enhancement(arguments.report_id, arguments.decision, _project_root())
         except EnhancementError as error:
+            print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
+            return 2
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "visual-text":
+        try:
+            result = run_visual_text(
+                arguments.plan_id,
+                _project_root(),
+                all_parts=arguments.all,
+                part_selectors=tuple(arguments.part),
+                range_selectors=tuple(getattr(arguments, "range")),
+            )
+        except VisualTextError as error:
             print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
             return 2
         print(json.dumps(result, sort_keys=True))
