@@ -175,14 +175,10 @@ def _within_an_appearance(pts: ExactTime, page: VisualPage) -> bool:
     be equal for a single-frame appearance), so the check is inclusive on both ends.
     """
 
-    return any(
-        appearance.start <= pts and pts <= appearance.end for appearance in page.appearances
-    )
+    return any(appearance.start <= pts and pts <= appearance.end for appearance in page.appearances)
 
 
-def _reject(
-    item: ProjectedOcrItem, part_id: str, reason: str, message: str
-) -> RejectedOcrItem:
+def _reject(item: ProjectedOcrItem, part_id: str, reason: str, message: str) -> RejectedOcrItem:
     return RejectedOcrItem(
         part_id=part_id,
         visual_page_id=item.visual_page_id,

@@ -298,6 +298,32 @@ def test_analyze_text_report_id_is_a_fresh_uuid_hex_per_attempt(tmp_path: Path) 
     assert Path(first["report"]["workspace_path"]) != Path(second["report"]["workspace_path"])
 
 
+def test_analyze_text_records_the_ocr_not_requested_absence_record(tmp_path: Path) -> None:
+    """A run that never enables visual-text records ``ocr=not_requested``.
+
+    Phase 8 exit gate (absence semantics): the base text-analysis report makes the
+    absence of visual evidence explicit -- no frames are extracted, no visual
+    facts are produced, and picture-only content is recorded as unanalyzed visual
+    content rather than implied as covered.
+    """
+
+    plan = _retained_plan(tmp_path)
+    subtitle_report = _retained_subtitle_report(tmp_path, plan)
+
+    report = text_analysis.analyze_text(plan.plan_id, subtitle_report.report_id, tmp_path)["report"]
+
+    assert report["visual_text"] == {
+        "ocr": "not_requested",
+        "frame_extraction": "not_attempted",
+        "detection": "not_attempted",
+        "visual_facts": [],
+        "picture_only_content": "unanalyzed_visual_content",
+    }
+    # The offline guarantees still assert no frame extraction was attempted.
+    assert report["guarantees"]["outputs_publication"] == "not_attempted"
+    assert not (tmp_path / "outputs").exists()
+
+
 def test_analyze_text_rejects_a_subtitle_report_for_another_plan(tmp_path: Path) -> None:
     plan = _retained_plan(tmp_path)
     subtitle_report = _retained_subtitle_report(tmp_path, plan)

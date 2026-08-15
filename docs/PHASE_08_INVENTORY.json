@@ -1,0 +1,361 @@
+{
+  "schema_version": 1,
+  "phase": 8,
+  "status": "in_progress",
+  "ticket_09_verification": "passed_offline",
+  "phase_exit_gates": "all_confirmed",
+  "phase_completion_note": "Ticket 09 closes Phase 8 offline: the nine exit gates below (the five 阶段 8 退出门禁 from docs/PHASED_EXECUTION_PLAN.md plus the four derived gates named in docs/PHASE_08_SPECIFICATION.md) are each mapped to named proving tests and cross-linked to a summary boolean, and every ticket-09 minimum scenario is mapped in coverage_map. Marking Phase 8 `completed` in project-state.json is a separate maintainer governance decision, intentionally not performed here; the phase plan's original 'evaluate local OCR candidates' work item is an explicitly recorded out-of-scope deviation (see open_requirements).",
+  "recorded_at": "2026-08-16T01:27:25+0800",
+  "project_root": "/Users/apple/Desktop/wp/video-content-pipeline",
+  "summary": {
+    "default_runs_extract_no_frames_confirmed": true,
+    "ocr_not_requested_record_when_visual_text_off_confirmed": true,
+    "formal_outputs_contain_no_screenshots_confirmed": true,
+    "frames_stay_workspace_internal_unpublished_confirmed": true,
+    "no_visual_facts_when_ocr_off_confirmed": true,
+    "declined_ocr_retains_page_index_with_zero_facts_confirmed": true,
+    "every_ocr_item_carries_part_pts_page_confidence_confirmed": true,
+    "ocr_enters_only_through_versioned_projection_confirmed": true,
+    "invalid_projection_fails_attempt_model_output_invalid_confirmed": true,
+    "projected_items_gated_with_structured_rejections_confirmed": true,
+    "no_general_vision_model_is_a_required_dependency_confirmed": true,
+    "scope_is_always_explicit_confirmed": true,
+    "all_frames_are_inventoried_with_reasons_confirmed": true,
+    "page_identity_is_part_local_with_appearances_confirmed": true,
+    "all_detection_sampling_classification_rules_versioned_confirmed": true,
+    "classification_distinguishes_page_speaker_background_confirmed": true,
+    "platform_noise_excluded_retained_as_non_evidence_confirmed": true,
+    "low_confidence_marks_classification_uncertain_never_forced_confirmed": true,
+    "embedded_media_marked_low_confidence_with_recorded_basis_confirmed": true,
+    "picture_only_versus_picture_plus_audio_basis_recorded_confirmed": true,
+    "both_ocr_pause_decisions_and_resource_envelope_pause_confirmed": true,
+    "model_acquisition_required_retains_page_index_confirmed": true,
+    "host_read_comment_upgrade_recorded_with_basis_confirmed": true,
+    "affected_parts_reanalyzed_rest_carried_forward_confirmed": true,
+    "immutable_workspaces_resume_by_report_id_only_confirmed": true,
+    "mixed_chinese_english_preserved_confirmed": true,
+    "multi_part_collections_covered_confirmed": true,
+    "no_model_download_or_invocation_confirmed": true,
+    "no_frame_extraction_attempted_confirmed": true,
+    "no_outputs_published_confirmed": true
+  },
+  "summary_note": "The `summary` block is the conventional offline-boundary declaration, mirroring prior phase inventories. The machine-checkable proof lives in `exit_gates` (each mapped to its plan/derived requirement and to named proving tests, cross-linked to its summary boolean via `summary_key`) and in `coverage_map` (each ticket-09 minimum scenario mapped to named tests whose existence is asserted by tests/acceptance/test_phase_08_inventory.py).",
+  "exit_gates": [
+    {
+      "id": "default_runs_extract_no_frames",
+      "requirement": "默认运行不会抽帧。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "default_runs_extract_no_frames_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_6_text_analysis_workspace.py::test_analyze_text_records_the_ocr_not_requested_absence_record",
+        "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_reads_no_source_media"
+      ]
+    },
+    {
+      "id": "formal_outputs_contain_no_screenshots",
+      "requirement": "正式输出没有截图。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "formal_outputs_contain_no_screenshots_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_8_visual_text_cli_contract.py::test_page_index_retains_every_frame_with_a_reason_unpublished",
+        "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_reads_no_source_media"
+      ]
+    },
+    {
+      "id": "no_visual_facts_when_ocr_off",
+      "requirement": "OCR 关闭时没有视觉事实。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "no_visual_facts_when_ocr_off_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_8_visual_text_cli_contract.py::test_declining_resume_retains_the_page_index_as_partial_with_zero_visual_facts",
+        "tests/integration/test_phase_6_text_analysis_workspace.py::test_analyze_text_records_the_ocr_not_requested_absence_record"
+      ]
+    },
+    {
+      "id": "ocr_item_carries_part_pts_page_confidence",
+      "requirement": "OCR 结果有 Part、PTS、页面 ID 和置信度。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "every_ocr_item_carries_part_pts_page_confidence_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_projects_and_gates_items_to_complete",
+        "tests/unit/test_visual_text_contracts.py::test_projection_projects_valid_items_and_preserves_mixed_language",
+        "tests/unit/test_visual_text_contracts.py::test_projection_rejects_a_missing_required_field"
+      ]
+    },
+    {
+      "id": "no_required_general_vision_model",
+      "requirement": "不引入 Qwen3-VL 等通用视觉模型作为必需依赖。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "no_general_vision_model_is_a_required_dependency_confirmed",
+      "proving_tests": [
+        "tests/unit/test_visual_text_capabilities.py::test_contract_is_ocr_primary_only",
+        "tests/unit/test_visual_text_capabilities.py::test_no_general_vision_model_capability_is_evaluated"
+      ]
+    },
+    {
+      "id": "scope_is_always_explicit",
+      "requirement": "Scope is always explicit (unscoped invocation errors).",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "scope_is_always_explicit_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_without_scope_errors_and_creates_no_workspace"
+      ]
+    },
+    {
+      "id": "all_frames_are_inventoried",
+      "requirement": "All extracted frames are inventoried with their selection reason.",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "all_frames_are_inventoried_with_reasons_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_8_visual_text_cli_contract.py::test_page_index_retains_every_frame_with_a_reason_unpublished",
+        "tests/unit/test_visual_page_index.py::test_every_frame_is_retained_once_and_transition_frames_belong_to_no_page"
+      ]
+    },
+    {
+      "id": "page_identity_is_part_local",
+      "requirement": "Page identity is Part-local with appearance records.",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "page_identity_is_part_local_with_appearances_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_8_visual_text_cli_contract.py::test_page_index_records_part_local_pages_and_appearances",
+        "tests/unit/test_visual_page_index.py::test_no_cross_part_correlation_page_ids_restart_per_part"
+      ]
+    },
+    {
+      "id": "all_rules_are_versioned",
+      "requirement": "All detection, sampling, and classification rules are versioned.",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "all_detection_sampling_classification_rules_versioned_confirmed",
+      "proving_tests": [
+        "tests/unit/test_visual_text_contracts.py::test_revalidate_binds_the_two_versioned_identities",
+        "tests/unit/test_visual_page_index.py::test_page_index_rules_load_from_the_repository_rules"
+      ]
+    }
+  ],
+  "exit_gates_source": "docs/PHASED_EXECUTION_PLAN.md :: ### 阶段 8：可选 visual-text :: 退出门禁 (plan gates) + docs/PHASE_08_SPECIFICATION.md :: Offline Test Contract (derived gates)",
+  "derived_gate_ids": [
+    "scope_is_always_explicit",
+    "all_frames_are_inventoried",
+    "page_identity_is_part_local",
+    "all_rules_are_versioned"
+  ],
+  "guarantees_asserted_at_cli": {
+    "model_execution": "not_attempted",
+    "model_acquisition": "not_attempted",
+    "network_access": "not_attempted",
+    "frame_extraction": "not_attempted",
+    "outputs_publication": "not_attempted",
+    "asserted_by": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_all_scope_reaches_model_acquisition_required",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_affirmative_resume_reaches_model_acquisition_required_with_page_index",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_ocr_resource_plan_records_serialized_execution",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_projects_and_gates_items_to_complete",
+      "tests/integration/test_visual_reanalysis_cli_contract.py::test_visual_reanalysis_resegments_and_owns_facts",
+      "tests/unit/test_visual_text_capabilities.py::test_missing_registry_requires_acquisition"
+    ]
+  },
+  "coverage_map": {
+    "absence_semantics": [
+      "tests/integration/test_phase_6_text_analysis_workspace.py::test_analyze_text_records_the_ocr_not_requested_absence_record"
+    ],
+    "unscoped_invocation_error": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_without_scope_errors_and_creates_no_workspace"
+    ],
+    "each_scope_form": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_all_scope_reaches_model_acquisition_required",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_part_scope_records_full_relative_coverage",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_range_scope_is_part_relative"
+    ],
+    "revalidation_drift": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_blocks_on_inspection_evidence_drift",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_blocks_on_rules_drift",
+      "tests/integration/test_visual_reanalysis_cli_contract.py::test_visual_report_from_a_different_plan_fails"
+    ],
+    "sampling_determinism": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_page_index_is_deterministic_across_attempts",
+      "tests/unit/test_visual_page_index.py::test_same_input_and_rules_produce_identical_json"
+    ],
+    "full_frame_retention_with_reasons": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_page_index_retains_every_frame_with_a_reason_unpublished",
+      "tests/unit/test_visual_page_index.py::test_every_frame_is_retained_once_and_transition_frames_belong_to_no_page"
+    ],
+    "part_local_page_identity_and_reappearance": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_page_index_records_part_local_pages_and_appearances",
+      "tests/unit/test_visual_page_index.py::test_reappearance_reuses_the_page_id_and_records_every_appearance",
+      "tests/unit/test_visual_page_index.py::test_no_cross_part_correlation_page_ids_restart_per_part"
+    ],
+    "projection_invalidity": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_invalidates_the_attempt_on_malformed_output",
+      "tests/unit/test_visual_text_contracts.py::test_projection_rejects_a_non_object_output"
+    ],
+    "item_gate_rejections": {
+      "out_of_coverage": "tests/unit/test_visual_text_gates.py::test_item_past_coverage_is_rejected_out_of_coverage",
+      "unknown_page": "tests/unit/test_visual_text_gates.py::test_item_naming_an_unknown_page_is_rejected",
+      "page_time_mismatch": "tests/unit/test_visual_text_gates.py::test_item_timed_outside_its_pages_appearances_is_rejected"
+    },
+    "item_gate_rejection_at_cli": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_rejects_an_out_of_gate_item_to_partial"
+    ],
+    "classification_classes": {
+      "page_text": "tests/unit/test_visual_text_classification.py::test_default_high_confidence_item_is_page_text",
+      "speaker_supplement": "tests/unit/test_visual_text_classification.py::test_speaker_supplement_marker_classifies_as_speaker_supplement",
+      "background_ui": "tests/unit/test_visual_text_classification.py::test_background_ui_marker_classifies_as_background_ui",
+      "classification_uncertain": "tests/unit/test_visual_text_classification.py::test_low_confidence_item_is_uncertain_and_never_forced",
+      "excluded": "tests/unit/test_visual_text_classification.py::test_platform_noise_is_excluded_non_evidence_with_its_kind"
+    },
+    "classification_at_cli": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_classification_assigns_page_categories_deterministically",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_classification_excludes_platform_noise_as_retained_non_evidence",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_classification_marks_low_confidence_uncertain_never_forced"
+    ],
+    "both_ocr_pause_decisions": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_affirmative_resume_reaches_model_acquisition_required_with_page_index",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_declining_resume_retains_the_page_index_as_partial_with_zero_visual_facts",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_detection_pauses_at_the_ocr_resource_confirmation_with_estimates"
+    ],
+    "resource_envelope_pause": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_a_plan_over_the_envelope_records_the_resource_envelope_pause",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_envelope_pause_rejects_the_ocr_confirmation_decision",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_envelope_resume_after_reconfiguration_reaches_the_ocr_pause"
+    ],
+    "model_acquisition_required_with_page_index": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_affirmative_resume_reaches_model_acquisition_required_with_page_index",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_empty_page_index_needs_no_pause_and_stays_model_acquisition_required"
+    ],
+    "embedded_media_basis_provenance": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_embedded_media_is_marked_picture_only_without_audio",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_embedded_media_uses_picture_plus_audio_with_a_revalidated_report",
+      "tests/unit/test_visual_text_suspicion.py::test_a_sustained_transition_run_is_flagged_picture_only",
+      "tests/unit/test_visual_text_suspicion.py::test_supplied_audio_makes_the_basis_picture_plus_audio"
+    ],
+    "host_read_comment_upgrade": [
+      "tests/integration/test_visual_reanalysis_cli_contract.py::test_host_read_comment_is_upgraded_with_citations_and_leaves_visual_report_untouched"
+    ],
+    "affected_part_selection_and_carry_forward": [
+      "tests/integration/test_visual_reanalysis_cli_contract.py::test_visual_reanalysis_resegments_and_owns_facts",
+      "tests/integration/test_visual_reanalysis_cli_contract.py::test_absence_of_visual_evidence_carries_everything_forward"
+    ],
+    "immutability": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_attempts_never_overwrite_each_other",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_resume_never_overwrites_the_paused_report"
+    ],
+    "statuses": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_projects_and_gates_items_to_complete",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_rejects_an_out_of_gate_item_to_partial",
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_invalidates_the_attempt_on_malformed_output"
+    ],
+    "hashes": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_rejects_a_fixture_not_bound_to_selected_frames",
+      "tests/unit/test_visual_text_contracts.py::test_input_manifest_is_order_independent"
+    ],
+    "mixed_chinese_english": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_confirmed_ocr_preserves_mixed_chinese_english_text",
+      "tests/unit/test_visual_text_contracts.py::test_projection_projects_valid_items_and_preserves_mixed_language"
+    ],
+    "multi_part_collections": [
+      "tests/integration/test_phase_8_visual_text_cli_contract.py::test_visual_text_all_scope_covers_multiple_parts"
+    ]
+  },
+  "created_or_modified": [
+    ".scratch/phase-08-optional-visual-text/spec.md",
+    ".scratch/phase-08-optional-visual-text/issues/01-register-ocr-capability-contract-and-eligibility.md",
+    ".scratch/phase-08-optional-visual-text/issues/09-prove-the-phase-8-cli-contract-offline.md",
+    "config/visual-text/rules.json",
+    "config/visual-text/ocr-projection-schema.json",
+    "config/visual-text/controlled-ocr-adapter.json",
+    "config/text-analysis/host-read-upgrade.json",
+    "docs/PHASE_08_INVENTORY.json",
+    "docs/PHASE_08_SPECIFICATION.md",
+    "docs/adr/0047-introduce-a-visual-text-context-with-deterministic-detection-and-ocr-only-model-capability.md",
+    "docs/adr/0048-keep-visual-page-identity-part-local.md",
+    "docs/adr/0049-separate-visual-evidence-classification-from-fact-upgrade.md",
+    "docs/contexts/visual-text/CONTEXT.md",
+    "models/registry.json",
+    "src/video_content_pipeline/cli.py",
+    "src/video_content_pipeline/host_read_upgrade.py",
+    "src/video_content_pipeline/text_analysis.py",
+    "src/video_content_pipeline/text_generation.py",
+    "src/video_content_pipeline/visual_page_index.py",
+    "src/video_content_pipeline/visual_reanalysis.py",
+    "src/video_content_pipeline/visual_text.py",
+    "src/video_content_pipeline/visual_text_classification.py",
+    "src/video_content_pipeline/visual_text_command.py",
+    "src/video_content_pipeline/visual_text_contracts.py",
+    "src/video_content_pipeline/visual_text_gates.py",
+    "src/video_content_pipeline/visual_text_suspicion.py",
+    "tests/acceptance/test_phase_08_inventory.py",
+    "tests/integration/test_phase_6_text_analysis_workspace.py",
+    "tests/integration/test_phase_8_visual_text_cli_contract.py",
+    "tests/integration/test_visual_reanalysis_cli_contract.py",
+    "tests/unit/test_visual_page_index.py",
+    "tests/unit/test_visual_reanalysis.py",
+    "tests/unit/test_visual_text_capabilities.py",
+    "tests/unit/test_visual_text_classification.py",
+    "tests/unit/test_visual_text_command.py",
+    "tests/unit/test_visual_text_contracts.py",
+    "tests/unit/test_visual_text_gates.py",
+    "tests/unit/test_visual_text_suspicion.py"
+  ],
+  "execution_records": [
+    {
+      "ticket": "09",
+      "status": "passed",
+      "commands": [
+        "source .venv/bin/activate; python -m pytest -q",
+        "source .venv/bin/activate; ruff check src tests",
+        "source .venv/bin/activate; ruff format --check src tests",
+        "source .venv/bin/activate; mypy src"
+      ],
+      "results": {
+        "pytest_full": "700 passed",
+        "closure_note": "Ticket 09 adds the base-report OCR-not-requested absence record (the run that never enables visual-text), one integration assertion for it, and this machine-checkable inventory with tests/acceptance/test_phase_08_inventory.py. Per the Phase 8 Testing Decisions, the deterministic core (page-change detection, sampling, page fingerprinting and appearance records, projection validation, item gates, classification rules, embedded-media basis provenance) is proven at the unit seam because the visual-text CLI cannot execute a model offline (it stops at model_acquisition_required); the CLI contract is proven end-to-end with hash-pinned synthetic fixtures and the Controlled offline OCR adapter. A closure-time `ruff format` pass reflowed ten already-committed Phase 8 files (formatting-only, no behaviour change) so `ruff format --check` is green."
+      },
+      "resource_bounds": {
+        "network_or_downloads": false,
+        "ffmpeg_or_ffprobe_executed": false,
+        "model_execution": false,
+        "user_media_accessed": false,
+        "outputs_written": false
+      }
+    }
+  ],
+  "external_reads": [],
+  "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted.",
+  "implementation_audit": {
+    "head": "83069a8",
+    "ticket_status": {
+      "01": "resolved",
+      "02": "resolved",
+      "03": "resolved",
+      "04": "resolved",
+      "05": "resolved",
+      "06": "resolved",
+      "07": "resolved",
+      "08": "resolved",
+      "09": "resolved"
+    },
+    "completed_work": [
+      "Provider-neutral single-capability `ocr_primary` contract with offline registry eligibility (RapidOCR registered metadata-only), the immutable visual-text workspace, and the `vcp visual-text` / `resume-visual-text` CLI with explicit-scope enforcement, full input revalidation, deterministic Part-local page indexing and adaptive sampling, and the OCR resource confirmation pause plus resource-envelope pause.",
+      "Versioned OCR adapter, output projection, and item gates (Part/PTS/page/confidence completeness with structured rejections), deterministic OCR-item classification (page text / speaker supplement / background UI with retained non-evidence and `classification_uncertain`), and low-confidence embedded-media suspicion with recorded picture-only versus picture-plus-audio basis.",
+      "Text-analysis affected-Part re-analysis consuming a retained visual-text report (page changes inform boundaries, OCR items gain exactly-once segment ownership) and the text-analysis-owned host-read comment upgrade with recorded basis, plus the base-report OCR-not-requested absence record, all proven offline with the machine-checkable exit-gate inventory."
+    ],
+    "open_requirements": [
+      "Real-model local OCR run, language coverage, and memory validation for the registered OCR research candidate remains a recorded deviation, deferred to a separately authorized model-prototype session (out of scope per the Phase 8 spec, including the phase plan's original 'evaluate local OCR candidates' work item).",
+      "Registry OCR eligibility fields are deliberately bare pending the real assets the offline boundary forbids.",
+      "Marking Phase 8 `completed` in project-state.json (and any completion report) is a maintainer governance decision, intentionally not performed by ticket 09."
+    ],
+    "current_head_verification": {
+      "pytest": "700 passed",
+      "production_validated": false
+    }
+  }
+}

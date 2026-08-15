@@ -273,9 +273,7 @@ def _expanded_selectors(
                 "No retained Part has determinate video coverage to sample.",
             )
         return covered
-    return tuple(
-        selector for selector in selectors if not isinstance(selector, AllScope)
-    )
+    return tuple(selector for selector in selectors if not isinstance(selector, AllScope))
 
 
 def _part_coverage(
@@ -915,9 +913,7 @@ def _revalidate_inputs(
         raise VisualTextError(
             "run_plan_not_confirmed", "RunPlan identity does not match the requested plan ID."
         )
-    confirmed_report_path = (
-        project_root / "plans" / "reports" / plan.report_id / "plan-report.json"
-    )
+    confirmed_report_path = project_root / "plans" / "reports" / plan.report_id / "plan-report.json"
     confirmed_report = load_plan_report(confirmed_report_path)
     if not confirmed_plan_matches(confirmed_report, plan):
         raise VisualTextError(

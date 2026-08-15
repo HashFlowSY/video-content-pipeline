@@ -206,12 +206,8 @@ def test_same_input_and_rules_produce_identical_json() -> None:
 
 
 def test_frames_are_ordered_by_pts_before_detection() -> None:
-    ordered = build_part_page_index(
-        "part-1", (_frame(0, "aaa"), _frame(1, "aaa")), _RULES
-    )
-    shuffled = build_part_page_index(
-        "part-1", (_frame(1, "aaa"), _frame(0, "aaa")), _RULES
-    )
+    ordered = build_part_page_index("part-1", (_frame(0, "aaa"), _frame(1, "aaa")), _RULES)
+    shuffled = build_part_page_index("part-1", (_frame(1, "aaa"), _frame(0, "aaa")), _RULES)
     assert ordered.as_json() == shuffled.as_json()
 
 

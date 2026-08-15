@@ -329,6 +329,23 @@ class AudioAnalysisBinding:
         }
 
 
+# The OCR-not-requested record. Vocabulary is owned by the Visual-Text Context
+# (see CONTEXT-MAP.md and docs/contexts/visual-text/CONTEXT.md), but a plain
+# text-analysis run is precisely the "run that never enables visual-text": it
+# extracts no frames, runs no detection, and produces no visual facts, and any
+# on-screen picture-only content is left recorded as unanalyzed visual content
+# rather than implied as covered (Phase 8 spec, User Story 1). The strings are
+# reproduced here rather than imported so the Phase 6 core keeps no dependency on
+# the Phase 8 visual-text module.
+_OCR_NOT_REQUESTED_RECORD: dict[str, object] = {
+    "ocr": "not_requested",
+    "frame_extraction": "not_attempted",
+    "detection": "not_attempted",
+    "visual_facts": [],
+    "picture_only_content": "unanalyzed_visual_content",
+}
+
+
 @dataclass(frozen=True)
 class TextAnalysisReport:
     """Immutable machine-readable result of one text-analysis attempt."""
@@ -413,6 +430,9 @@ class TextAnalysisReport:
             "unsupported_item_count": self.unsupported_item_count,
             "restricted_raw_output": [output.as_json() for output in self.restricted_raw_output],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
+            # A run that never enables visual-text records the OCR-not-requested
+            # record so absence is explicit rather than implied.
+            "visual_text": dict(_OCR_NOT_REQUESTED_RECORD),
             "guarantees": {
                 "asr_or_ocr": "not_attempted",
                 "external_knowledge": "not_used",

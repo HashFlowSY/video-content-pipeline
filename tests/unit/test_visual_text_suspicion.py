@@ -109,9 +109,7 @@ def test_supplied_audio_makes_the_basis_picture_plus_audio() -> None:
 
 def test_supplied_audio_with_no_overlap_still_records_picture_plus_audio_basis() -> None:
     index = _index([_frame(1, None), _frame(2, None), _frame(3, None)])
-    result = detect_embedded_media(
-        part_id="part-1", index=index, rules=_RULES, audio_regions=()
-    )
+    result = detect_embedded_media(part_id="part-1", index=index, rules=_RULES, audio_regions=())
     (interval,) = result.intervals
     assert interval.basis == BASIS_PICTURE_PLUS_AUDIO
     assert interval.as_json()["overlapping_audio"] == []

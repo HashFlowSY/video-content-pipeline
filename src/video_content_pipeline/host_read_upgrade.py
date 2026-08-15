@@ -50,9 +50,7 @@ _RULES_RELATIVE_PATH = ("config", "text-analysis", "host-read-upgrade.json")
 
 # Whitespace and punctuation stripped before the substring comparison, so a cue
 # that renders the same words with spaces or different punctuation still matches.
-_STRIPPED = frozenset(
-    " \t\r\n　，。！？：；、,.!?:;\"'“”‘’「」『』（）()【】[]…—~"
-)
+_STRIPPED = frozenset(" \t\r\n　，。！？：；、,.!?:;\"'“”‘’「」『』（）()【】[]…—~")
 
 
 class HostReadUpgradeError(ValueError):
@@ -203,10 +201,7 @@ def evaluate_host_read_upgrades(
             continue
         basis = (
             SELECTION_BASIS_SELECTED
-            if any(
-                _has_selection_marker(cue.text, normalized_comment, rules)
-                for cue in supporting
-            )
+            if any(_has_selection_marker(cue.text, normalized_comment, rules) for cue in supporting)
             else SELECTION_BASIS_READ
         )
         upgrades.append(

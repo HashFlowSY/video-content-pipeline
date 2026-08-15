@@ -149,9 +149,7 @@ def test_part_video_coverage_omits_indeterminate_video_coverage() -> None:
             _evidence(
                 "part-1",
                 streams=[{"index": 0, "codec_type": "video", "time_base": "1/1000"}],
-                coverage=(
-                    (0, StreamCoverage(coverage=None, gaps=(), diagnostics=())),
-                ),
+                coverage=((0, StreamCoverage(coverage=None, gaps=(), diagnostics=())),),
             ),
         )
     )

@@ -473,9 +473,7 @@ def frames_in_scope(
     return tuple(
         frame
         for frame in frames
-        if any(
-            interval.start <= frame.pts and frame.pts < interval.end for interval in intervals
-        )
+        if any(interval.start <= frame.pts and frame.pts < interval.end for interval in intervals)
     )
 
 

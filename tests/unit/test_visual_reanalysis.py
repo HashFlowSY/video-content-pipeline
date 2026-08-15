@@ -232,9 +232,7 @@ def test_boundary_candidates_are_adjudicable_cue_pairs() -> None:
 
     cues = _cues(0, 2, 4, 6)
     candidates = vr.visual_boundary_candidates("part-a", (ExactTime(4),), cues)
-    inventory = PartCueInventory(
-        part_id="part-a", cue_ids=tuple(cue.cue_id for cue in cues)
-    )
+    inventory = PartCueInventory(part_id="part-a", cue_ids=tuple(cue.cue_id for cue in cues))
     outcome = adjudicate_part_segments(inventory, candidates)
 
     # Page changes alone tile the Part into two adjudicated segments.

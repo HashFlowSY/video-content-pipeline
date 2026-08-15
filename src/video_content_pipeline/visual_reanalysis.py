@@ -671,9 +671,7 @@ class VisualReanalysisReport:
             "segments": [dict(segment) for segment in self.segments],
             "chapters": [dict(chapter) for chapter in self.chapters],
             "collection_summary": (
-                self.collection_summary.as_json()
-                if self.collection_summary is not None
-                else None
+                self.collection_summary.as_json() if self.collection_summary is not None else None
             ),
             "unsupported_item_count": self.unsupported_item_count,
             "contract_identity": self.contract_identity,
@@ -1292,9 +1290,7 @@ def _load_prior_report(prior_path: Path) -> LoadedTextAnalysisReport:
         raise VisualReanalysisError(error.reason, error.message) from error
 
 
-def _load_subtitle_report(
-    path: Path, subtitle_id: str, plan_id: str
-) -> SubtitleCandidateReport:
+def _load_subtitle_report(path: Path, subtitle_id: str, plan_id: str) -> SubtitleCandidateReport:
     try:
         decoded = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:

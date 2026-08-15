@@ -85,9 +85,7 @@ def _confirmed_plan(
             digest, digest, byte_count, media_path, origin_kind="synthetic_fixture"
         )
         artifacts.append(artifact)
-        evidence_records.append(
-            _video_evidence(artifact.source_id, duration=durations[ordinal])
-        )
+        evidence_records.append(_video_evidence(artifact.source_id, duration=durations[ordinal]))
     plan_report = create_plan_report(
         state=PlanState.READY_FOR_CONFIRMATION,
         source_artifacts=tuple(artifacts),
@@ -371,9 +369,7 @@ def test_visual_text_blocks_on_inspection_evidence_drift(
     part_id = plan.source_artifacts[0].source_id
     # Mutate the confirmed PlanReport's retained inspection evidence so its
     # fingerprints no longer match the RunPlan the attempt revalidates.
-    report_path = (
-        tmp_path / "plans" / "reports" / plan.report_id / "plan-report.json"
-    )
+    report_path = tmp_path / "plans" / "reports" / plan.report_id / "plan-report.json"
     document = json.loads(report_path.read_text(encoding="utf-8"))
     document["inspection_evidence"][0]["stream_coverage"] = []
     report_path.write_text(json.dumps(document, sort_keys=True, indent=2) + "\n", encoding="utf-8")
@@ -411,9 +407,7 @@ def test_visual_text_fails_on_an_unknown_plan(
 ) -> None:
     _install_rules(tmp_path)
 
-    code, response = _run(
-        monkeypatch, capsys, tmp_path, ["visual-text", "no-such-plan", "--all"]
-    )
+    code, response = _run(monkeypatch, capsys, tmp_path, ["visual-text", "no-such-plan", "--all"])
 
     assert code == 0
     assert response["status"] == "failed"
@@ -430,9 +424,7 @@ def test_visual_text_attempts_never_overwrite_each_other(
     _install_rules(tmp_path)
     part_id = plan.source_artifacts[0].source_id
 
-    _, first = _run(
-        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
-    )
+    _, first = _run(monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id])
     _, second = _run(
         monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
     )
@@ -542,9 +534,7 @@ def test_page_index_is_deterministic_across_attempts(
     part_id = plan.source_artifacts[0].source_id
     _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
 
-    _, first = _run(
-        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
-    )
+    _, first = _run(monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id])
     _, second = _run(
         monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
     )
@@ -556,8 +546,7 @@ def test_page_index_is_deterministic_across_attempts(
     assert first_index["pages"] == second_index["pages"]
     assert first_index["retained_frames"] == second_index["retained_frames"]
     assert (
-        first_index["inventory_artifact"]["sha256"]
-        == second_index["inventory_artifact"]["sha256"]
+        first_index["inventory_artifact"]["sha256"] == second_index["inventory_artifact"]["sha256"]
     )
 
 
@@ -781,9 +770,7 @@ def test_resume_rejects_an_unknown_report(
 ) -> None:
     _install_rules(tmp_path)
 
-    code, response = _resume(
-        monkeypatch, capsys, tmp_path, "0" * 32, "ocr_resource_confirmed"
-    )
+    code, response = _resume(monkeypatch, capsys, tmp_path, "0" * 32, "ocr_resource_confirmed")
 
     assert code == 2
     assert response["reason"] == "visual_text_report_invalid"
@@ -898,7 +885,8 @@ def test_ocr_resource_plan_records_serialized_execution(
     assert code == 0
     # OCR shares the single heavy-task queue and releases before another heavy model loads.
     assert response["report"]["ocr_resource"]["serialized_execution"] is True
-    assert response["report"]["guarantees"]["model_execution"] == "not_attempted"
+    # Every offline run asserts the whole guarantees block, not just model execution.
+    assert response["report"]["guarantees"] == _GUARANTEES
 
 
 # --- Ticket 05: the Controlled offline OCR adapter, projection, and item gates ---
@@ -910,8 +898,7 @@ _SELECTED = (("page-01", 0, "aaa"), ("page-02", 3, "bbb"))
 
 def _selected_manifest_sha(plan_id: str, part_id: str) -> str:
     selections = [
-        (part_id, page_id, ExactTime(pts), fingerprint)
-        for page_id, pts, fingerprint in _SELECTED
+        (part_id, page_id, ExactTime(pts), fingerprint) for page_id, pts, fingerprint in _SELECTED
     ]
     return ocr_input_manifest_sha256(ocr_input_manifest_document(plan_id, selections))
 
@@ -979,9 +966,7 @@ def _pause_then_confirm(
     plan_id: str,
     part_id: str,
 ) -> tuple[int, dict[str, object]]:
-    _, paused = _run(
-        monkeypatch, capsys, tmp_path, ["visual-text", plan_id, "--part", part_id]
-    )
+    _, paused = _run(monkeypatch, capsys, tmp_path, ["visual-text", plan_id, "--part", part_id])
     report_id = paused["report"]["report_id"]
     return _resume(monkeypatch, capsys, tmp_path, report_id, "ocr_resource_confirmed")
 
@@ -1021,8 +1006,9 @@ def test_confirmed_ocr_projects_and_gates_items_to_complete(
     assert contract["implementation_version"] == "phase-08-controlled-ocr-adapter-impl-v1"
     assert contract["input_manifest"]["sha256"] == _selected_manifest_sha(plan.plan_id, part_id)
     assert contract["restricted_raw_output"]["restricted"] is True
-    # The offline model-execution guarantee holds: the controlled adapter is not a model.
-    assert response["report"]["guarantees"]["model_execution"] == "not_attempted"
+    # The controlled adapter is not a model and extracts no frames, so the whole
+    # offline guarantees block still holds even when OCR evidence is produced.
+    assert response["report"]["guarantees"] == _GUARANTEES
 
 
 def test_confirmed_ocr_preserves_mixed_chinese_english_text(
@@ -1307,11 +1293,7 @@ def _install_audio_report(
     """
 
     path = (
-        project_root
-        / "work"
-        / "audio-analysis-reports"
-        / report_id
-        / "audio-analysis-report.json"
+        project_root / "work" / "audio-analysis-reports" / report_id / "audio-analysis-report.json"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {
