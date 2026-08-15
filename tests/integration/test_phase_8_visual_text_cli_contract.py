@@ -1141,3 +1141,340 @@ def test_confirmed_ocr_rejects_a_fixture_not_bound_to_selected_frames(
     assert code == 0
     assert response["status"] == "failed"
     assert response["report"]["diagnostics"][0]["reason"] == "visual_text_fixture_input_mismatch"
+
+
+# --- Ticket 06: OCR-item classification ------------------------------------
+
+
+def _confirm_with_items(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    plan: RunPlan,
+    part_id: str,
+    items: list[dict[str, object]],
+) -> tuple[int, dict[str, object]]:
+    _install_rules(tmp_path)
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _install_ocr_fixture(
+        tmp_path, input_sha=_selected_manifest_sha(plan.plan_id, part_id), items=items
+    )
+    return _pause_then_confirm(tmp_path, monkeypatch, capsys, plan.plan_id, part_id)
+
+
+def test_classification_assigns_page_categories_deterministically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+
+    code, response = _confirm_with_items(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        plan,
+        part_id,
+        [
+            _ocr_item(part_id, "page-01", 0, text="第一章 标题", confidence=0.95),
+            _ocr_item(part_id, "page-02", 3, text="点击下一页", confidence=0.9),
+        ],
+    )
+
+    assert code == 0
+    assert response["status"] == "complete"
+    classification = response["report"]["classification"]
+    assert classification["version"] == "phase-08-ocr-item-classification-v1"
+    assert classification["calibration_required"] is True
+    (part,) = classification["parts"]
+    categories = {item["visual_page_id"]: item["category"] for item in part["classified"]}
+    # Ordinary page text vs a background-UI marker ("下一页"): two distinct categories.
+    assert categories == {"page-01": "page_text", "page-02": "background_ui"}
+    # No visual description leaks into an evidence item: only the evidence fields exist.
+    assert set(part["classified"][0]) == {
+        "part_id",
+        "visual_page_id",
+        "pts",
+        "text",
+        "confidence",
+        "language_spans",
+        "category",
+    }
+
+
+def test_classification_excludes_platform_noise_as_retained_non_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+
+    code, response = _confirm_with_items(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        plan,
+        part_id,
+        [
+            _ocr_item(part_id, "page-01", 0, text="正文内容", confidence=0.95),
+            _ocr_item(part_id, "page-02", 3, text="弹幕：哈哈哈", confidence=0.9),
+        ],
+    )
+
+    assert code == 0
+    # The item is still admitted by the gates (it sits on its page) but classification
+    # marks it platform noise, so it never becomes formal classified evidence.
+    assert response["status"] == "complete"
+    (part,) = response["report"]["classification"]["parts"]
+    assert [item["visual_page_id"] for item in part["classified"]] == ["page-01"]
+    (excluded,) = part["excluded"]
+    assert excluded["visual_page_id"] == "page-02"
+    assert excluded["excluded_kind"] == "danmaku"
+    assert excluded["matched_marker"] == "弹幕"
+    assert excluded["non_evidence"] is True
+
+
+def test_classification_marks_low_confidence_uncertain_never_forced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+
+    code, response = _confirm_with_items(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        plan,
+        part_id,
+        [
+            # Low confidence AND a background-UI marker: it must not be forced to a category.
+            _ocr_item(part_id, "page-01", 0, text="下一页", confidence=0.2),
+            _ocr_item(part_id, "page-02", 3, text="正文", confidence=0.9),
+        ],
+    )
+
+    assert code == 0
+    (part,) = response["report"]["classification"]["parts"]
+    categories = {item["visual_page_id"]: item["category"] for item in part["classified"]}
+    assert categories["page-01"] == "classification_uncertain"
+    assert categories["page-02"] == "page_text"
+
+
+def test_no_ocr_evidence_means_no_classification_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A declined OCR run has no evidence items, so there is nothing to classify.
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _, paused = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+    _, response = _resume(
+        monkeypatch, capsys, tmp_path, paused["report"]["report_id"], "ocr_declined"
+    )
+
+    assert response["status"] == "partial"
+    assert response["report"]["classification"] is None
+
+
+# --- Ticket 06: Suspected embedded-media intervals -------------------------
+
+# A settled page, a sustained three-frame transition run (on-screen motion), then a
+# second settled page. The run is what an embedded playing video would produce.
+_EMBEDDED_FRAMES = [
+    _metric(0, "aaa"),
+    _metric(1, "aaa"),
+    _metric(2, "mmm", region_diff=90),
+    _metric(3, "mmm", region_diff=90),
+    _metric(4, "mmm", region_diff=90),
+    _metric(5, "bbb"),
+]
+
+
+def _install_audio_report(
+    project_root: Path,
+    *,
+    report_id: str,
+    plan_id: str,
+    part_id: str,
+    intervals: list[dict[str, object]],
+) -> None:
+    """Write a synthetic, hash-pinnable Audio analysis report bound to one RunPlan.
+
+    Visual-text revalidates the report's identity (report_id + bound plan_id) and reads
+    its formal VAD partition for the named Part; the report is synthetic exactly as the
+    frame-metric fixtures are, so no real audio model runs.
+    """
+
+    path = (
+        project_root
+        / "work"
+        / "audio-analysis-reports"
+        / report_id
+        / "audio-analysis-report.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = {
+        "report_id": report_id,
+        "plan_id": plan_id,
+        "formal_evidence": [
+            {
+                "capability": "vad",
+                "parts": [{"source_id": part_id, "voice_activity_intervals": intervals}],
+            }
+        ],
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+
+def _vad_interval(start: int, end: int, state: str = "speech_likely") -> dict[str, object]:
+    return {
+        "interval": {
+            "start": {"numerator": start, "denominator": 1},
+            "end": {"numerator": end, "denominator": 1},
+        },
+        "state": state,
+    }
+
+
+def test_embedded_media_is_marked_picture_only_without_audio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _EMBEDDED_FRAMES)
+
+    code, response = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+
+    assert code == 0
+    # Suspicion is picture-derived and produced alongside the page index -- here in the
+    # OCR pause report, before any OCR decision.
+    suspicion = response["report"]["suspected_embedded_media"]
+    assert suspicion["version"] == "phase-08-embedded-media-suspicion-v1"
+    (part,) = suspicion["parts"]
+    (interval,) = part["intervals"]
+    assert interval["basis"] == "picture_only"
+    assert interval["low_confidence"] is True
+    assert interval["transition_frame_count"] == 3
+    assert interval["start"] == {"numerator": 2, "denominator": 1}
+    assert interval["end"] == {"numerator": 4, "denominator": 1}
+    assert interval["overlapping_audio"] == []
+
+
+def test_embedded_media_uses_picture_plus_audio_with_a_revalidated_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _EMBEDDED_FRAMES)
+    audio_id = "a" * 32
+    _install_audio_report(
+        tmp_path,
+        report_id=audio_id,
+        plan_id=plan.plan_id,
+        part_id=part_id,
+        intervals=[_vad_interval(3, 5), _vad_interval(50, 60)],
+    )
+
+    code, response = _run(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        ["visual-text", plan.plan_id, "--part", part_id, "--audio-report", audio_id],
+    )
+
+    assert code == 0
+    report = response["report"]
+    # The supplied report is revalidated and recorded as bound input evidence (its hash).
+    assert report["audio_report_id"] == audio_id
+    assert report["input_evidence"]["audio_analysis_report"]["sha256"]
+    (part,) = report["suspected_embedded_media"]["parts"]
+    (interval,) = part["intervals"]
+    assert interval["basis"] == "picture_plus_audio"
+    # Only the active region overlapping [2,4] corroborates; the [50,60] region does not.
+    assert interval["overlapping_audio"] == [
+        {"start": {"numerator": 3, "denominator": 1}, "end": {"numerator": 5, "denominator": 1}}
+    ]
+
+
+def test_a_mismatched_audio_report_blocks_the_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _EMBEDDED_FRAMES)
+    audio_id = "b" * 32
+    # The audio report is bound to a different RunPlan, so its evidence must not be used.
+    _install_audio_report(
+        tmp_path,
+        report_id=audio_id,
+        plan_id="some-other-plan",
+        part_id=part_id,
+        intervals=[_vad_interval(3, 5)],
+    )
+
+    code, response = _run(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        ["visual-text", plan.plan_id, "--part", part_id, "--audio-report", audio_id],
+    )
+
+    assert code == 0
+    assert response["status"] == "failed"
+    assert response["report"]["diagnostics"][0]["reason"] == "audio_report_mismatch"
+
+
+def test_a_short_transition_run_is_not_flagged_as_embedded_media(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    # _PAGE_FRAMES has only isolated single transition frames (ordinary page changes).
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+
+    code, response = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan.plan_id, "--part", part_id]
+    )
+
+    assert code == 0
+    (part,) = response["report"]["suspected_embedded_media"]["parts"]
+    assert part["intervals"] == []
+
+
+def test_embedded_media_survives_an_affirmative_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The audio report is an identity-bound input replayed on resume, so the resumed
+    # attempt re-derives the same picture-plus-audio basis.
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _EMBEDDED_FRAMES)
+    audio_id = "c" * 32
+    _install_audio_report(
+        tmp_path,
+        report_id=audio_id,
+        plan_id=plan.plan_id,
+        part_id=part_id,
+        intervals=[_vad_interval(3, 5)],
+    )
+    _, paused = _run(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        ["visual-text", plan.plan_id, "--part", part_id, "--audio-report", audio_id],
+    )
+    report_id = paused["report"]["report_id"]
+
+    _, resumed = _resume(monkeypatch, capsys, tmp_path, report_id, "ocr_declined")
+
+    assert resumed["report"]["audio_report_id"] == audio_id
+    (part,) = resumed["report"]["suspected_embedded_media"]["parts"]
+    assert part["intervals"][0]["basis"] == "picture_plus_audio"

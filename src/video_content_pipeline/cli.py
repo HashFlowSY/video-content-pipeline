@@ -172,6 +172,7 @@ def _parser() -> argparse.ArgumentParser:
     visual_text_command.add_argument(
         "--range", action="append", default=[], metavar="PART_ID:START-END"
     )
+    visual_text_command.add_argument("--audio-report", metavar="REPORT_ID")
     visual_text_command.add_argument("--json", action="store_true")
     resume_visual_text_command = subcommands.add_parser("resume-visual-text")
     resume_visual_text_command.add_argument("report_id")
@@ -322,6 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 all_parts=arguments.all,
                 part_selectors=tuple(arguments.part),
                 range_selectors=tuple(getattr(arguments, "range")),
+                audio_report_id=arguments.audio_report,
             )
         except VisualTextError as error:
             print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))

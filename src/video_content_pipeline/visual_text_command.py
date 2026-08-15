@@ -67,6 +67,12 @@ from video_content_pipeline.visual_text import (
     evaluate_ocr_capabilities,
     offline_guarantees,
 )
+from video_content_pipeline.visual_text_classification import (
+    ClassificationRuleset,
+    PartClassificationResult,
+    classify_ocr_items,
+    load_classification_ruleset,
+)
 from video_content_pipeline.visual_text_contracts import (
     ProjectedOcrItem,
     load_controlled_ocr_fixture,
@@ -77,9 +83,18 @@ from video_content_pipeline.visual_text_contracts import (
     revalidate_ocr_contracts,
 )
 from video_content_pipeline.visual_text_gates import (
+    GatedOcrItem,
     OcrItemGateResult,
     RejectedOcrItem,
     gate_ocr_items,
+)
+from video_content_pipeline.visual_text_suspicion import (
+    AudioActivityRegion,
+    EmbeddedMediaRuleset,
+    PartEmbeddedMediaResult,
+    audio_activity_regions,
+    detect_embedded_media,
+    load_embedded_media_ruleset,
 )
 
 # The explicit decisions that continue a retained visual-text decision pause. The
@@ -456,9 +471,17 @@ class _VisualTextInputs:
     rule_versions: VisualTextRuleVersions
     page_index_rules: PageIndexRules
     ocr_resource_policy: OcrResourcePolicy
+    classification_rules: ClassificationRuleset
+    embedded_media_rules: EmbeddedMediaRuleset
     scope: tuple[PartVisualScope, ...]
     limitations: tuple[PlanningDiagnostic, ...]
     capability_report: VisualTextCapabilityReport
+    audio_report_id: str | None
+    audio_report_evidence: InputEvidence | None
+    # None means no Audio analysis report was supplied (picture-only suspicion basis);
+    # a mapping means a revalidated report was supplied (picture-plus-audio), keyed by
+    # Part with that Part's active-voice regions (empty for a model-gated report).
+    audio_regions_by_part: Mapping[str, tuple[AudioActivityRegion, ...]] | None
 
 
 @dataclass(frozen=True)
@@ -503,12 +526,16 @@ class VisualTextReport:
     resumed_from_report: InputEvidence | None
     resumed_from_report_id: str | None
     resumption_decision: str | None
+    audio_report_id: str | None
+    audio_report_evidence: InputEvidence | None
     rule_versions: VisualTextRuleVersions | None
     scope: tuple[PartVisualScope, ...]
     capability: VisualTextCapabilityReport | None
     page_index: tuple[_PartFrameInventory, ...]
     ocr_resource_plan: OcrResourcePlan | None
     ocr_evidence: dict[str, object] | None
+    classification: dict[str, object] | None
+    suspected_embedded_media: dict[str, object] | None
     required_decision: dict[str, object] | None
     limitations: tuple[PlanningDiagnostic, ...]
     diagnostics: tuple[PlanningDiagnostic, ...]
@@ -520,12 +547,14 @@ class VisualTextReport:
             "status": self.status.value,
             "workspace_path": self.workspace_path.as_posix(),
             "report_path": self.report_path.as_posix(),
+            "audio_report_id": self.audio_report_id,
             "input_evidence": {
                 "run_plan": _evidence_json(self.plan_evidence),
                 "confirmed_plan_report": _evidence_json(self.confirmed_report_evidence),
                 "resumed_from_report": _evidence_json(self.resumed_from_report),
                 "resumed_from_report_id": self.resumed_from_report_id,
                 "resumption_decision": self.resumption_decision,
+                "audio_analysis_report": _evidence_json(self.audio_report_evidence),
             },
             "scope": {
                 "requested": self.scope_mode,
@@ -542,6 +571,8 @@ class VisualTextReport:
                 self.ocr_resource_plan.as_json() if self.ocr_resource_plan is not None else None
             ),
             "ocr_evidence": self.ocr_evidence,
+            "classification": self.classification,
+            "suspected_embedded_media": self.suspected_embedded_media,
             "required_decision": self.required_decision,
             "limitations": [limitation.as_json() for limitation in self.limitations],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
@@ -559,6 +590,8 @@ class _ReportBuilder:
     resumed_from_report: InputEvidence | None = None
     resumed_from_report_id: str | None = None
     resumption_decision: str | None = None
+    audio_report_id: str | None = None
+    audio_report_evidence: InputEvidence | None = None
     status: VisualTextReportStatus = VisualTextReportStatus.FAILED
     plan_evidence: InputEvidence | None = None
     confirmed_report_evidence: InputEvidence | None = None
@@ -568,6 +601,8 @@ class _ReportBuilder:
     page_index: tuple[_PartFrameInventory, ...] = ()
     ocr_resource_plan: OcrResourcePlan | None = None
     ocr_evidence: dict[str, object] | None = None
+    classification: dict[str, object] | None = None
+    suspected_embedded_media: dict[str, object] | None = None
     required_decision: dict[str, object] | None = None
     limitations: tuple[PlanningDiagnostic, ...] = ()
     diagnostics: tuple[PlanningDiagnostic, ...] = ()
@@ -576,6 +611,8 @@ class _ReportBuilder:
         self.plan_id = inputs.plan.plan_id
         self.plan_evidence = input_evidence(inputs.plan_path)
         self.confirmed_report_evidence = input_evidence(inputs.confirmed_report_path)
+        self.audio_report_id = inputs.audio_report_id
+        self.audio_report_evidence = inputs.audio_report_evidence
         self.rule_versions = inputs.rule_versions
         self.scope = inputs.scope
         self.limitations = inputs.limitations
@@ -602,12 +639,16 @@ class _ReportBuilder:
             resumed_from_report=self.resumed_from_report,
             resumed_from_report_id=self.resumed_from_report_id,
             resumption_decision=self.resumption_decision,
+            audio_report_id=self.audio_report_id,
+            audio_report_evidence=self.audio_report_evidence,
             rule_versions=self.rule_versions,
             scope=self.scope,
             capability=self.capability,
             page_index=self.page_index,
             ocr_resource_plan=self.ocr_resource_plan,
             ocr_evidence=self.ocr_evidence,
+            classification=self.classification,
+            suspected_embedded_media=self.suspected_embedded_media,
             required_decision=self.required_decision,
             limitations=self.limitations,
             diagnostics=self.diagnostics,
@@ -621,6 +662,7 @@ def run_visual_text(
     all_parts: bool = False,
     part_selectors: Sequence[str] = (),
     range_selectors: Sequence[str] = (),
+    audio_report_id: str | None = None,
     resumed_from_report: InputEvidence | None = None,
     resumed_from_report_id: str | None = None,
     resumption_decision: str | None = None,
@@ -641,6 +683,13 @@ def run_visual_text(
     with no eligible OCR capability reaches ``model_acquisition_required``. Any drift
     or invalid scope retains a ``failed`` report. Each attempt owns a fresh workspace
     and never overwrites prior evidence, so there is no automatic retry.
+
+    Once the page index exists the attempt also marks Suspected embedded-media intervals
+    from the picture (basis picture-plus-audio when an optional ``audio_report_id`` is
+    supplied and revalidated, picture-only otherwise); and after an affirmative OCR
+    decision produces gated evidence, each admitted item is classified deterministically
+    as page text, speaker supplement, or background UI, with platform noise retained as
+    non-evidence and low-confidence items marked ``classification_uncertain``.
     """
 
     selectors = parse_visual_text_scope(all_parts, part_selectors, range_selectors)
@@ -657,9 +706,10 @@ def run_visual_text(
         resumed_from_report=resumed_from_report,
         resumed_from_report_id=resumed_from_report_id,
         resumption_decision=resumption_decision,
+        audio_report_id=audio_report_id,
     )
     try:
-        inputs = _revalidate_inputs(plan_id, selectors, project_root)
+        inputs = _revalidate_inputs(plan_id, selectors, project_root, audio_report_id)
         builder.bind(inputs)
         _finalize(builder, inputs, project_root)
     except (VisualTextError, PlanningError, OSError, ValueError) as error:
@@ -709,12 +759,13 @@ def resume_visual_text(
             "Only a retained visual-text decision pause can be resumed.",
         )
     _reject_mismatched_decision(pause_reason, decision)
-    plan_id, all_parts, range_selectors = _resumed_request(prior)
+    plan_id, all_parts, range_selectors, audio_report_id = _resumed_request(prior)
     return run_visual_text(
         plan_id,
         project_root,
         all_parts=all_parts,
         range_selectors=range_selectors,
+        audio_report_id=audio_report_id,
         resumed_from_report=input_evidence(prior_path),
         resumed_from_report_id=report_id,
         resumption_decision=decision,
@@ -761,15 +812,16 @@ def _resumable_pause_reason(report: Mapping[str, object]) -> str | None:
     return None
 
 
-def _resumed_request(report: Mapping[str, object]) -> tuple[str, bool, tuple[str, ...]]:
-    """Read the identity-bound plan and scope from a paused report.
+def _resumed_request(report: Mapping[str, object]) -> tuple[str, bool, tuple[str, ...], str | None]:
+    """Read the identity-bound plan, scope, and audio report from a paused report.
 
     The paused report retains its resolved scope intervals, so the resume rebuilds
     the exact same scope as explicit ``--range`` selectors -- the identity-bound
     inputs are never re-derived from anything but the retained report. An ``--all``
     request is replayed as ranges over the same retained coverage, which resolves to
-    the same Parts. A malformed or empty retained scope is rejected rather than
-    silently narrowed.
+    the same Parts. The optional supplied Audio analysis report is an identity-bound
+    input too, so its report ID is replayed and revalidated afresh. A malformed or
+    empty retained scope is rejected rather than silently narrowed.
     """
 
     plan_id = report.get("plan_id")
@@ -784,7 +836,12 @@ def _resumed_request(report: Mapping[str, object]) -> tuple[str, bool, tuple[str
             "visual_text_report_invalid", "Paused report omits its retained scope."
         )
     ranges = tuple(_scope_range_selectors(parts))
-    return plan_id, False, ranges
+    audio_report_id = report.get("audio_report_id")
+    if audio_report_id is not None and not isinstance(audio_report_id, str):
+        raise VisualTextError(
+            "visual_text_report_invalid", "Paused report has a malformed audio report identity."
+        )
+    return plan_id, False, ranges, audio_report_id
 
 
 def _scope_range_selectors(parts: Sequence[object]) -> list[str]:
@@ -850,6 +907,7 @@ def _revalidate_inputs(
     plan_id: str,
     selectors: Sequence[VisualTextScopeSelector],
     project_root: Path,
+    audio_report_id: str | None,
 ) -> _VisualTextInputs:
     plan_path = project_root / "plans" / plan_id / "run-plan.json"
     plan = load_run_plan(plan_path)
@@ -876,6 +934,8 @@ def _revalidate_inputs(
     rule_versions = load_visual_text_rule_versions(project_root)
     page_index_rules = load_page_index_rules(project_root)
     ocr_resource_policy = load_ocr_resource_policy(project_root)
+    classification_rules = load_classification_ruleset(project_root)
+    embedded_media_rules = load_embedded_media_ruleset(project_root)
     coverage_by_part = part_video_coverage(confirmed_report)
     plan_part_ids = {artifact.source_id for artifact in plan.source_artifacts}
     scope = resolve_visual_text_scope(
@@ -883,6 +943,9 @@ def _revalidate_inputs(
     )
     limitations = _uncovered_part_limitations(selectors, plan_part_ids, coverage_by_part)
     capability_report = evaluate_ocr_capabilities(project_root)
+    audio_evidence, audio_regions_by_part = _bind_audio_report(
+        project_root, audio_report_id, plan.plan_id, [part.part_id for part in scope]
+    )
     return _VisualTextInputs(
         plan=plan,
         plan_path=plan_path,
@@ -890,10 +953,66 @@ def _revalidate_inputs(
         rule_versions=rule_versions,
         page_index_rules=page_index_rules,
         ocr_resource_policy=ocr_resource_policy,
+        classification_rules=classification_rules,
+        embedded_media_rules=embedded_media_rules,
         scope=scope,
         limitations=limitations,
         capability_report=capability_report,
+        audio_report_id=audio_report_id,
+        audio_report_evidence=audio_evidence,
+        audio_regions_by_part=audio_regions_by_part,
     )
+
+
+def _bind_audio_report(
+    project_root: Path,
+    audio_report_id: str | None,
+    plan_id: str,
+    scoped_part_ids: Sequence[str],
+) -> tuple[InputEvidence | None, Mapping[str, tuple[AudioActivityRegion, ...]] | None]:
+    """Revalidate an optional supplied Audio analysis report before its evidence is used.
+
+    An Audio analysis report is optional and used only by embedded-media suspicion (an
+    optional informing context). When one is supplied it is revalidated exactly -- hash
+    evidence plus bound input identities: it must exist, name itself, and be bound to
+    this RunPlan -- before any of its evidence is read, so a mismatched report blocks
+    the attempt rather than silently informing a marker. Its active-voice regions are
+    then lifted per scoped Part (a model-gated report legitimately carries none). With
+    no report supplied the result is ``(None, None)`` and suspicion falls back to the
+    picture-only basis.
+    """
+
+    if audio_report_id is None:
+        return None, None
+    validated_id = validated_report_id(
+        audio_report_id,
+        invalid_error=lambda: VisualTextError(
+            "audio_report_invalid", "Audio analysis report ID must be a UUID."
+        ),
+    )
+    audio_path = (
+        project_root
+        / "work"
+        / "audio-analysis-reports"
+        / validated_id
+        / "audio-analysis-report.json"
+    )
+    try:
+        decoded = json.loads(audio_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise VisualTextError(
+            "audio_report_invalid", "Audio analysis report cannot be read."
+        ) from error
+    if not isinstance(decoded, Mapping) or decoded.get("report_id") != validated_id:
+        raise VisualTextError("audio_report_invalid", "Audio analysis report is invalid.")
+    if decoded.get("plan_id") != plan_id:
+        raise VisualTextError(
+            "audio_report_mismatch", "Audio analysis report is not bound to this RunPlan."
+        )
+    regions_by_part = {
+        part_id: audio_activity_regions(decoded, part_id) for part_id in scoped_part_ids
+    }
+    return input_evidence(audio_path), regions_by_part
 
 
 def _uncovered_part_limitations(
@@ -933,11 +1052,58 @@ def _finalize(builder: _ReportBuilder, inputs: _VisualTextInputs, project_root: 
 
     builder.page_index, absences = _build_page_index(inputs, project_root, builder.workspace_path)
     builder.limitations = inputs.limitations + absences
+    builder.suspected_embedded_media = _detect_embedded_media(builder, inputs)
     plan = plan_ocr_resources(
         tuple(inventory.index for inventory in builder.page_index), inputs.ocr_resource_policy
     )
     builder.ocr_resource_plan = plan
     _derive_terminal_status(builder, inputs, plan, project_root)
+
+
+def _detect_embedded_media(
+    builder: _ReportBuilder, inputs: _VisualTextInputs
+) -> dict[str, object] | None:
+    """Mark suspected embedded-media intervals from the picture, once per scoped Part.
+
+    Suspicion is picture-derived (a sustained transition-frame run) and so is produced
+    whenever a page index exists -- independently of the OCR decision, exactly like the
+    page index it is retained beside. The basis follows the revalidated audio binding:
+    picture-plus-audio when a report was supplied, picture-only otherwise. With no page
+    index there is nothing to mark and the block is absent.
+    """
+
+    if not builder.page_index:
+        return None
+    rules = inputs.embedded_media_rules
+    regions_by_part = inputs.audio_regions_by_part
+    parts: list[PartEmbeddedMediaResult] = []
+    for inventory in builder.page_index:
+        part_id = inventory.index.part_id
+        audio_regions = None if regions_by_part is None else regions_by_part.get(part_id, ())
+        parts.append(
+            detect_embedded_media(
+                part_id=part_id,
+                index=inventory.index,
+                rules=rules,
+                audio_regions=audio_regions,
+            )
+        )
+    return _versioned_part_block(
+        rules.version, rules.calibration_required, [part.as_json() for part in parts]
+    )
+
+
+def _versioned_part_block(
+    version: str, calibration_required: bool, parts: Sequence[dict[str, object]]
+) -> dict[str, object]:
+    """Wrap per-Part results in the shared versioned evidence-block envelope.
+
+    Both the classification and the embedded-media suspicion blocks record their
+    versioned ``calibration_required`` rule identity beside a list of per-Part results,
+    so the two callers build the same envelope through here.
+    """
+
+    return {"version": version, "calibration_required": calibration_required, "parts": list(parts)}
 
 
 def _derive_terminal_status(
@@ -1096,9 +1262,30 @@ def _execute_ocr(
     builder.ocr_evidence = _OcrEvidence(
         "projected", contract_identity, tuple(gate_results), tuple(orphans)
     ).as_json()
+    builder.classification = _classify_admitted_items(gate_results, inputs.classification_rules)
     rejected_count = sum(len(result.rejected) for result in gate_results) + len(orphans)
     builder.status = (
         VisualTextReportStatus.PARTIAL if rejected_count else VisualTextReportStatus.COMPLETE
+    )
+
+
+def _classify_admitted_items(
+    gate_results: Sequence[OcrItemGateResult], rules: ClassificationRuleset
+) -> dict[str, object]:
+    """Classify each Part's admitted OCR evidence items with the versioned rules.
+
+    Classification runs only over admitted (gated) items -- a rejected item never
+    became evidence, so it is never classified. Each Part is classified independently;
+    platform-noise items are partitioned out as retained non-evidence and every other
+    item receives a page category or ``classification_uncertain``.
+    """
+
+    parts: list[PartClassificationResult] = []
+    for result in gate_results:
+        admitted: Sequence[GatedOcrItem] = result.admitted
+        parts.append(classify_ocr_items(part_id=result.part_id, items=admitted, rules=rules))
+    return _versioned_part_block(
+        rules.version, rules.calibration_required, [part.as_json() for part in parts]
     )
 
 

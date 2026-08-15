@@ -11,7 +11,26 @@
     "text_value_min": 30
   },
   "classification": {
-    "version": "phase-08-ocr-item-classification-v1"
+    "version": "phase-08-ocr-item-classification-v1",
+    "calibration_required": true,
+    "minimum_classification_confidence": 0.55,
+    "excluded_markers": {
+      "danmaku": ["弹幕"],
+      "high_speed_chat": ["聊天室", "刷屏"],
+      "follow_gift_prompt": ["关注", "点赞", "投币", "礼物", "打赏", "一键三连", "充电"],
+      "logo": ["台标", "logo", "LOGO"],
+      "watermark": ["水印"],
+      "platform_shell": ["正在直播", "直播中", "推荐视频", "首页"]
+    },
+    "category_markers": {
+      "background_ui": ["下一页", "上一页", "设置", "菜单", "返回", "播放", "暂停", "音量"],
+      "speaker_supplement": ["补充", "旁白", "注：", "备注"]
+    }
+  },
+  "embedded_media": {
+    "version": "phase-08-embedded-media-suspicion-v1",
+    "calibration_required": true,
+    "minimum_transition_run": 3
   },
   "ocr_projection": {
     "version": "phase-08-ocr-projection-schema-v1"
