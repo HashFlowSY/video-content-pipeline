@@ -15,9 +15,9 @@ suspicious-interval detection need voice-activity evidence.
 
 ## Status
 
-`approved_for_implementation_planning`. The user approved this specification
-and its atomic ticket breakdown on 2026-08-15; `project-state.json` records
-Phase 7 `implementation_planning`. The phase will be verified offline only: no model is downloaded, installed, or
+`completed_and_verified_offline`. Implementation and the Phase 7 CLI contract
+are complete; see the [completion report](PHASE_07_COMPLETION_REPORT.md) and
+[inventory](PHASE_07_INVENTORY.json). Verification was offline only: no model is downloaded, installed, or
 invoked, no user media or network is accessed, `outputs/` is not written, and
 the phase claims no domain quality, `model_audited`, `human_verified`,
 real-world testing, or production validation.

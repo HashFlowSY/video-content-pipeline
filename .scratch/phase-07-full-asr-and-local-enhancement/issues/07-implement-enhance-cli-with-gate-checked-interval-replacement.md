@@ -9,7 +9,7 @@ provenance.
 **Blocked by:** 04 (gates), 06 (arbitration machinery, reused when review is
 requested inside an enhancement interval)
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
 - [ ] Enhancement scope comes only from user-named Parts, ranges, or cues,

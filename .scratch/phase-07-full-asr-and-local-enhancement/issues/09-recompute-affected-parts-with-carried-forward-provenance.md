@@ -8,7 +8,7 @@ set.
 
 **Blocked by:** 07, 08
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
 - [ ] New attempt in a new immutable workspace; the prior report is never

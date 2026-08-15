@@ -7,7 +7,7 @@ result when no eligible capability exists.
 
 **Blocked by:** None -- can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
 - [x] Add `capability: "asr_primary"` and `capability: "asr_review"` handling

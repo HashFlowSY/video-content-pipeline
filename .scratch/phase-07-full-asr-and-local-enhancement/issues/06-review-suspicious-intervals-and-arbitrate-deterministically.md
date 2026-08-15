@@ -7,7 +7,7 @@ artifact semantics.
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
 - [ ] Run review only on suspicious intervals by default; a full-length review

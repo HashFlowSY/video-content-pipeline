@@ -7,7 +7,7 @@ defaults and `calibration_required` marks.
 
 **Blocked by:** 02, 04
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
 - [ ] Version the detector set and thresholds in

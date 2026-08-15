@@ -6,7 +6,7 @@ adapters only, inside the Phase 7 offline transcription-verification boundary.
 
 **Blocked by:** 06, 07, 09
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
 - [ ] Guarantees block asserts `model_execution`, `model_acquisition`,

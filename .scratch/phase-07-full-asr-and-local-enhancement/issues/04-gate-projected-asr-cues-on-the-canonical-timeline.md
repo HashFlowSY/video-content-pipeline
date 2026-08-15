@@ -7,7 +7,7 @@ duration-to-text relation. Rejected cues keep structured reasons.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
 - [ ] Reuse the Phase 2 exact-time types and coverage evidence; no float

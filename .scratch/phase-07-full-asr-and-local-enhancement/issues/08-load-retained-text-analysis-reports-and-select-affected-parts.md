@@ -8,7 +8,7 @@ identities.
 **Blocked by:** None -- can start immediately (pure text-analysis work,
 independent of ASR machinery).
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
 - [ ] Deserialize retained reports into `AvailablePart` / segment / chapter /
