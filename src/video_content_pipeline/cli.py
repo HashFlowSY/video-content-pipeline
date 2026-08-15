@@ -53,6 +53,11 @@ from video_content_pipeline.text_analysis import (
     analyze_text,
     resume_text_analysis,
 )
+from video_content_pipeline.transcription import (
+    TranscriptionError,
+    resume_transcription,
+    transcribe,
+)
 from video_content_pipeline.url_policy import (
     COLLECTION_CLOSURE_SIGNAL,
     ManualCollectionSession,
@@ -122,6 +127,16 @@ def _parser() -> argparse.ArgumentParser:
     resume_text_command.add_argument("report_id")
     resume_text_command.add_argument("--decision", metavar="DECISION")
     resume_text_command.add_argument("--json", action="store_true")
+    transcribe_command = subcommands.add_parser("transcribe")
+    transcribe_command.add_argument("plan_id")
+    transcribe_command.add_argument("subtitle_report_id")
+    transcribe_command.add_argument("audio_report_id")
+    transcribe_command.add_argument("--upgrade-all", action="store_true")
+    transcribe_command.add_argument("--json", action="store_true")
+    resume_transcription_command = subcommands.add_parser("resume-transcription")
+    resume_transcription_command.add_argument("report_id")
+    resume_transcription_command.add_argument("--decision", metavar="DECISION")
+    resume_transcription_command.add_argument("--json", action="store_true")
     return parser
 
 
@@ -207,6 +222,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             result = resume_text_analysis(arguments.report_id, arguments.decision, _project_root())
         except TextAnalysisError as error:
+            print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
+            return 2
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "transcribe":
+        result = transcribe(
+            arguments.plan_id,
+            arguments.subtitle_report_id,
+            arguments.audio_report_id,
+            _project_root(),
+            upgrade_all=arguments.upgrade_all,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "resume-transcription":
+        try:
+            result = resume_transcription(arguments.report_id, arguments.decision, _project_root())
+        except TranscriptionError as error:
             print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
             return 2
         print(json.dumps(result, sort_keys=True))
