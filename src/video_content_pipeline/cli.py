@@ -13,6 +13,11 @@ from urllib.parse import urlsplit
 from video_content_pipeline import __version__
 from video_content_pipeline.acquisition import URLAcquisitionError, acquire_public_source
 from video_content_pipeline.audio_analysis import analyze_audio, resume_audio_analysis
+from video_content_pipeline.enhancement import (
+    EnhancementError,
+    enhance,
+    resume_enhancement,
+)
 from video_content_pipeline.environment import assert_project_venv, assert_runtime_policy
 from video_content_pipeline.external_tools import PinnedExternalTool, identify_external_tool
 from video_content_pipeline.inspection import (
@@ -137,6 +142,20 @@ def _parser() -> argparse.ArgumentParser:
     resume_transcription_command.add_argument("report_id")
     resume_transcription_command.add_argument("--decision", metavar="DECISION")
     resume_transcription_command.add_argument("--json", action="store_true")
+    enhance_command = subcommands.add_parser("enhance")
+    enhance_command.add_argument("plan_id")
+    enhance_command.add_argument("subtitle_report_id")
+    enhance_command.add_argument("--audio-report", metavar="REPORT_ID")
+    enhance_command.add_argument("--part", action="append", default=[], metavar="PART_ID")
+    enhance_command.add_argument(
+        "--range", action="append", default=[], metavar="PART_ID:START-END"
+    )
+    enhance_command.add_argument("--cue", action="append", default=[], metavar="PART_ID:ORDINAL")
+    enhance_command.add_argument("--json", action="store_true")
+    resume_enhancement_command = subcommands.add_parser("resume-enhancement")
+    resume_enhancement_command.add_argument("report_id")
+    resume_enhancement_command.add_argument("--decision", metavar="DECISION")
+    resume_enhancement_command.add_argument("--json", action="store_true")
     return parser
 
 
@@ -240,6 +259,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             result = resume_transcription(arguments.report_id, arguments.decision, _project_root())
         except TranscriptionError as error:
+            print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
+            return 2
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "enhance":
+        result = enhance(
+            arguments.plan_id,
+            arguments.subtitle_report_id,
+            _project_root(),
+            part_selectors=tuple(arguments.part),
+            range_selectors=tuple(getattr(arguments, "range")),
+            cue_selectors=tuple(arguments.cue),
+            audio_report_id=arguments.audio_report,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "resume-enhancement":
+        try:
+            result = resume_enhancement(arguments.report_id, arguments.decision, _project_root())
+        except EnhancementError as error:
             print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
             return 2
         print(json.dumps(result, sort_keys=True))
