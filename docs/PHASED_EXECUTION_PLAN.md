@@ -15,7 +15,8 @@
 在以下唯一项目根目录内构建一套免费、本地运行、可审计、可恢复的视频内容处理
 流水线：
 
-`/Users/shangyang/Desktop/workspace/projects/video-content-pipeline`
+`/Users/apple/Desktop/wp/video-content-pipeline`
+（2026-08-15 起的迁移后根目录；历史清单与完成报告继续描述记录时的旧路径）
 
 流水线接收本地视频、音频或公开 HTTP(S) 视频链接，面向所选内容总时长为
 0 至 4 小时的单视频或多 P 合集，产出：
