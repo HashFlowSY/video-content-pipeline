@@ -409,7 +409,12 @@ def generate_analysis(
     )
 
 
-def generate_part(part: LoadedPart, part_result: Mapping[str, object]) -> PartGeneration:
+def generate_part(
+    part: LoadedPart,
+    part_result: Mapping[str, object],
+    *,
+    extra_boundaries: Sequence[ProposedSegment] = (),
+) -> PartGeneration:
     """Regenerate one available Part's segments and chapters from a model result.
 
     This is the per-Part unit ``generate_analysis`` runs for every available Part,
@@ -422,10 +427,16 @@ def generate_part(part: LoadedPart, part_result: Mapping[str, object]) -> PartGe
     and its chapters are adjudicated over the resulting segment identities. Every
     boundary rejection, fallback, and chapter rejection is retained as a diagnostic
     in the same order ``generate_analysis`` records them.
+
+    ``extra_boundaries`` are additional candidate cue-pair boundaries adjudicated
+    alongside the model-proposed ones. Phase 8 Affected-Part re-analysis (ticket 07)
+    supplies Visual page-change boundaries here so page changes participate as
+    candidate boundary evidence in the same deterministic tiling; the default empty
+    sequence keeps every Phase 6/7 caller's adjudication unchanged.
     """
 
     segments, boundary_diagnostics, unsupported, used_fallback = _generate_part_segments(
-        part, part_result
+        part, part_result, extra_boundaries
     )
     available_part = AvailablePart(
         part_id=part.part_id,
@@ -454,14 +465,16 @@ def generate_part(part: LoadedPart, part_result: Mapping[str, object]) -> PartGe
 
 
 def _generate_part_segments(
-    part: LoadedPart, part_result: Mapping[str, object]
+    part: LoadedPart,
+    part_result: Mapping[str, object],
+    extra_boundaries: Sequence[ProposedSegment] = (),
 ) -> tuple[list[GeneratedSegment], list[PlanningDiagnostic], int, bool]:
     """Adjudicate one Part's boundaries and validate each segment's content."""
 
     raw_segments = _as_list(part_result.get("segments"))
     adjudication = adjudicate_part_segments(
         PartCueInventory(part_id=part.part_id, cue_ids=part.cue_ids),
-        _proposed_segments(part.part_id, raw_segments),
+        (*_proposed_segments(part.part_id, raw_segments), *extra_boundaries),
     )
     diagnostics: list[PlanningDiagnostic] = list(adjudication.rejected)
     if adjudication.fallback is not None:

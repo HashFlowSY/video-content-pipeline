@@ -72,6 +72,7 @@ from video_content_pipeline.url_policy import (
     URLPolicyError,
     authorize_public_url,
 )
+from video_content_pipeline.visual_reanalysis import reanalyze_text_with_visual
 from video_content_pipeline.visual_text import VisualTextError
 from video_content_pipeline.visual_text_command import resume_visual_text, run_visual_text
 
@@ -141,6 +142,14 @@ def _parser() -> argparse.ArgumentParser:
     reanalyze_text_command.add_argument("--prior-report", required=True, metavar="REPORT_ID")
     reanalyze_text_command.add_argument("--enhancement-report", required=True, metavar="REPORT_ID")
     reanalyze_text_command.add_argument("--json", action="store_true")
+    reanalyze_text_visual_command = subcommands.add_parser("reanalyze-text-visual")
+    reanalyze_text_visual_command.add_argument("plan_id")
+    reanalyze_text_visual_command.add_argument("subtitle_report_id")
+    reanalyze_text_visual_command.add_argument("--prior-report", required=True, metavar="REPORT_ID")
+    reanalyze_text_visual_command.add_argument(
+        "--visual-text-report", required=True, metavar="REPORT_ID"
+    )
+    reanalyze_text_visual_command.add_argument("--json", action="store_true")
     transcribe_command = subcommands.add_parser("transcribe")
     transcribe_command.add_argument("plan_id")
     transcribe_command.add_argument("subtitle_report_id")
@@ -273,6 +282,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.subtitle_report_id,
             arguments.prior_report,
             arguments.enhancement_report,
+            _project_root(),
+        )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "reanalyze-text-visual":
+        result = reanalyze_text_with_visual(
+            arguments.plan_id,
+            arguments.subtitle_report_id,
+            arguments.prior_report,
+            arguments.visual_text_report,
             _project_root(),
         )
         print(json.dumps(result, sort_keys=True))
