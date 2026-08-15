@@ -19,6 +19,19 @@
     {
       "candidate_id": "whisper-large-v3",
       "capability": "asr_review"
+    },
+    {
+      "candidate_id": "rapidocr",
+      "capability": "ocr_primary",
+      "research_candidate": true,
+      "official_source": {
+        "url": "https://github.com/RapidAI/RapidOCR",
+        "approved": false
+      },
+      "license": "Apache-2.0",
+      "license_approved": false,
+      "revision": "research-unpinned",
+      "notes": "Metadata-only research candidate for the ocr_primary capability. Real OCR evaluation (RapidOCR or a compatible free local candidate) is a recorded deviation deferred to an authorized model-prototype session (docs/PHASE_08_SPECIFICATION.md). No asset is downloaded, hashed, executed, or network-accessed; the missing pinned asset hash and dependency plan keep it ineligible until that step."
     }
   ]
 }
