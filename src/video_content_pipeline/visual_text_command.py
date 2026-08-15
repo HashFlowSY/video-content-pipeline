@@ -67,6 +67,20 @@ from video_content_pipeline.visual_text import (
     evaluate_ocr_capabilities,
     offline_guarantees,
 )
+from video_content_pipeline.visual_text_contracts import (
+    ProjectedOcrItem,
+    load_controlled_ocr_fixture,
+    ocr_input_manifest_document,
+    ocr_input_manifest_sha256,
+    project_ocr_output,
+    retain_restricted_ocr_output,
+    revalidate_ocr_contracts,
+)
+from video_content_pipeline.visual_text_gates import (
+    OcrItemGateResult,
+    RejectedOcrItem,
+    gate_ocr_items,
+)
 
 # The explicit decisions that continue a retained visual-text decision pause. The
 # affirmative OCR decision runs OCR; the declining decision keeps the page index at
@@ -78,6 +92,11 @@ RESOURCE_ENVELOPE_DECISION = "resource_configuration_changed"
 # The recorded pause reasons carried in a report's ``required_decision`` block.
 _OCR_RESOURCE_CONFIRMATION_REASON = "ocr_resource_confirmation"
 _RESOURCE_ENVELOPE_REASON = "resource_envelope_exceeded"
+
+# The invalidation reason recorded when untrusted OCR output fails the projection.
+_MODEL_OUTPUT_INVALID = "model_output_invalid"
+# The rejection reason for an OCR item naming a Part with no page index this attempt.
+_OCR_ITEM_UNKNOWN_PART = "ocr_item_unknown_part"
 
 
 # --- Scope selectors --------------------------------------------------------
@@ -489,6 +508,7 @@ class VisualTextReport:
     capability: VisualTextCapabilityReport | None
     page_index: tuple[_PartFrameInventory, ...]
     ocr_resource_plan: OcrResourcePlan | None
+    ocr_evidence: dict[str, object] | None
     required_decision: dict[str, object] | None
     limitations: tuple[PlanningDiagnostic, ...]
     diagnostics: tuple[PlanningDiagnostic, ...]
@@ -521,7 +541,7 @@ class VisualTextReport:
             "ocr_resource": (
                 self.ocr_resource_plan.as_json() if self.ocr_resource_plan is not None else None
             ),
-            "ocr_evidence": None,
+            "ocr_evidence": self.ocr_evidence,
             "required_decision": self.required_decision,
             "limitations": [limitation.as_json() for limitation in self.limitations],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
@@ -547,6 +567,7 @@ class _ReportBuilder:
     capability: VisualTextCapabilityReport | None = None
     page_index: tuple[_PartFrameInventory, ...] = ()
     ocr_resource_plan: OcrResourcePlan | None = None
+    ocr_evidence: dict[str, object] | None = None
     required_decision: dict[str, object] | None = None
     limitations: tuple[PlanningDiagnostic, ...] = ()
     diagnostics: tuple[PlanningDiagnostic, ...] = ()
@@ -586,6 +607,7 @@ class _ReportBuilder:
             capability=self.capability,
             page_index=self.page_index,
             ocr_resource_plan=self.ocr_resource_plan,
+            ocr_evidence=self.ocr_evidence,
             required_decision=self.required_decision,
             limitations=self.limitations,
             diagnostics=self.diagnostics,
@@ -915,11 +937,14 @@ def _finalize(builder: _ReportBuilder, inputs: _VisualTextInputs, project_root: 
         tuple(inventory.index for inventory in builder.page_index), inputs.ocr_resource_policy
     )
     builder.ocr_resource_plan = plan
-    _derive_terminal_status(builder, inputs, plan)
+    _derive_terminal_status(builder, inputs, plan, project_root)
 
 
 def _derive_terminal_status(
-    builder: _ReportBuilder, inputs: _VisualTextInputs, plan: OcrResourcePlan
+    builder: _ReportBuilder,
+    inputs: _VisualTextInputs,
+    plan: OcrResourcePlan,
+    project_root: Path,
 ) -> None:
     """Choose the status from the OCR resource plan and any explicit resume decision.
 
@@ -927,11 +952,13 @@ def _derive_terminal_status(
     capability outcome; a plan over the approved envelope is the immutable Visual-text
     resource-envelope pause (never silently altering candidate, resolution, or batch);
     a declining decision retains the page index as ``partial`` with zero visual facts;
-    an affirmative decision authorizes OCR, which -- absent an eligible capability in
-    this phase -- reaches ``model_acquisition_required`` with the page index retained;
-    and any other attempt (a fresh run, or a resource-envelope resume that now fits)
-    stops at the OCR resource confirmation pause. The plan is deterministic, so a
-    resume rebuilds the same page index and re-plans the same OCR work.
+    an affirmative decision authorizes OCR, which runs the Controlled offline OCR
+    adapter (``_execute_ocr``) to produce gated evidence -- or, with no controlled
+    adapter and no eligible model, reaches ``model_acquisition_required`` with the page
+    index retained; and any other attempt (a fresh run, or a resource-envelope resume
+    that now fits) stops at the OCR resource confirmation pause. The plan is
+    deterministic, so a resume rebuilds the same page index and re-plans the same OCR
+    work.
     """
 
     capability_status = VisualTextReportStatus(inputs.capability_report.result)
@@ -957,13 +984,207 @@ def _derive_terminal_status(
         builder.status = VisualTextReportStatus.PARTIAL
         return
     if decision == OCR_RESOURCE_CONFIRMATION_DECISION:
-        builder.status = capability_status
+        _execute_ocr(builder, inputs, capability_status, project_root)
         return
     builder.status = VisualTextReportStatus.AWAITING_OCR_RESOURCE_CONFIRMATION
     builder.required_decision = {
         "reason": _OCR_RESOURCE_CONFIRMATION_REASON,
         "decision": OCR_RESOURCE_CONFIRMATION_DECISION,
     }
+
+
+@dataclass(frozen=True)
+class _OcrEvidence:
+    """The projected-and-gated OCR evidence block embedded in a report.
+
+    ``state`` is ``projected`` for gated evidence or ``model_output_invalid`` when an
+    untrusted output failed the projection; ``contract`` records the versioned adapter
+    and projection identities plus the restricted raw-output pointer; ``parts`` carries
+    each Part's admitted and rejected items; ``orphan_rejections`` retains items naming
+    a Part with no page index this attempt.
+    """
+
+    state: str
+    contract: dict[str, object]
+    parts: tuple[OcrItemGateResult, ...]
+    orphan_rejections: tuple[RejectedOcrItem, ...]
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "state": self.state,
+            "contract": self.contract,
+            "parts": [result.as_json() for result in self.parts],
+            "rejected_items": [item.as_json() for item in self.orphan_rejections],
+        }
+
+
+def _execute_ocr(
+    builder: _ReportBuilder,
+    inputs: _VisualTextInputs,
+    capability_status: VisualTextReportStatus,
+    project_root: Path,
+) -> None:
+    """Run the Controlled offline OCR adapter and gate its output into evidence.
+
+    An affirmative OCR decision reaches here with a within-envelope plan and at
+    least one selected representative. OCR text enters only through the versioned
+    projection: the two versioned contract identities are revalidated, the bound
+    controlled fixture (if any) is loaded and proven to match exactly the selected
+    frames, its raw output is retained as restricted audit evidence and projected,
+    and every projected item is gated against its Part's coverage and page
+    appearance records. With no controlled adapter fixture and no eligible model the
+    attempt acquisition-gates with the page index retained; an untrusted, malformed
+    output invalidates the whole attempt (``model_output_invalid`` -> ``failed``)
+    with the raw output kept as restricted audit evidence; otherwise the admitted
+    and rejected items become the report's OCR evidence, ``partial`` when any item
+    was rejected and ``complete`` when none was. The controlled adapter is not a
+    model asset, so the offline model-execution guarantee is preserved.
+    """
+
+    contracts = revalidate_ocr_contracts(project_root)
+    fixture = load_controlled_ocr_fixture(contracts, project_root)
+    if fixture is None:
+        builder.status = capability_status
+        return
+
+    selections = _selected_representatives(builder.page_index)
+    manifest_document = ocr_input_manifest_document(inputs.plan.plan_id, selections)
+    manifest_sha = ocr_input_manifest_sha256(manifest_document)
+    if fixture.input_fixture_sha256 != manifest_sha:
+        raise VisualTextError(
+            "visual_text_fixture_input_mismatch",
+            "Controlled OCR adapter fixture is not bound to this attempt's selected frames.",
+        )
+    manifest_path = builder.workspace_path / "provenance" / "ocr-input-manifest.json"
+    write_json_once(
+        manifest_path,
+        manifest_document,
+        conflict_error=lambda message: VisualTextError("visual_text_report_conflict", message),
+    )
+    # The raw output is retained as restricted audit evidence *before* projection, so
+    # an invalid output leaves a diagnostic trail rather than vanishing.
+    raw_pointer = retain_restricted_ocr_output(
+        fixture.raw_output,
+        builder.workspace_path,
+        capability=fixture.capability,
+        label="visual-text",
+    )
+    contract_identity = {
+        **contracts.as_json(),
+        "capability": fixture.capability,
+        "input_manifest": {**input_evidence(manifest_path).as_json(), "sha256": manifest_sha},
+        "restricted_raw_output": raw_pointer.as_json(),
+    }
+
+    projection = project_ocr_output(_decode_ocr_output(fixture.raw_output), contracts)
+    if projection.state != "projected":
+        message = (
+            projection.diagnostic.message
+            if projection.diagnostic is not None
+            else "The controlled OCR output is invalid."
+        )
+        builder.status = VisualTextReportStatus.FAILED
+        builder.ocr_evidence = _OcrEvidence(
+            _MODEL_OUTPUT_INVALID, contract_identity, (), ()
+        ).as_json()
+        builder.diagnostics = (PlanningDiagnostic(_MODEL_OUTPUT_INVALID, message),)
+        return
+
+    gate_results, orphans = _gate_projected_items(
+        builder.page_index, inputs.scope, projection.items
+    )
+    builder.ocr_evidence = _OcrEvidence(
+        "projected", contract_identity, tuple(gate_results), tuple(orphans)
+    ).as_json()
+    rejected_count = sum(len(result.rejected) for result in gate_results) + len(orphans)
+    builder.status = (
+        VisualTextReportStatus.PARTIAL if rejected_count else VisualTextReportStatus.COMPLETE
+    )
+
+
+def _selected_representatives(
+    page_index: Sequence[_PartFrameInventory],
+) -> list[tuple[str, str, ExactTime, str]]:
+    """List every page's OCR representative across the scoped Parts, canonically bound.
+
+    Each entry is ``(part_id, visual_page_id, selected_pts, content_fingerprint)`` --
+    exactly the frames OCR will read -- so the input manifest hash binds the
+    controlled fixture to precisely what detection and sampling selected.
+    """
+
+    selections: list[tuple[str, str, ExactTime, str]] = []
+    for inventory in page_index:
+        for page in inventory.index.pages:
+            if page.selected_frame_pts is not None:
+                selections.append(
+                    (
+                        inventory.index.part_id,
+                        page.visual_page_id,
+                        page.selected_frame_pts,
+                        page.content_fingerprint,
+                    )
+                )
+    return selections
+
+
+def _gate_projected_items(
+    page_index: Sequence[_PartFrameInventory],
+    scope: Sequence[PartVisualScope],
+    items: Sequence[ProjectedOcrItem],
+) -> tuple[list[OcrItemGateResult], list[RejectedOcrItem]]:
+    """Gate every projected item against the Part-local page index it names.
+
+    Items are grouped by their projected Part; each scoped Part gates its own items
+    against its coverage and page appearance records, and an item naming a Part with
+    no page index in this attempt is rejected outright as ``ocr_item_unknown_part``
+    rather than silently dropped.
+    """
+
+    coverage_by_part = {
+        part_scope.part_id: HalfOpenInterval(ExactTime(0), part_scope.coverage_duration)
+        for part_scope in scope
+    }
+    known_parts = {inventory.index.part_id for inventory in page_index}
+    results: list[OcrItemGateResult] = []
+    for inventory in page_index:
+        part_id = inventory.index.part_id
+        part_items = tuple(item for item in items if item.part_id == part_id)
+        coverage = coverage_by_part.get(part_id)
+        if coverage is None:
+            # Every page-index Part is drawn from the resolved scope, so its coverage is
+            # always present; a miss is an internal inconsistency, surfaced as a
+            # structured failure rather than an unhandled KeyError that skips the gate.
+            raise VisualTextError(
+                "visual_text_coverage_missing",
+                f"Part {part_id!r} has a page index but no resolved coverage to gate against.",
+            )
+        results.append(
+            gate_ocr_items(
+                part_id=part_id,
+                items=part_items,
+                page_index=inventory.index,
+                coverage=coverage,
+            )
+        )
+    orphans = [
+        RejectedOcrItem(
+            part_id=item.part_id,
+            visual_page_id=item.visual_page_id,
+            pts=item.pts,
+            reason=_OCR_ITEM_UNKNOWN_PART,
+            message="Item names a Part with no page index in this attempt.",
+        )
+        for item in items
+        if item.part_id not in known_parts
+    ]
+    return results, orphans
+
+
+def _decode_ocr_output(raw_output: bytes) -> object:
+    try:
+        return json.loads(raw_output)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
 
 
 def _build_page_index(

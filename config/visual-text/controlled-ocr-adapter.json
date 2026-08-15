@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "version": "phase-08-controlled-ocr-adapter-v1",
+  "implementation_version": "phase-08-controlled-ocr-adapter-impl-v1",
+  "projection_schema_version": "phase-08-ocr-projection-schema-v1",
+  "sampling_configuration": {
+    "mode": "deterministic",
+    "temperature": 0,
+    "seed": 0
+  },
+  "quality_scope": "synthetic_verification_only"
+}

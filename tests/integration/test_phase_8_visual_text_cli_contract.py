@@ -14,6 +14,7 @@ frame of user media is extracted, and no network is accessed.
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,10 @@ from video_content_pipeline.planning import (
 from video_content_pipeline.probe import ProbeDocument
 from video_content_pipeline.source import SourceArtifact, sha256_file
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
+from video_content_pipeline.visual_text_contracts import (
+    ocr_input_manifest_document,
+    ocr_input_manifest_sha256,
+)
 
 _GUARANTEES = {
     "frame_extraction": "not_attempted",
@@ -109,13 +114,29 @@ def _confirmed_plan(
     return plan
 
 
-def _install_rules(project_root: Path) -> None:
-    """Copy the shipped versioned visual-text rules into the fixture project root."""
+_CONTRACT_FILES = (
+    "rules.json",
+    "ocr-projection-schema.json",
+    "controlled-ocr-adapter.json",
+)
 
-    repo_rules = Path(__file__).resolve().parents[2] / "config" / "visual-text" / "rules.json"
-    destination = project_root / "config" / "visual-text" / "rules.json"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(repo_rules.read_text(encoding="utf-8"), encoding="utf-8")
+
+def _install_rules(project_root: Path) -> None:
+    """Copy the shipped versioned visual-text rules and OCR contracts into the fixture.
+
+    The OCR projection schema and Controlled offline OCR adapter identities ship
+    alongside the rules so an affirmative OCR decision can revalidate them; the
+    shipped adapter carries no bound fixture, so an affirmative decision reaches
+    ``model_acquisition_required`` until a test installs a fixture-bearing adapter.
+    """
+
+    source = Path(__file__).resolve().parents[2] / "config" / "visual-text"
+    destination = project_root / "config" / "visual-text"
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in _CONTRACT_FILES:
+        (destination / name).write_text(
+            (source / name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
 
 
 def _install_rules_with_envelope(project_root: Path, *, max_selected_frames: int) -> None:
@@ -878,3 +899,245 @@ def test_ocr_resource_plan_records_serialized_execution(
     # OCR shares the single heavy-task queue and releases before another heavy model loads.
     assert response["report"]["ocr_resource"]["serialized_execution"] is True
     assert response["report"]["guarantees"]["model_execution"] == "not_attempted"
+
+
+# --- Ticket 05: the Controlled offline OCR adapter, projection, and item gates ---
+
+# The two text-bearing pages of ``_PAGE_FRAMES`` each select a representative: page-01
+# (aaa) at t=0 and page-02 (bbb) at t=3. The controlled fixture binds to exactly these.
+_SELECTED = (("page-01", 0, "aaa"), ("page-02", 3, "bbb"))
+
+
+def _selected_manifest_sha(plan_id: str, part_id: str) -> str:
+    selections = [
+        (part_id, page_id, ExactTime(pts), fingerprint)
+        for page_id, pts, fingerprint in _SELECTED
+    ]
+    return ocr_input_manifest_sha256(ocr_input_manifest_document(plan_id, selections))
+
+
+def _ocr_item(
+    part_id: str,
+    page_id: str,
+    pts: int,
+    *,
+    text: str = "Text",
+    confidence: float = 0.9,
+    language_spans: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    item: dict[str, object] = {
+        "part_id": part_id,
+        "visual_page_id": page_id,
+        "pts": {"numerator": pts, "denominator": 1},
+        "text": text,
+        "confidence": confidence,
+    }
+    if language_spans is not None:
+        item["language_spans"] = language_spans
+    return item
+
+
+def _install_ocr_fixture(
+    project_root: Path,
+    *,
+    input_sha: str,
+    items: list[dict[str, object]],
+    capability: str = "ocr_primary",
+) -> None:
+    """Rewrite the installed controlled OCR adapter with a bound synthetic output fixture.
+
+    The Controlled offline OCR adapter is not a model asset: it returns exactly these
+    fixed bytes, bound to the fixed selected-frame input identity ``input_sha``.
+    """
+
+    fixtures = project_root / "config" / "visual-text" / "fixtures"
+    fixtures.mkdir(parents=True, exist_ok=True)
+    output = {
+        "schema_version": 1,
+        "projection_schema_version": "phase-08-ocr-projection-schema-v1",
+        "adapter_identity": "phase-08-controlled-ocr-adapter-v1",
+        "capability": capability,
+        "result": {"items": items},
+    }
+    raw = json.dumps(output).encode("utf-8")
+    (fixtures / "ocr-output.json").write_bytes(raw)
+    adapter_path = project_root / "config" / "visual-text" / "controlled-ocr-adapter.json"
+    document = json.loads(adapter_path.read_text(encoding="utf-8"))
+    document["fixture"] = {
+        "capability": "ocr_primary",
+        "input_fixture_sha256": input_sha,
+        "output_fixture_path": "config/visual-text/fixtures/ocr-output.json",
+        "output_fixture_sha256": sha256(raw).hexdigest(),
+    }
+    adapter_path.write_text(json.dumps(document), encoding="utf-8")
+
+
+def _pause_then_confirm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    plan_id: str,
+    part_id: str,
+) -> tuple[int, dict[str, object]]:
+    _, paused = _run(
+        monkeypatch, capsys, tmp_path, ["visual-text", plan_id, "--part", part_id]
+    )
+    report_id = paused["report"]["report_id"]
+    return _resume(monkeypatch, capsys, tmp_path, report_id, "ocr_resource_confirmed")
+
+
+def test_confirmed_ocr_projects_and_gates_items_to_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _install_ocr_fixture(
+        tmp_path,
+        input_sha=_selected_manifest_sha(plan.plan_id, part_id),
+        items=[
+            _ocr_item(part_id, "page-01", 0, text="标题", confidence=0.95),
+            _ocr_item(part_id, "page-02", 3, text="Slide", confidence=0.88),
+        ],
+    )
+
+    code, response = _pause_then_confirm(tmp_path, monkeypatch, capsys, plan.plan_id, part_id)
+
+    assert code == 0
+    assert response["status"] == "complete"
+    evidence_block = response["report"]["ocr_evidence"]
+    assert evidence_block["state"] == "projected"
+    (part_evidence,) = evidence_block["parts"]
+    assert part_evidence["rejected"] == []
+    # AC#3: every admitted item carries Part, PTS, visual_page_id, and confidence.
+    admitted = {item["visual_page_id"]: item for item in part_evidence["admitted"]}
+    assert set(admitted) == {"page-01", "page-02"}
+    assert admitted["page-01"]["part_id"] == part_id
+    assert admitted["page-01"]["pts"] == {"numerator": 0, "denominator": 1}
+    assert admitted["page-01"]["confidence"] == 0.95
+    # AC#1: the controlled adapter is described by implementation version + fixed hashes.
+    contract = evidence_block["contract"]
+    assert contract["implementation_version"] == "phase-08-controlled-ocr-adapter-impl-v1"
+    assert contract["input_manifest"]["sha256"] == _selected_manifest_sha(plan.plan_id, part_id)
+    assert contract["restricted_raw_output"]["restricted"] is True
+    # The offline model-execution guarantee holds: the controlled adapter is not a model.
+    assert response["report"]["guarantees"]["model_execution"] == "not_attempted"
+
+
+def test_confirmed_ocr_preserves_mixed_chinese_english_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _install_ocr_fixture(
+        tmp_path,
+        input_sha=_selected_manifest_sha(plan.plan_id, part_id),
+        items=[
+            _ocr_item(
+                part_id,
+                "page-01",
+                0,
+                text="登录 Login",
+                language_spans=[
+                    {"language": "zh", "start_char": 0, "end_char": 2},
+                    {"language": "en", "start_char": 3, "end_char": 8},
+                ],
+            ),
+            _ocr_item(part_id, "page-02", 3, text="下一步"),
+        ],
+    )
+
+    code, response = _pause_then_confirm(tmp_path, monkeypatch, capsys, plan.plan_id, part_id)
+
+    assert code == 0
+    (part_evidence,) = response["report"]["ocr_evidence"]["parts"]
+    page_one = next(i for i in part_evidence["admitted"] if i["visual_page_id"] == "page-01")
+    # AC#4: OCR text keeps its source language, including mixed Chinese/English.
+    assert page_one["text"] == "登录 Login"
+    spans = [(s["language"], s["start_char"], s["end_char"]) for s in page_one["language_spans"]]
+    assert spans == [("zh", 0, 2), ("en", 3, 8)]
+
+
+def test_confirmed_ocr_rejects_an_out_of_gate_item_to_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    _install_ocr_fixture(
+        tmp_path,
+        input_sha=_selected_manifest_sha(plan.plan_id, part_id),
+        items=[
+            _ocr_item(part_id, "page-01", 0, text="ok"),
+            # page-02 appears only at t=3; an item timed at t=10 is inconsistent with it.
+            _ocr_item(part_id, "page-02", 10, text="drift"),
+        ],
+    )
+
+    code, response = _pause_then_confirm(tmp_path, monkeypatch, capsys, plan.plan_id, part_id)
+
+    assert code == 0
+    assert response["status"] == "partial"
+    (part_evidence,) = response["report"]["ocr_evidence"]["parts"]
+    assert len(part_evidence["admitted"]) == 1
+    (rejected,) = part_evidence["rejected"]
+    # The offending item is retained with a structured reason, never silently repaired.
+    assert rejected["reason"] == "ocr_item_page_time_mismatch"
+    assert rejected["visual_page_id"] == "page-02"
+
+
+def test_confirmed_ocr_invalidates_the_attempt_on_malformed_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    # A well-bound input but a schema-invalid capability in the output envelope.
+    _install_ocr_fixture(
+        tmp_path,
+        input_sha=_selected_manifest_sha(plan.plan_id, part_id),
+        items=[_ocr_item(part_id, "page-01", 0)],
+        capability="ocr_bogus",
+    )
+
+    code, response = _pause_then_confirm(tmp_path, monkeypatch, capsys, plan.plan_id, part_id)
+
+    assert code == 0
+    # AC#2: an invalid projection invalidates the whole attempt.
+    assert response["status"] == "failed"
+    report = response["report"]
+    assert report["ocr_evidence"]["state"] == "model_output_invalid"
+    assert report["diagnostics"][0]["reason"] == "model_output_invalid"
+    # The raw output is retained as restricted, audit-only local evidence.
+    raw = report["ocr_evidence"]["contract"]["restricted_raw_output"]
+    assert raw["restricted"] is True and raw["audit_only"] is True
+    assert Path(raw["path"]).exists()
+    # The page index survives so the failure is auditable, and nothing is published.
+    assert len(report["page_index"]["parts"]) == 1
+    assert not (tmp_path / "outputs").exists()
+
+
+def test_confirmed_ocr_rejects_a_fixture_not_bound_to_selected_frames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    _install_rules(tmp_path)
+    part_id = plan.source_artifacts[0].source_id
+    _install_frame_metrics(tmp_path, part_id, _PAGE_FRAMES)
+    # A fixture bound to some other input identity must not be accepted for this scope.
+    _install_ocr_fixture(
+        tmp_path,
+        input_sha="f" * 64,
+        items=[_ocr_item(part_id, "page-01", 0)],
+    )
+
+    code, response = _pause_then_confirm(tmp_path, monkeypatch, capsys, plan.plan_id, part_id)
+
+    assert code == 0
+    assert response["status"] == "failed"
+    assert response["report"]["diagnostics"][0]["reason"] == "visual_text_fixture_input_mismatch"

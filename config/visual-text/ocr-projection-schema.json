@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "version": "phase-08-ocr-projection-schema-v1",
+  "item": {
+    "required_fields": ["part_id", "visual_page_id", "pts", "text", "confidence"],
+    "confidence_range": [0, 1],
+    "language_span": {
+      "required_fields": ["language", "start_char", "end_char"]
+    }
+  }
+}

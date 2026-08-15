@@ -13,6 +13,12 @@
   "classification": {
     "version": "phase-08-ocr-item-classification-v1"
   },
+  "ocr_projection": {
+    "version": "phase-08-ocr-projection-schema-v1"
+  },
+  "controlled_ocr_adapter": {
+    "identity": "phase-08-controlled-ocr-adapter-v1"
+  },
   "ocr_execution": {
     "version": "phase-08-ocr-resource-plan-v1",
     "seconds_per_selected_frame": 3,
