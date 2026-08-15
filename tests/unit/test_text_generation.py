@@ -236,6 +236,68 @@ def test_unavailable_part_lowers_status_and_declares_omitted_range() -> None:
     assert analysis.collection_summary.partial is True
 
 
+def test_generate_part_regenerates_one_part_through_the_same_adjudication() -> None:
+    # generate_part is the per-Part unit re-analysis reuses; it must produce the
+    # same segments, chapters, and fallback flag generate_analysis records for one
+    # available Part, so a regenerated affected Part obeys the Phase 6 contracts.
+    part = _part("p1", 3)
+    part_result = {
+        "part_id": "p1",
+        "segments": [
+            {
+                "boundary": {"start_cue_id": _cue("p1", 0), "end_cue_id": _cue("p1", 1)},
+                "content": {"title": {"text": "开场", "cue_ids": [_cue("p1", 0)]}},
+                "source_languages": ["en", "zh"],
+            },
+            {
+                "boundary": {"start_cue_id": _cue("p1", 2), "end_cue_id": _cue("p1", 2)},
+                "content": {"title": {"text": "结尾", "cue_ids": [_cue("p1", 2)]}},
+            },
+        ],
+        "chapters": [{"start_ordinal": 0, "end_ordinal": 1, "title": "全部"}],
+    }
+    result = {"parts": [part_result], "collection_summary": None}
+
+    generation = tg.generate_part(part, part_result)
+    whole = tg.generate_analysis([part], [], result)
+
+    assert generation.part_id == "p1"
+    assert generation.used_fallback is False
+    assert [segment.ordinal for segment in generation.segments] == [0, 1]
+    assert generation.segments[0].source_languages == ("en", "zh")
+    assert generation.available_part.ordinals == {0, 1}
+    assert [chapter.segment_ordinals for chapter in generation.chapters] == [(0, 1)]
+    # Every cue is owned exactly once across the regenerated Part's segments.
+    owned = [cue for segment in generation.segments for cue in segment.cue_ids]
+    assert owned == [_cue("p1", 0), _cue("p1", 1), _cue("p1", 2)]
+    # The per-Part unit matches the whole-analysis path for the same Part.
+    assert [segment.as_json() for segment in generation.segments] == [
+        segment.as_json() for segment in whole.segments
+    ]
+
+
+def test_generate_part_falls_back_to_one_segment_when_no_boundary_tiles() -> None:
+    part = _part("p1", 3)
+    part_result = {
+        "part_id": "p1",
+        "segments": [
+            {
+                # Leaves cue 2 uncovered, so no exact tiling and the fallback owns all cues.
+                "boundary": {"start_cue_id": _cue("p1", 0), "end_cue_id": _cue("p1", 1)},
+                "content": {"title": {"text": "唯一", "cue_ids": [_cue("p1", 2)]}},
+            }
+        ],
+        "chapters": [],
+    }
+
+    generation = tg.generate_part(part, part_result)
+
+    assert generation.used_fallback is True
+    assert len(generation.segments) == 1
+    assert generation.segments[0].origin == "conservative_fallback"
+    assert generation.available_part.used_fallback is True
+
+
 def test_load_controlled_generation_is_absent_without_a_generation_block(tmp_path: Path) -> None:
     assert tg.load_controlled_generation({"version": "x"}, tmp_path, "deadbeef") is None
 

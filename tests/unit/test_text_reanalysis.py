@@ -21,8 +21,15 @@ from pathlib import Path
 
 import pytest
 
+from video_content_pipeline import text_generation as tg
 from video_content_pipeline import text_reanalysis as reanalysis
-from video_content_pipeline.text_aggregation import AvailablePart, Chapter, OmittedPart
+from video_content_pipeline.text_aggregation import (
+    AvailablePart,
+    Chapter,
+    OmittedPart,
+    ProposedCollectionEntry,
+    SegmentRef,
+)
 from video_content_pipeline.text_contracts import render_text_analysis_markdown
 
 
@@ -408,3 +415,233 @@ def test_select_from_loaded_report_uses_its_cue_bases(tmp_path: Path) -> None:
 
     assert selection.unaffected == ("part-a",)
     assert selection.affected == ("part-b",)
+
+
+# --- New cue basis derivation ------------------------------------------------
+
+
+def _enhanced_cue(cue_ref: str, provenance: str) -> dict[str, object]:
+    return {
+        "provenance": provenance,
+        "interval": {
+            "start": {"numerator": 0, "denominator": 1},
+            "end": {"numerator": 1, "denominator": 1},
+        },
+        "text": "x",
+        "cue_ref": cue_ref,
+    }
+
+
+def test_enhancement_report_cue_bases_reads_cue_refs_in_display_order() -> None:
+    document = {
+        "enhanced_parts": [
+            {
+                "part_id": "part-a",
+                "cues": [
+                    _enhanced_cue("part-a:asr:0", "asr"),
+                    _enhanced_cue("part-a:stream-1:2", "subtitle_track"),
+                ],
+            }
+        ]
+    }
+
+    bases = reanalysis.enhancement_report_cue_bases(document)
+
+    assert bases == {"part-a": ("part-a:asr:0", "part-a:stream-1:2")}
+
+
+def test_enhancement_report_cue_bases_rejects_a_cue_missing_its_identity() -> None:
+    document = {"enhanced_parts": [{"part_id": "part-a", "cues": [{"provenance": "asr"}]}]}
+    with pytest.raises(reanalysis.TextReanalysisError) as excinfo:
+        reanalysis.enhancement_report_cue_bases(document)
+    assert excinfo.value.reason == "enhancement_report_invalid"
+
+
+def test_combined_new_cue_bases_overlays_changed_parts_only() -> None:
+    prior = {"part-a": (_cue("part-a", 0),), "part-b": (_cue("part-b", 0),)}
+    changed = {"part-a": ("part-a:asr:0",)}
+
+    combined = reanalysis.combined_new_cue_bases(prior, changed)
+
+    assert combined == {"part-a": ("part-a:asr:0",), "part-b": (_cue("part-b", 0),)}
+
+
+# --- Carry-forward -----------------------------------------------------------
+
+
+def test_carry_forward_links_unaffected_parts_to_their_source_report(tmp_path: Path) -> None:
+    chapters = [
+        Chapter(
+            part_id="part-b", ordinal=0, title="B", segment_ordinals=(0,), source_languages=("zh",)
+        ).as_json()
+    ]
+    document = _report_document(
+        segments=[
+            _segment("part-a", 0, (_cue("part-a", 0),)),
+            _segment("part-b", 0, (_cue("part-b", 0),)),
+        ],
+        chapters=chapters,
+    )
+    path = _write_report(tmp_path, document)
+    loaded = reanalysis.load_text_analysis_report(path)
+
+    carried = reanalysis.carry_forward_parts(loaded, ["part-b"])
+
+    assert [item.part_id for item in carried] == ["part-b"]
+    entry = carried[0]
+    assert entry.source_report_id == loaded.report_id
+    assert entry.source_report_sha256 == loaded.source_evidence.sha256
+    assert isinstance(entry.part, AvailablePart)
+    assert [chapter.part_id for chapter in entry.chapters] == ["part-b"]
+    provenance = entry.provenance_json()
+    assert provenance["source_report_id"] == loaded.report_id
+    assert provenance["segment_count"] == 1
+    assert provenance["chapter_count"] == 1
+
+
+def test_carry_forward_skips_an_unaffected_id_with_no_prior_analysis(tmp_path: Path) -> None:
+    document = _report_document(segments=[_segment("part-a", 0, (_cue("part-a", 0),))])
+    path = _write_report(tmp_path, document)
+    loaded = reanalysis.load_text_analysis_report(path)
+
+    # "part-omitted" is unaffected but never had verified analysis; it must not be
+    # fabricated as a carried-forward available Part.
+    carried = reanalysis.carry_forward_parts(loaded, ["part-a", "part-omitted"])
+
+    assert [item.part_id for item in carried] == ["part-a"]
+
+
+# --- Combined composition ----------------------------------------------------
+
+
+def _regenerated(part_id: str, cue_ids: tuple[str, ...], titles: list[str]) -> tg.PartGeneration:
+    """Regenerate one Part with one segment per cue through the real generation seam."""
+
+    part = tg.LoadedPart(part_id=part_id, track_id="reanalysis", cue_ids=cue_ids)
+    part_result = {
+        "part_id": part_id,
+        "segments": [
+            {
+                "boundary": {"start_cue_id": cue_id, "end_cue_id": cue_id},
+                "content": {"title": {"text": title, "cue_ids": [cue_id]}},
+            }
+            for cue_id, title in zip(cue_ids, titles, strict=True)
+        ],
+        "chapters": [],
+    }
+    return tg.generate_part(part, part_result)
+
+
+def _loaded_prior(tmp_path: Path) -> reanalysis.LoadedTextAnalysisReport:
+    collection_summary = {
+        "part_ids": ["part-a", "part-b"],
+        "partial": False,
+        "entries": [
+            {"text": "旧摘要", "segment_refs": [{"part_id": "part-b", "ordinal": 0}]},
+        ],
+        "omitted_parts": [],
+        "limitations": [],
+        "rejected": [],
+    }
+    document = _report_document(
+        segments=[
+            _segment("part-a", 0, (_cue("part-a", 0), _cue("part-a", 1))),
+            _segment("part-b", 0, (_cue("part-b", 0),)),
+        ],
+        collection_summary=collection_summary,
+    )
+    path = _write_report(tmp_path, document)
+    return reanalysis.load_text_analysis_report(path)
+
+
+def test_compose_combines_regenerated_and_carried_forward_with_provenance(tmp_path: Path) -> None:
+    prior = _loaded_prior(tmp_path)
+    # part-a's cues changed (ASR replaced them); part-b is unchanged.
+    regenerated = (_regenerated("part-a", ("part-a:asr:0", "part-a:asr:1"), ["甲", "乙"]),)
+    carried = reanalysis.carry_forward_parts(prior, ["part-b"])
+    proposed = (
+        ProposedCollectionEntry(
+            segment_refs=(SegmentRef("part-a", 0), SegmentRef("part-b", 0)), text="新摘要"
+        ),
+    )
+    order = reanalysis.combined_part_order(prior, ("part-a",), carried, prior.omitted_parts)
+
+    composition = reanalysis.compose_reanalysis(
+        regenerated=regenerated,
+        carried_forward=carried,
+        omitted_parts=prior.omitted_parts,
+        proposed_entries=proposed,
+        part_order=order,
+    )
+
+    # part-b keeps the prior order ahead-of/behind part-a as recorded in the prior
+    # collection (part-a, part-b).
+    assert order == ("part-a", "part-b")
+    provenances = [(segment["part_id"], segment["provenance"]) for segment in composition.segments]
+    assert provenances == [
+        ("part-a", "regenerated"),
+        ("part-a", "regenerated"),
+        ("part-b", "carried_forward"),
+    ]
+    # The carried-forward segment links to its source report and copies no prose.
+    carried_segment = composition.segments[-1]
+    assert carried_segment["source_report_id"] == prior.report_id
+    assert "title" not in carried_segment
+    # The collection is recomputed over the combined set and cites both Parts.
+    assert composition.collection_summary is not None
+    assert len(composition.collection_summary.entries) == 1
+    assert composition.status == "complete"
+
+
+def test_compose_reports_partial_when_a_part_is_omitted(tmp_path: Path) -> None:
+    collection_summary = {
+        "part_ids": ["part-a", "part-z"],
+        "partial": True,
+        "entries": [],
+        "omitted_parts": [
+            {
+                "part_id": "part-z",
+                "reason": "no_primary_subtitle",
+                "virtual_time_range": {
+                    "start": {"numerator": 0, "denominator": 1},
+                    "end": {"numerator": 5, "denominator": 1},
+                },
+            }
+        ],
+        "limitations": [{"reason": "text_content_unavailable", "message": "part-z omitted"}],
+        "rejected": [],
+    }
+    document = _report_document(
+        segments=[_segment("part-a", 0, (_cue("part-a", 0),))],
+        collection_summary=collection_summary,
+    )
+    path = _write_report(tmp_path, document)
+    prior = reanalysis.load_text_analysis_report(path)
+    regenerated = (_regenerated("part-a", ("part-a:asr:0",), ["甲"]),)
+    order = reanalysis.combined_part_order(prior, ("part-a",), (), prior.omitted_parts)
+
+    composition = reanalysis.compose_reanalysis(
+        regenerated=regenerated,
+        carried_forward=(),
+        omitted_parts=prior.omitted_parts,
+        proposed_entries=(),
+        part_order=order,
+    )
+
+    # The omitted Part stays declared and lowers the recomputed status to partial.
+    assert composition.status == "partial"
+    assert composition.collection_summary is not None
+    assert [item.part_id for item in composition.collection_summary.omitted_parts] == ["part-z"]
+
+
+def test_reanalysis_input_cue_manifest_is_deterministic() -> None:
+    document = reanalysis.reanalysis_input_cue_manifest_document(
+        {"part-b": ("part-b:asr:0",), "part-a": ("part-a:asr:0",)},
+        prior_report_id="prior-1",
+        enhancement_report_id="enh-1",
+    )
+    # Affected Parts are pinned in stable identity order.
+    assert [part["part_id"] for part in document["affected_parts"]] == ["part-a", "part-b"]
+    sha_one = reanalysis.reanalysis_input_cue_manifest_sha256(document)
+    sha_two = reanalysis.reanalysis_input_cue_manifest_sha256(document)
+    assert sha_one == sha_two

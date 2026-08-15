@@ -193,6 +193,28 @@ class GeneratedSegment:
 
 
 @dataclass(frozen=True)
+class PartGeneration:
+    """One available Part's regenerated analysis, before collection aggregation.
+
+    It is the per-Part unit of ``generate_analysis`` exposed on its own so a caller
+    that regenerates only some Parts -- Affected-Part re-analysis (ADR 0046) -- can
+    drive the exact same adjudication and content validation without re-running the
+    model over the Parts it carries forward. ``available_part`` is the Part's
+    aggregation identity (its verified segment ordinals and fallback flag), and
+    ``diagnostics`` retains this Part's boundary rejections, conservative fallback,
+    and chapter rejections in the same order ``generate_analysis`` records them.
+    """
+
+    part_id: str
+    segments: tuple[GeneratedSegment, ...]
+    available_part: AvailablePart
+    chapters: tuple[Chapter, ...]
+    diagnostics: tuple[PlanningDiagnostic, ...]
+    unsupported_item_count: int
+    used_fallback: bool
+
+
+@dataclass(frozen=True)
 class GeneratedAnalysis:
     """The deterministic outcome of one controlled-generation attempt.
 
@@ -333,7 +355,7 @@ def generate_analysis(
     lowers it to ``partial``; the absence of any verified segment is ``failed``.
     """
 
-    result_parts = _index_result_parts(result)
+    result_parts = index_result_parts(result)
     segments: list[GeneratedSegment] = []
     chapters: list[Chapter] = []
     diagnostics: list[PlanningDiagnostic] = []
@@ -342,33 +364,13 @@ def generate_analysis(
     aggregatable_parts: list[AvailablePart | UnavailablePart] = []
 
     for part in available:
-        part_result = result_parts.get(part.part_id, {})
-        part_segments, part_diags, part_unsupported, used_fallback = _generate_part_segments(
-            part, part_result
-        )
-        segments.extend(part_segments)
-        diagnostics.extend(part_diags)
-        unsupported += part_unsupported
-        used_fallback_anywhere = used_fallback_anywhere or used_fallback
-
-        available_part = AvailablePart(
-            part_id=part.part_id,
-            segments=tuple(
-                AggregatableSegment(
-                    part_id=segment.part_id,
-                    ordinal=segment.ordinal,
-                    source_languages=segment.source_languages,
-                )
-                for segment in part_segments
-            ),
-            used_fallback=used_fallback,
-        )
-        aggregatable_parts.append(available_part)
-        part_chapters = adjudicate_part_chapters(
-            available_part, _proposed_chapters(part.part_id, part_result)
-        )
-        chapters.extend(part_chapters.chapters)
-        diagnostics.extend(part_chapters.rejected)
+        part_generation = generate_part(part, result_parts.get(part.part_id, {}))
+        segments.extend(part_generation.segments)
+        diagnostics.extend(part_generation.diagnostics)
+        unsupported += part_generation.unsupported_item_count
+        used_fallback_anywhere = used_fallback_anywhere or part_generation.used_fallback
+        aggregatable_parts.append(part_generation.available_part)
+        chapters.extend(part_generation.chapters)
 
     for missing in unavailable:
         aggregatable_parts.append(
@@ -380,7 +382,7 @@ def generate_analysis(
         )
 
     collection_summary = aggregate_collection(
-        aggregatable_parts, _proposed_collection_entries(result)
+        aggregatable_parts, proposed_collection_entries(result)
     )
     diagnostics.extend(collection_summary.rejected)
     diagnostics.extend(collection_summary.limitations)
@@ -404,6 +406,50 @@ def generate_analysis(
         collection_summary=collection_summary if aggregatable_parts else None,
         diagnostics=tuple(diagnostics),
         unsupported_item_count=unsupported,
+    )
+
+
+def generate_part(part: LoadedPart, part_result: Mapping[str, object]) -> PartGeneration:
+    """Regenerate one available Part's segments and chapters from a model result.
+
+    This is the per-Part unit ``generate_analysis`` runs for every available Part,
+    exposed so Affected-Part re-analysis (ADR 0046) regenerates a changed Part
+    through the identical adjudication -- cue-bound boundaries, exactly-once
+    ownership, cue-level content validation, deterministic chapter adjudication,
+    and the conservative single-segment fallback -- rather than reimplementing any
+    of it. The Part's model-proposed boundaries are adjudicated into
+    SemanticSegments, each segment's content is validated against its own cue basis,
+    and its chapters are adjudicated over the resulting segment identities. Every
+    boundary rejection, fallback, and chapter rejection is retained as a diagnostic
+    in the same order ``generate_analysis`` records them.
+    """
+
+    segments, boundary_diagnostics, unsupported, used_fallback = _generate_part_segments(
+        part, part_result
+    )
+    available_part = AvailablePart(
+        part_id=part.part_id,
+        segments=tuple(
+            AggregatableSegment(
+                part_id=segment.part_id,
+                ordinal=segment.ordinal,
+                source_languages=segment.source_languages,
+            )
+            for segment in segments
+        ),
+        used_fallback=used_fallback,
+    )
+    part_chapters = adjudicate_part_chapters(
+        available_part, _proposed_chapters(part.part_id, part_result)
+    )
+    return PartGeneration(
+        part_id=part.part_id,
+        segments=tuple(segments),
+        available_part=available_part,
+        chapters=part_chapters.chapters,
+        diagnostics=tuple((*boundary_diagnostics, *part_chapters.rejected)),
+        unsupported_item_count=unsupported,
+        used_fallback=used_fallback,
     )
 
 
@@ -445,7 +491,14 @@ def _generate_part_segments(
     return generated, diagnostics, unsupported, adjudication.used_fallback
 
 
-def _index_result_parts(result: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+def index_result_parts(result: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+    """Index a model result's per-Part proposals by Part identity.
+
+    Exposed so Affected-Part re-analysis (ADR 0046) locates each regenerated Part's
+    proposals through the same reader ``generate_analysis`` uses, keeping one
+    interpretation of the model-proposed Part structure.
+    """
+
     indexed: dict[str, Mapping[str, object]] = {}
     for raw_part in _as_list(result.get("parts")):
         if not isinstance(raw_part, Mapping):
@@ -523,9 +576,18 @@ def _proposed_chapters(
     return tuple(proposed)
 
 
-def _proposed_collection_entries(
+def proposed_collection_entries(
     result: Mapping[str, object],
 ) -> tuple[ProposedCollectionEntry, ...]:
+    """Parse a model result's proposed cross-Part collection entries.
+
+    Exposed so Affected-Part re-analysis (ADR 0046) recomputes the collection
+    summary over the combined regenerated-plus-carried-forward Part set through the
+    same parsing ``generate_analysis`` uses, keeping one interpretation of the
+    model-proposed collection structure. Malformed entries and citations are
+    dropped here and rejected later by ``aggregate_collection`` against the actual
+    verified segments.
+    """
     summary = result.get("collection_summary")
     if not isinstance(summary, Mapping):
         return ()
@@ -572,6 +634,7 @@ __all__ = [
     "GeneratedAnalysis",
     "GeneratedSegment",
     "LoadedPart",
+    "PartGeneration",
     "STATUS_COMPLETE",
     "STATUS_FAILED",
     "STATUS_PARTIAL",
@@ -579,6 +642,9 @@ __all__ = [
     "UnavailablePartInfo",
     "cue_id",
     "generate_analysis",
+    "generate_part",
+    "index_result_parts",
+    "proposed_collection_entries",
     "input_cue_manifest_document",
     "input_cue_manifest_sha256",
     "load_controlled_generation",

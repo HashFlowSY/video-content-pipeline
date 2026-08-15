@@ -58,6 +58,7 @@ from video_content_pipeline.text_analysis import (
     analyze_text,
     resume_text_analysis,
 )
+from video_content_pipeline.text_reanalysis import reanalyze_text
 from video_content_pipeline.transcription import (
     TranscriptionError,
     resume_transcription,
@@ -132,6 +133,12 @@ def _parser() -> argparse.ArgumentParser:
     resume_text_command.add_argument("report_id")
     resume_text_command.add_argument("--decision", metavar="DECISION")
     resume_text_command.add_argument("--json", action="store_true")
+    reanalyze_text_command = subcommands.add_parser("reanalyze-text")
+    reanalyze_text_command.add_argument("plan_id")
+    reanalyze_text_command.add_argument("subtitle_report_id")
+    reanalyze_text_command.add_argument("--prior-report", required=True, metavar="REPORT_ID")
+    reanalyze_text_command.add_argument("--enhancement-report", required=True, metavar="REPORT_ID")
+    reanalyze_text_command.add_argument("--json", action="store_true")
     transcribe_command = subcommands.add_parser("transcribe")
     transcribe_command.add_argument("plan_id")
     transcribe_command.add_argument("subtitle_report_id")
@@ -243,6 +250,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         except TextAnalysisError as error:
             print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
             return 2
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "reanalyze-text":
+        result = reanalyze_text(
+            arguments.plan_id,
+            arguments.subtitle_report_id,
+            arguments.prior_report,
+            arguments.enhancement_report,
+            _project_root(),
+        )
         print(json.dumps(result, sort_keys=True))
         return 0
     if arguments.command == "transcribe":
