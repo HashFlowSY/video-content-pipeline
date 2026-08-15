@@ -10,18 +10,25 @@ with recorded reasons.
 **Blocked by:** 01, 04 — OCR runs under the registered capability and only
 after the confirmation pause.
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] The Controlled offline OCR adapter is described by implementation
+- [x] The Controlled offline OCR adapter is described by implementation
   version and fixed input/output fixture hashes; it is not a model asset and
   cannot earn a real-model quality qualification.
-- [ ] OCR output enters only through a versioned output projection; an
+- [x] OCR output enters only through a versioned output projection; an
   incomplete or schema-invalid projection is `model_output_invalid` and
   invalidates the attempt, with raw output retained as restricted local audit
   evidence.
-- [ ] Every projected OCR evidence item carries Part, PTS, `visual_page_id`,
+- [x] Every projected OCR evidence item carries Part, PTS, `visual_page_id`,
   and confidence; items with times outside actual stream coverage or
   inconsistent with their page's appearance records are rejected with
   structured reasons, never silently repaired.
-- [ ] OCR text keeps its source language, including mixed Chinese/English.
+- [x] OCR text keeps its source language, including mixed Chinese/English.
+
+## Comments
+
+Implemented in commit 21fa4c1 feat: version the OCR adapter, projection, and item gates. Acceptance criteria were checked at phase
+closure on the maintainer's instruction, anchored to the current-head
+verification (pytest 700 passed; ruff and mypy clean; 30 confirmed exit-gate
+booleans in docs/PHASE_08_INVENTORY.json).

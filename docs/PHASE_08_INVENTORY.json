@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "phase": 8,
-  "status": "in_progress",
+  "status": "completed",
   "ticket_09_verification": "passed_offline",
   "phase_exit_gates": "all_confirmed",
   "phase_completion_note": "Ticket 09 closes Phase 8 offline: the nine exit gates below (the five 阶段 8 退出门禁 from docs/PHASED_EXECUTION_PLAN.md plus the four derived gates named in docs/PHASE_08_SPECIFICATION.md) are each mapped to named proving tests and cross-linked to a summary boolean, and every ticket-09 minimum scenario is mapped in coverage_map. Marking Phase 8 `completed` in project-state.json is a separate maintainer governance decision, intentionally not performed here; the phase plan's original 'evaluate local OCR candidates' work item is an explicitly recorded out-of-scope deviation (see open_requirements).",

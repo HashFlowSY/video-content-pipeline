@@ -14,12 +14,13 @@ Visual-text does not depend on subtitles (ADR 0047).
 
 ## Status
 
-`approved_for_implementation_planning` (grilling consensus approved
-2026-08-15). Verification will be offline only: no model is downloaded,
-installed, or invoked, no user media or network is accessed, no frame is
-extracted from user media, `outputs/` is not written, and the phase will claim
-no domain quality, `model_audited`, `human_verified`, real-world testing, or
-production validation.
+`completed_and_verified_offline`. Implementation and the Phase 8 CLI contract
+are complete; see the [completion report](PHASE_08_COMPLETION_REPORT.md) and
+[inventory](PHASE_08_INVENTORY.json). Verification was offline only: no model
+is downloaded, installed, or invoked, no user media or network is accessed, no
+frame is extracted from user media, `outputs/` is not written, and the phase
+claims no domain quality, `model_audited`, `human_verified`, real-world
+testing, or production validation.
 
 ## Objective
 

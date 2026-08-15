@@ -9,16 +9,23 @@ semantics change.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] `ocr_primary` is evaluated with the shared eligibility fields (https
+- [x] `ocr_primary` is evaluated with the shared eligibility fields (https
   official source, approved license, pinned revision, asset hash, offline
   runtime, no credentials, no telemetry, dependency plan, resource envelope).
-- [ ] RapidOCR (or a compatible free local candidate) is registered as a
+- [x] RapidOCR (or a compatible free local candidate) is registered as a
   research candidate — metadata only: no download, no execution, no network.
-- [ ] No general vision model appears anywhere in the capability contract —
+- [x] No general vision model appears anywhere in the capability contract —
   no required dependency and no optional capability slot (ADR 0047).
-- [ ] When no eligible `ocr_primary` capability exists, the outcome is an
+- [x] When no eligible `ocr_primary` capability exists, the outcome is an
   immutable Model-acquisition-required visual-text result carrying no OCR
   evidence.
+
+## Comments
+
+Implemented in commit d84d196 feat: register the OCR capability contract and eligibility. Acceptance criteria were checked at phase
+closure on the maintainer's instruction, anchored to the current-head
+verification (pytest 700 passed; ruff and mypy clean; 30 confirmed exit-gate
+booleans in docs/PHASE_08_INVENTORY.json).
