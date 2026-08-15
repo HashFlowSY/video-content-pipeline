@@ -28,11 +28,17 @@ pause, from an explicit decision, as a fresh non-overwriting attempt — there i
 no automatic retry. Append-only synthetic human-review records live in
 ``text_review``.
 
-No Controlled offline text adapter *generates* yet, so a fully revalidated
-attempt with no resource pause still retains ``controlled_adapter_unavailable``
-with no semantic content. The generating adapter and semantic segmentation belong
-to later Phase 6 tickets. See ``docs/PHASE_06_SPECIFICATION.md`` and the Text
-Analysis Context.
+Ticket 08 completes the offline contract: a fully revalidated attempt whose
+Controlled offline text adapter binds a hash-pinned synthetic output fixture to
+these exact revalidated cues now *generates*. ``_run_controlled_generation``
+projects that retained output through the versioned schema and composes it — via
+``text_generation`` — into verified SemanticSegments, chapters, and a collection
+summary, concluding ``complete`` or ``partial``. Without a bound fixture the
+adapter cannot generate and the attempt still retains
+``controlled_adapter_unavailable`` with no semantic content; an invalid whole
+projection fails the attempt while its raw output stays restricted audit evidence.
+The adapter is not a model asset and can never earn a real-model qualification. See
+``docs/PHASE_06_SPECIFICATION.md`` and the Text Analysis Context.
 """
 
 from __future__ import annotations
@@ -65,16 +71,38 @@ from video_content_pipeline.source import SourceArtifact, sha256_file
 from video_content_pipeline.subtitle_pipeline import (
     CandidateReportState,
     CandidateState,
+    SubtitleCandidate,
     SubtitleCandidateReport,
     SubtitleReportError,
     subtitle_rules_fingerprint,
 )
+from video_content_pipeline.text_aggregation import (
+    Chapter,
+    CollectionSummary,
+    TextAggregationError,
+)
 from video_content_pipeline.text_contracts import (
     TextContractError,
     TextGenerationContracts,
+    project_text_model_output,
     render_text_analysis_markdown,
     revalidate_text_generation_contracts,
 )
+from video_content_pipeline.text_generation import (
+    STATUS_COMPLETE,
+    STATUS_FAILED,
+    STATUS_PARTIAL,
+    GeneratedSegment,
+    LoadedPart,
+    TextGenerationError,
+    UnavailablePartInfo,
+    generate_analysis,
+    input_cue_manifest_document,
+    input_cue_manifest_sha256,
+    load_controlled_generation,
+    load_cue_inventory,
+)
+from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 
 # The future-real-model one-large-model rule: a conservative resource estimate
 # above this envelope pauses for an explicit resource decision instead of
@@ -208,6 +236,27 @@ class AttemptProvenance:
 
 
 @dataclass(frozen=True)
+class _ControlledGenerationOutcome:
+    """The internal result of one Controlled offline text-generation attempt.
+
+    It gathers the fields an attempt derives after revalidation so the caller binds
+    them by name rather than by position, mirroring the frozen-record style used for
+    every outward report structure.
+    """
+
+    status: TextAnalysisReportStatus
+    diagnostics: tuple[PlanningDiagnostic, ...]
+    adapter_state: ControlledTextAdapterState
+    segments: tuple[GeneratedSegment, ...]
+    chapters: tuple[Chapter, ...]
+    collection_summary: CollectionSummary | None
+    unsupported_item_count: int
+    restricted_raw_output: tuple[RestrictedRawOutput, ...]
+    raw_output_state: str
+    projection_state: dict[str, object]
+
+
+@dataclass(frozen=True)
 class ControlledTextAdapterState:
     """The availability outcome for the Controlled offline text adapter."""
 
@@ -304,6 +353,10 @@ class TextAnalysisReport:
     required_decision: dict[str, object] | None
     rendered_report: dict[str, object] | None
     restricted_raw_output: tuple[RestrictedRawOutput, ...]
+    segments: tuple[GeneratedSegment, ...]
+    chapters: tuple[Chapter, ...]
+    collection_summary: CollectionSummary | None
+    unsupported_item_count: int
     diagnostics: tuple[PlanningDiagnostic, ...]
 
     def as_json(self) -> dict[str, object]:
@@ -352,15 +405,21 @@ class TextAnalysisReport:
             "attempt_provenance": self.attempt_provenance.as_json(),
             "required_decision": self.required_decision,
             "rendered_report": self.rendered_report,
-            "segments": [],
-            "chapters": [],
-            "collection_summary": None,
+            "segments": [segment.as_json() for segment in self.segments],
+            "chapters": [chapter.as_json() for chapter in self.chapters],
+            "collection_summary": (
+                self.collection_summary.as_json() if self.collection_summary is not None else None
+            ),
+            "unsupported_item_count": self.unsupported_item_count,
             "restricted_raw_output": [output.as_json() for output in self.restricted_raw_output],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
             "guarantees": {
                 "asr_or_ocr": "not_attempted",
                 "external_knowledge": "not_used",
                 "model_acquisition": "not_attempted",
+                # The Controlled offline text adapter reads a hash-pinned synthetic
+                # fixture; it loads and runs no model asset, so real-model execution
+                # is never attempted in this phase.
                 "model_execution": "not_attempted",
                 "network_access": "not_attempted",
                 "outputs_publication": "not_attempted",
@@ -449,6 +508,17 @@ def analyze_text(
     contracts: TextGenerationContracts | None = None
     required_decision: dict[str, object] | None = None
     resource_measurement: dict[str, object] = _incomplete_resource_measurement()
+    segments: tuple[GeneratedSegment, ...] = ()
+    chapters: tuple[Chapter, ...] = ()
+    collection_summary: CollectionSummary | None = None
+    unsupported_item_count = 0
+    restricted_raw_output: tuple[RestrictedRawOutput, ...] = ()
+    raw_output_state = "not_generated"
+    projection_state: dict[str, object] = {"state": "not_projected"}
+    adapter_state = ControlledTextAdapterState(
+        state=TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE.value,
+        diagnostic=_adapter_unavailable_diagnostic(),
+    )
 
     try:
         plan_path = project_root / "plans" / plan_id / "run-plan.json"
@@ -516,11 +586,29 @@ def analyze_text(
                 ),
             )
         else:
-            status = TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE
-            diagnostics = (_adapter_unavailable_diagnostic(),)
+            outcome = _run_controlled_generation(
+                contracts=contracts,
+                plan=plan,
+                subtitle_report=subtitle_report,
+                selected_primary_tracks=selected_primary_tracks,
+                project_root=project_root,
+                workspace_path=workspace_path,
+            )
+            status = outcome.status
+            diagnostics = outcome.diagnostics
+            adapter_state = outcome.adapter_state
+            segments = outcome.segments
+            chapters = outcome.chapters
+            collection_summary = outcome.collection_summary
+            unsupported_item_count = outcome.unsupported_item_count
+            restricted_raw_output = outcome.restricted_raw_output
+            raw_output_state = outcome.raw_output_state
+            projection_state = outcome.projection_state
     except (
         TextAnalysisError,
         TextContractError,
+        TextGenerationError,
+        TextAggregationError,
         PlanningError,
         SubtitleReportError,
         OSError,
@@ -534,6 +622,17 @@ def analyze_text(
         contracts = None
         required_decision = None
         resource_measurement = _incomplete_resource_measurement()
+        segments = ()
+        chapters = ()
+        collection_summary = None
+        unsupported_item_count = 0
+        restricted_raw_output = ()
+        raw_output_state = "not_generated"
+        projection_state = {"state": "not_projected"}
+        adapter_state = ControlledTextAdapterState(
+            state=TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE.value,
+            diagnostic=_adapter_unavailable_diagnostic(),
+        )
         diagnostics = (
             PlanningDiagnostic(
                 getattr(error, "reason", "text_analysis_input_invalid"),
@@ -548,7 +647,9 @@ def analyze_text(
         contracts=contracts,
         selected_primary_tracks=selected_primary_tracks,
         resource_measurement=resource_measurement,
-        restricted_raw_output=(),
+        restricted_raw_output=restricted_raw_output,
+        raw_output_state=raw_output_state,
+        projection_state=projection_state,
         workspace_path=workspace_path,
     )
     report = TextAnalysisReport(
@@ -564,10 +665,7 @@ def analyze_text(
         audio_analysis_report_evidence=audio_analysis_report_evidence,
         resumed_from_report=resumed_from_report,
         resumption_decision=resumption_decision,
-        controlled_text_adapter=ControlledTextAdapterState(
-            state=TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE.value,
-            diagnostic=_adapter_unavailable_diagnostic(),
-        ),
+        controlled_text_adapter=adapter_state,
         audio_analysis=audio_binding,
         revalidation=RevalidationEvidence(
             run_plan_confirmed=run_plan_confirmed,
@@ -579,7 +677,11 @@ def analyze_text(
         attempt_provenance=provenance,
         required_decision=required_decision,
         rendered_report=None,
-        restricted_raw_output=(),
+        restricted_raw_output=restricted_raw_output,
+        segments=segments,
+        chapters=chapters,
+        collection_summary=collection_summary,
+        unsupported_item_count=unsupported_item_count,
         diagnostics=diagnostics,
     )
     report = _render_and_bind_markdown(report)
@@ -620,6 +722,8 @@ def _build_attempt_provenance(
     selected_primary_tracks: tuple[SelectedPrimaryTrack, ...],
     resource_measurement: dict[str, object],
     restricted_raw_output: tuple[RestrictedRawOutput, ...],
+    raw_output_state: str = "not_generated",
+    projection_state: dict[str, object] | None = None,
     workspace_path: Path,
 ) -> AttemptProvenance:
     """Compose the immutable provenance record for one attempt.
@@ -628,9 +732,10 @@ def _build_attempt_provenance(
     written into the immutable workspace and bound by hash so a future real-model
     boundary can prove exactly which prompt, adapter, sampling, schema, and
     evidence rules produced a candidate. A failed attempt records only the
-    identities it managed to bind. No raw output is generated in this phase, so the
-    raw-output and projection state stay ``not_generated``/``not_projected`` while
-    the restriction is still declared.
+    identities it managed to bind. ``raw_output_state`` and ``projection_state``
+    record whether the Controlled offline text adapter generated and whether its
+    output projected; the raw output itself stays restricted local audit evidence
+    referenced only by hash.
     """
 
     prompt: dict[str, object] | None = None
@@ -655,7 +760,9 @@ def _build_attempt_provenance(
             "version": contracts.evidence_rules.version,
             "sha256": contracts.evidence_rules.evidence.sha256,
         }
-        manifest_document = _input_cue_manifest_document(selected_primary_tracks)
+        manifest_document = input_cue_manifest_document(
+            _selected_track_tuples(selected_primary_tracks)
+        )
         manifest_path = workspace_path / "provenance" / "input-cue-manifest.json"
         _write_json_once(manifest_path, manifest_document)
         manifest_evidence = _input_evidence(manifest_path)
@@ -682,11 +789,13 @@ def _build_attempt_provenance(
         output_schema_identity=output_schema_identity,
         evidence_rules_identity=evidence_rules_identity,
         raw_output={
-            "state": "not_generated",
+            "state": raw_output_state,
             "restriction": _RESTRICTED_LOCAL_AUDIT,
             "artifacts": [output.as_json() for output in restricted_raw_output],
         },
-        projection={"state": "not_projected"},
+        projection=(
+            dict(projection_state) if projection_state is not None else {"state": "not_projected"}
+        ),
         resource_measurement=resource_measurement,
     )
 
@@ -699,14 +808,206 @@ def _sampling_identity(adapter_document: Mapping[str, object]) -> dict[str, obje
     return {"sha256": sha256(encoded).hexdigest(), "configuration": dict(configuration)}
 
 
-def _input_cue_manifest_document(
+def _run_controlled_generation(
+    *,
+    contracts: TextGenerationContracts,
+    plan: RunPlan,
+    subtitle_report: SubtitleCandidateReport,
     selected_primary_tracks: tuple[SelectedPrimaryTrack, ...],
-) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "track_count": len(selected_primary_tracks),
-        "tracks": [track.as_json() for track in selected_primary_tracks],
+    project_root: Path,
+    workspace_path: Path,
+) -> _ControlledGenerationOutcome:
+    """Attempt Controlled offline text generation for a fully revalidated attempt.
+
+    Without a bound generation fixture the Controlled offline text adapter cannot
+    generate, so the attempt retains ``controlled_adapter_unavailable`` with no
+    semantic content (backward compatible with an availability-only attempt). With
+    one, the fixture must be bound to exactly these revalidated cues; its retained
+    output is projected through the versioned schema, and an invalid whole
+    projection fails the complete attempt while its raw output stays restricted
+    audit evidence. A valid projection is composed into verified segments,
+    chapters, and a collection summary by ``text_generation``.
+    """
+
+    manifest_document = input_cue_manifest_document(
+        _selected_track_tuples(selected_primary_tracks)
+    )
+    manifest_sha = input_cue_manifest_sha256(manifest_document)
+    controlled = load_controlled_generation(
+        contracts.controlled_adapter.document, project_root, manifest_sha
+    )
+    if controlled is None:
+        return _ControlledGenerationOutcome(
+            status=TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE,
+            diagnostics=(_adapter_unavailable_diagnostic(),),
+            adapter_state=ControlledTextAdapterState(
+                state=TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE.value,
+                diagnostic=_adapter_unavailable_diagnostic(),
+            ),
+            segments=(),
+            chapters=(),
+            collection_summary=None,
+            unsupported_item_count=0,
+            restricted_raw_output=(),
+            raw_output_state="not_generated",
+            projection_state={"state": "not_projected"},
+        )
+    if controlled.input_fixture_sha256 != manifest_sha:
+        raise TextAnalysisError(
+            "controlled_generation_input_mismatch",
+            "Controlled adapter fixture is not bound to these revalidated cues.",
+        )
+    raw_pointer = record_restricted_raw_output(
+        workspace_path, "controlled-generation", controlled.raw_output
+    )
+    restricted_raw_output = (raw_pointer,)
+    projection = project_text_model_output(
+        _decode_generation_output(controlled.raw_output), contracts
+    )
+    if projection.projection is None:
+        diagnostic = projection.diagnostic or PlanningDiagnostic(
+            "model_output_invalid", "The controlled generation output is invalid."
+        )
+        return _ControlledGenerationOutcome(
+            status=TextAnalysisReportStatus.FAILED,
+            diagnostics=(diagnostic,),
+            adapter_state=ControlledTextAdapterState(
+                state="controlled_generation_invalid", diagnostic=diagnostic
+            ),
+            segments=(),
+            chapters=(),
+            collection_summary=None,
+            unsupported_item_count=0,
+            restricted_raw_output=restricted_raw_output,
+            raw_output_state="generated",
+            projection_state={"state": projection.state},
+        )
+    available, unavailable = _generation_parts(plan, subtitle_report, selected_primary_tracks)
+    result = projection.projection.get("result")
+    analysis = generate_analysis(
+        available, unavailable, result if isinstance(result, Mapping) else {}
+    )
+    return _ControlledGenerationOutcome(
+        status=_map_generation_status(analysis.status),
+        diagnostics=analysis.diagnostics,
+        adapter_state=ControlledTextAdapterState(
+            state="controlled_generation_complete", diagnostic=None
+        ),
+        segments=analysis.segments,
+        chapters=analysis.chapters,
+        collection_summary=analysis.collection_summary,
+        unsupported_item_count=analysis.unsupported_item_count,
+        restricted_raw_output=restricted_raw_output,
+        raw_output_state="generated",
+        projection_state={
+            "state": "projected",
+            "output_schema_version": contracts.output_schema.version,
+        },
+    )
+
+
+def _generation_parts(
+    plan: RunPlan,
+    subtitle_report: SubtitleCandidateReport,
+    selected_primary_tracks: tuple[SelectedPrimaryTrack, ...],
+) -> tuple[tuple[LoadedPart, ...], tuple[UnavailablePartInfo, ...]]:
+    """Derive authoritative per-Part cue inventories and unavailable-Part ranges.
+
+    Each selected Primary track becomes an available Part whose ordered cue
+    identities are loaded from its retained ``source-candidate.json``. Every plan
+    SourceArtifact without a selected Primary track is a ``text_content=unavailable``
+    Part whose retained CollectionVirtualTime range is derived from the candidate's
+    retained raw-PTS cue intervals, so the collection can declare its omission
+    without inventing content.
+    """
+
+    candidates_by_key = {
+        (candidate.source_id, candidate.stream_index): candidate
+        for candidate in subtitle_report.candidates
     }
+    available: list[LoadedPart] = []
+    covered: set[str] = set()
+    for track in selected_primary_tracks:
+        candidate = candidates_by_key.get((track.source_id, track.stream_index))
+        if candidate is None or candidate.source_candidate_path is None:
+            raise TextAnalysisError(
+                "subtitle_track_changed",
+                "A selected Primary subtitle track lost its retained cue evidence.",
+            )
+        available.append(
+            load_cue_inventory(
+                Path(candidate.source_candidate_path),
+                part_id=track.source_id,
+                stream_index=track.stream_index,
+            )
+        )
+        covered.add(track.source_id)
+
+    unavailable: list[UnavailablePartInfo] = []
+    for artifact in plan.source_artifacts:
+        if artifact.source_id in covered:
+            continue
+        part_candidates = [
+            candidate
+            for candidate in subtitle_report.candidates
+            if candidate.source_id == artifact.source_id
+        ]
+        unavailable.append(_unavailable_part(artifact.source_id, part_candidates))
+    return tuple(available), tuple(unavailable)
+
+
+def _unavailable_part(
+    source_id: str, candidates: list[SubtitleCandidate]
+) -> UnavailablePartInfo:
+    """Build one ``text_content=unavailable`` Part with its retained omitted range."""
+
+    intervals = [
+        interval for candidate in candidates for interval in candidate.raw_pts_cue_intervals
+    ]
+    if intervals:
+        start = min(interval.start for interval in intervals)
+        end = max(interval.end for interval in intervals)
+        virtual_time_range = HalfOpenInterval(start, end)
+    else:
+        # No retained timing evidence for this Part; declare a minimal placeholder
+        # range so the omission is still visible without inventing cue content.
+        virtual_time_range = HalfOpenInterval(ExactTime(0), ExactTime(1))
+    reason = "no_valid_primary_track"
+    for candidate in candidates:
+        if candidate.diagnostic is not None:
+            reason = candidate.diagnostic.reason
+            break
+    return UnavailablePartInfo(
+        part_id=source_id, reason=reason, virtual_time_range=virtual_time_range
+    )
+
+
+def _decode_generation_output(raw_output: bytes) -> object:
+    """Decode restricted raw generation bytes for projection, or a rejecting sentinel."""
+
+    try:
+        return json.loads(raw_output)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _selected_track_tuples(
+    selected_primary_tracks: tuple[SelectedPrimaryTrack, ...],
+) -> list[tuple[str, int, str]]:
+    """Project the selected Primary tracks into the input-cue manifest identity form."""
+
+    return [
+        (track.source_id, track.stream_index, track.sha256)
+        for track in selected_primary_tracks
+    ]
+
+
+def _map_generation_status(status: str) -> TextAnalysisReportStatus:
+    return {
+        STATUS_COMPLETE: TextAnalysisReportStatus.COMPLETE,
+        STATUS_PARTIAL: TextAnalysisReportStatus.PARTIAL,
+        STATUS_FAILED: TextAnalysisReportStatus.FAILED,
+    }[status]
 
 
 def _render_prompt(

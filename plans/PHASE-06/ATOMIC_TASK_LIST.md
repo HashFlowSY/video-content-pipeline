@@ -19,7 +19,7 @@ model, reads user media, accesses a network, or writes `outputs/`.
    limitations, unavailable Parts, and source-language boundaries.
 7. [x] Implement immutable attempt provenance, state/decision/resource rules,
    restricted diagnostics, and synthetic append-only human-review records.
-8. [ ] Prove the complete offline `analyze-text` CLI contract, no-side-effect
+8. [x] Prove the complete offline `analyze-text` CLI contract, no-side-effect
    guarantees, and project verification gates.
 
 Dependency order:

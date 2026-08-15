@@ -203,10 +203,22 @@ def render_text_analysis_markdown(report: Mapping[str, object]) -> RenderedTextR
     chapters = _as_list(report.get("chapters"))
     lines.append("")
     lines.append("## 语义段 Segments")
-    lines.append(f"已验证语义段数量: {len(segments)}")
+    lines.append(f"已验证语义段数量 verified segments: {len(segments)}")
+    fallback_segments = sum(
+        1
+        for segment in segments
+        if isinstance(segment, Mapping) and segment.get("origin") == "conservative_fallback"
+    )
+    if fallback_segments:
+        lines.append(f"保守回退语义段 conservative-fallback segments: {fallback_segments}")
+    unsupported = report.get("unsupported_item_count")
+    if isinstance(unsupported, int):
+        lines.append(f"未获支持的生成条目 unsupported generated items: {unsupported}")
     lines.append("")
     lines.append("## 章节 Chapters")
-    lines.append(f"章节数量: {len(chapters)}")
+    lines.append(f"章节数量 chapters: {len(chapters)}")
+    # Every chapter summary declares audio_completeness regardless of any evidence.
+    lines.append("音频完整性 audio_completeness: `not_verified`")
     lines.append("")
     lines.append("## 合集摘要 Collection summary")
     _render_collection_summary(lines, report.get("collection_summary"))
