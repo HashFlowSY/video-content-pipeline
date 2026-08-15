@@ -248,3 +248,44 @@ def test_render_markdown_excludes_raw_generated_output() -> None:
 
     assert "deadbeef" not in rendered.text
     assert "work/raw.txt" not in rendered.text
+
+
+def test_render_markdown_summarizes_collection_omissions_and_limitations() -> None:
+    report = {
+        "status": "partial",
+        "plan_id": "plan-a",
+        "subtitle_report_id": "1" * 32,
+        "audio_completeness": "not_verified",
+        "segments": [{"part_id": "part-a", "ordinal": 0}],
+        "chapters": [{"part_id": "part-a", "ordinal": 0}],
+        "collection_summary": {
+            "part_ids": ["part-a", "part-z"],
+            "partial": True,
+            "entries": [
+                {"text": "跨部概览", "segment_refs": [{"part_id": "part-a", "ordinal": 0}]}
+            ],
+            "omitted_parts": [
+                {
+                    "part_id": "part-z",
+                    "reason": "no_primary_subtitle",
+                    "virtual_time_range": {"start": [5, 1], "end": [9, 1]},
+                }
+            ],
+            "limitations": [
+                {"reason": "text_content_unavailable", "message": "Part part-z has no subtitle."}
+            ],
+            "rejected": [],
+        },
+        "diagnostics": [],
+    }
+
+    rendered = text_contracts.render_text_analysis_markdown(report)
+
+    # Unavailable Parts and limitation reasons are summarized in the readable report.
+    assert "part-z" in rendered.text
+    assert "text_content_unavailable" in rendered.text
+    # The collection summary itself declares audio_completeness=not_verified.
+    assert rendered.text.count("not_verified") >= 2
+    assert "1" in rendered.text  # verified segment/chapter counts are present
+    # It still never dumps the cited entry prose or item-level validation detail.
+    assert "跨部概览" not in rendered.text

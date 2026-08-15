@@ -15,7 +15,7 @@ model, reads user media, accesses a network, or writes `outputs/`.
    ownership, technical-block deduplication, and conservative fallback.
 5. [x] Validate evidence-bound segment detail, titles, Q&A, people/roles,
    structured details, contradictions, unresolved questions, and diagnostics.
-6. [ ] Aggregate Part-local chapters and collection summaries while preserving
+6. [x] Aggregate Part-local chapters and collection summaries while preserving
    limitations, unavailable Parts, and source-language boundaries.
 7. [ ] Implement immutable attempt provenance, state/decision/resource rules,
    restricted diagnostics, and synthetic append-only human-review records.

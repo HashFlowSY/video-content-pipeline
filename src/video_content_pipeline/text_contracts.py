@@ -182,12 +182,13 @@ def render_text_analysis_markdown(report: Mapping[str, object]) -> RenderedTextR
     """Deterministically render a verified JSON report into workspace Markdown.
 
     The rendition summarizes the report status, plan and subtitle identities,
-    verified segment and chapter counts, collection-summary presence, the
+    verified segment and chapter counts, the collection-summary entry count with
+    its declared subtitle-unavailable Parts and limitation reasons (ticket 06), the
     mandatory ``audio_completeness=not_verified`` notice, and a diagnostic-reason
     summary. It never includes raw generated text or item-level validation dumps;
     the JSON report remains authoritative. Later tickets extend the summary with
-    unsupported-item counts, unavailable Parts, and pending decisions once those
-    fields exist on the report.
+    unsupported-item counts and pending decisions once those fields exist on the
+    report.
     """
 
     lines: list[str] = []
@@ -208,7 +209,7 @@ def render_text_analysis_markdown(report: Mapping[str, object]) -> RenderedTextR
     lines.append(f"章节数量: {len(chapters)}")
     lines.append("")
     lines.append("## 合集摘要 Collection summary")
-    lines.append("无" if report.get("collection_summary") is None else "见 JSON 报告")
+    _render_collection_summary(lines, report.get("collection_summary"))
 
     lines.append("")
     lines.append("## 限制与诊断 Limitations and diagnostics")
@@ -231,6 +232,36 @@ def render_text_analysis_markdown(report: Mapping[str, object]) -> RenderedTextR
         sha256=sha256(encoded).hexdigest(),
         byte_count=len(encoded),
     )
+
+
+def _render_collection_summary(lines: list[str], summary: object) -> None:
+    """Summarize collection omissions and limitations without dumping item prose.
+
+    A ``None`` summary renders ``无``. Otherwise the readable report states the
+    verified-entry count, declares every subtitle-unavailable Part with its reason,
+    and lists the distinct limitation reasons. It never includes the cited entry
+    prose or item-level validation detail; the JSON report remains authoritative.
+    """
+
+    if not isinstance(summary, Mapping):
+        lines.append("无")
+        return
+    entries = _as_list(summary.get("entries"))
+    lines.append(f"合集条目数量 entry count: {len(entries)}")
+    lines.append("音频完整性 audio_completeness: `not_verified`")
+    omitted = [item for item in _as_list(summary.get("omitted_parts")) if isinstance(item, Mapping)]
+    lines.append(f"不可用分卷 unavailable Parts: {len(omitted)}")
+    for item in omitted:
+        lines.append(
+            f"- `{_scalar(item.get('part_id'))}` ({_scalar(item.get('reason'))})"
+        )
+    limitations = _as_list(summary.get("limitations"))
+    reasons = sorted(
+        {_scalar(item.get("reason")) for item in limitations if isinstance(item, Mapping)}
+    )
+    if reasons:
+        joined = ", ".join(f"`{reason}`" for reason in reasons)
+        lines.append("限制原因 limitation reasons: " + joined)
 
 
 def _read_json_mapping(
