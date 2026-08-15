@@ -28,13 +28,16 @@ visual fact traces to retained OCR evidence:
   regenerated-plus-carried-forward set through the Phase 6/7 composition, in a
   fresh immutable workspace that never overwrites the prior report.
 
-The Host-read comment upgrade (ADR 0049) is a *separate* text-analysis rule
-(ticket 08); this module only consumes classified page-text evidence as cited
-page facts. Visual page-change times and OCR item PTS are compared on the same
-retained raw-PTS axis as the subtitle cue intervals; cross-stream clock
-reconciliation on real media is deferred with the rest of the real-OCR work.
-See ``docs/PHASE_08_SPECIFICATION.md``, ADR 0046-0049, and the Text Analysis and
-Visual-Text Contexts.
+The Host-read comment upgrade (ADR 0049, ticket 08) also lives here, because it is
+the one cross-modal fact decision the phase permits: a background-UI comment the
+host read aloud or explicitly selected becomes formal evidence only after a
+deterministic comparison with the retained cue text (``host_read_upgrade``). The
+visual-side report is never mutated; the upgrade record lives in this text-analysis
+report and cites both the OCR evidence item and the supporting cues. Visual
+page-change times and OCR item PTS are compared on the same retained raw-PTS axis as
+the subtitle cue intervals; cross-stream clock reconciliation on real media is
+deferred with the rest of the real-OCR work. See ``docs/PHASE_08_SPECIFICATION.md``,
+ADR 0046-0049, and the Text Analysis and Visual-Text Contexts.
 """
 
 from __future__ import annotations
@@ -45,7 +48,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
-from typing import TypeGuard
+from typing import Protocol, TypeGuard, TypeVar
 
 from video_content_pipeline.enhancement import RetainedSubtitleCue, load_retained_subtitle_cues
 from video_content_pipeline.evidence import (
@@ -53,6 +56,13 @@ from video_content_pipeline.evidence import (
     input_evidence,
     validated_report_id,
     write_json_once,
+)
+from video_content_pipeline.host_read_upgrade import (
+    BackgroundUiComment,
+    CueText,
+    HostReadUpgrade,
+    evaluate_host_read_upgrades,
+    load_host_read_upgrade_ruleset,
 )
 from video_content_pipeline.planning import (
     PlanningDiagnostic,
@@ -124,6 +134,12 @@ VISUAL_EVIDENCE_STATUSES = frozenset({"complete", "partial"})
 # other categories and excluded platform noise never enter formal content here.
 _PAGE_TEXT_CATEGORY = "page_text"
 
+# The category whose items are the *candidates* for the Host-read comment upgrade
+# (ticket 08). A background-UI item is never evidence until text-analysis upgrades
+# it, and it never widens Affected-Part selection on its own (that stays driven by
+# page-text facts and page changes).
+_BACKGROUND_UI_CATEGORY = "background_ui"
+
 
 class VisualReanalysisError(ValueError):
     """A rejected visual re-analysis input with a machine-readable reason."""
@@ -174,10 +190,16 @@ class VisualPartEvidence:
     part_id: str
     page_facts: tuple[VisualPageFact, ...]
     page_change_times: tuple[ExactTime, ...]
+    background_ui_comments: tuple[BackgroundUiComment, ...] = ()
 
     @property
     def has_visual_evidence(self) -> bool:
-        """Whether this Part carries any new visual evidence to re-analyze."""
+        """Whether this Part carries any new visual evidence to re-analyze.
+
+        Background-UI comments are deliberately *not* counted here: they are only
+        candidates for the Host-read comment upgrade, which enriches an already
+        affected Part rather than widening Affected-Part selection (ADR 0049).
+        """
 
         return bool(self.page_facts) or bool(self.page_change_times)
 
@@ -230,12 +252,19 @@ def load_visual_text_report(report_path: Path) -> LoadedVisualText:
 
     facts_by_part = _page_text_facts_by_part(document)
     changes_by_part = _page_change_times_by_part(document)
-    part_ids = _page_index_part_ids(document) | set(facts_by_part) | set(changes_by_part)
+    comments_by_part = _background_ui_comments_by_part(document)
+    part_ids = (
+        _page_index_part_ids(document)
+        | set(facts_by_part)
+        | set(changes_by_part)
+        | set(comments_by_part)
+    )
     parts = tuple(
         VisualPartEvidence(
             part_id=part_id,
             page_facts=facts_by_part.get(part_id, ()),
             page_change_times=changes_by_part.get(part_id, ()),
+            background_ui_comments=comments_by_part.get(part_id, ()),
         )
         for part_id in sorted(part_ids)
     )
@@ -274,19 +303,68 @@ def _page_text_facts_by_part(
 
 
 def _page_fact(part_id: str, raw_item: Mapping[str, object]) -> VisualPageFact:
-    text = raw_item.get("text")
-    confidence = raw_item.get("confidence")
-    if not isinstance(text, str) or not _is_real(confidence):
-        raise VisualReanalysisError(
-            "visual_text_report_drifted", "A classified page-text item omits text or confidence."
-        )
+    text, confidence = _text_and_confidence(raw_item, "page-text")
     return VisualPageFact(
         part_id=part_id,
         visual_page_id=_required_str(raw_item, "visual_page_id"),
         pts=_time_from_json(raw_item.get("pts")),
         text=text,
-        confidence=float(confidence),
+        confidence=confidence,
     )
+
+
+def _background_ui_comments_by_part(
+    document: Mapping[str, object],
+) -> dict[str, tuple[BackgroundUiComment, ...]]:
+    """Read every Part's classified background-UI items -- upgrade candidates (ticket 08).
+
+    These are read from the same versioned ``classification`` block as page-text
+    facts but are *not* evidence: they are the only items the Host-read comment
+    upgrade may promote, and only when cross-modal comparison with cue text confirms
+    the host read or selected them (ADR 0049). Everything else classification
+    produced is ignored here.
+    """
+
+    classification = document.get("classification")
+    if classification is None:
+        return {}
+    if not isinstance(classification, Mapping):
+        raise VisualReanalysisError(
+            "visual_text_report_drifted", "Retained classification block is not an object."
+        )
+    comments: dict[str, tuple[BackgroundUiComment, ...]] = {}
+    for raw_part in _object_sequence(classification.get("parts"), "classification Part"):
+        part_id = _required_str(raw_part, "part_id")
+        part_comments: list[BackgroundUiComment] = []
+        for raw_item in _object_sequence(raw_part.get("classified"), "classified item"):
+            if raw_item.get("category") != _BACKGROUND_UI_CATEGORY:
+                continue
+            part_comments.append(_background_ui_comment(part_id, raw_item))
+        if part_comments:
+            comments[part_id] = tuple(part_comments)
+    return comments
+
+
+def _background_ui_comment(part_id: str, raw_item: Mapping[str, object]) -> BackgroundUiComment:
+    text, confidence = _text_and_confidence(raw_item, "background-UI")
+    return BackgroundUiComment(
+        part_id=part_id,
+        visual_page_id=_required_str(raw_item, "visual_page_id"),
+        pts=_time_from_json(raw_item.get("pts")),
+        text=text,
+        confidence=confidence,
+    )
+
+
+def _text_and_confidence(raw_item: Mapping[str, object], label: str) -> tuple[str, float]:
+    text = raw_item.get("text")
+    confidence = raw_item.get("confidence")
+    if not isinstance(text, str) or not _is_real(confidence):
+        raise VisualReanalysisError(
+            "visual_text_report_drifted",
+            f"A classified {label} item omits text or confidence.",
+        )
+    return text, float(confidence)
 
 
 def _page_change_times_by_part(
@@ -421,33 +499,57 @@ def _first_cue_at_or_after(cues: Sequence[TimedCue], time: ExactTime) -> int:
 # --- Exactly-once page-fact ownership (AC3/AC4) ------------------------------
 
 
-def assign_page_facts(
-    facts: Sequence[VisualPageFact], segment_starts: Sequence[tuple[int, ExactTime]]
-) -> dict[int, tuple[VisualPageFact, ...]]:
-    """Assign each admitted page-text fact to exactly one segment, by segment time.
+class _HasPts(Protocol):
+    """A visual item ownable by segment time: it exposes a raw-PTS read time."""
 
-    A fact is owned by the segment in effect at its PTS -- the last segment whose
-    start time is at or before the fact -- and a fact before the first segment
+    @property
+    def pts(self) -> ExactTime: ...
+
+
+_PtsItemT = TypeVar("_PtsItemT", bound=_HasPts)
+
+
+def _assign_by_pts(
+    items: Sequence[_PtsItemT], segment_starts: Sequence[tuple[int, ExactTime]]
+) -> dict[int, tuple[_PtsItemT, ...]]:
+    """Assign each PTS-bearing item to exactly one segment, by segment start time.
+
+    An item is owned by the segment in effect at its PTS -- the last segment whose
+    start time is at or before the item -- and an item before the first segment
     falls to the first. Because the segments tile the Part in start order, every
-    fact is owned by exactly one segment. Segments with no owned fact do not appear
-    in the result. Returns a map from segment ordinal to its owned facts, in the
-    facts' original order.
+    item is owned by exactly one segment. Segments with no owned item do not appear
+    in the result. Returns a map from segment ordinal to its owned items, in the
+    items' original order.
     """
 
     ordered = sorted(segment_starts, key=lambda item: item[1].as_fraction())
-    owned: dict[int, list[VisualPageFact]] = {}
+    owned: dict[int, list[_PtsItemT]] = {}
     if not ordered:
         return {}
-    for fact in facts:
-        target = fact.pts.as_fraction()
+    for item in items:
+        target = item.pts.as_fraction()
         chosen = ordered[0][0]
         for ordinal, start in ordered:
             if start.as_fraction() <= target:
                 chosen = ordinal
             else:
                 break
-        owned.setdefault(chosen, []).append(fact)
-    return {ordinal: tuple(items) for ordinal, items in owned.items()}
+        owned.setdefault(chosen, []).append(item)
+    return {ordinal: tuple(members) for ordinal, members in owned.items()}
+
+
+def assign_page_facts(
+    facts: Sequence[VisualPageFact], segment_starts: Sequence[tuple[int, ExactTime]]
+) -> dict[int, tuple[VisualPageFact, ...]]:
+    """Assign each admitted page-text fact to exactly one segment, by segment time.
+
+    A thin, named wrapper over ``_assign_by_pts`` for page facts specifically; the
+    Host-read comment upgrade owns its upgraded comments through the same helper, so
+    every visual item -- page fact or upgraded comment -- is owned by exactly one
+    segment under identical rules.
+    """
+
+    return _assign_by_pts(facts, segment_starts)
 
 
 # --- The visual re-analysis input manifest (regeneration binding) ------------
@@ -512,6 +614,7 @@ class VisualReanalysisReport:
     collection_summary: CollectionSummary | None
     unsupported_item_count: int
     visual_fact_count: int
+    host_read_upgrades: tuple[HostReadUpgrade, ...]
     contract_identity: dict[str, object] | None
     restricted_raw_output: dict[str, object] | None
     rendered_report: dict[str, object] | None
@@ -562,6 +665,8 @@ class VisualReanalysisReport:
                     carried.provenance_json() for carried in self.carried_forward
                 ],
                 "visual_fact_count": self.visual_fact_count,
+                "host_read_upgrades": [upgrade.as_json() for upgrade in self.host_read_upgrades],
+                "host_read_upgrade_count": len(self.host_read_upgrades),
             },
             "segments": [dict(segment) for segment in self.segments],
             "chapters": [dict(chapter) for chapter in self.chapters],
@@ -626,6 +731,7 @@ class _VisualReanalysisBuilder:
     collection_summary: CollectionSummary | None = None
     unsupported_item_count: int = 0
     visual_fact_count: int = 0
+    host_read_upgrades: tuple[HostReadUpgrade, ...] = ()
     contract_identity: dict[str, object] | None = None
     restricted_raw_output: dict[str, object] | None = None
     diagnostics: tuple[PlanningDiagnostic, ...] = ()
@@ -650,6 +756,7 @@ class _VisualReanalysisBuilder:
         self.collection_summary = None
         self.unsupported_item_count = 0
         self.visual_fact_count = 0
+        self.host_read_upgrades = ()
         self.contract_identity = None
         self.restricted_raw_output = None
         self.diagnostics = (
@@ -680,6 +787,7 @@ class _VisualReanalysisBuilder:
             collection_summary=self.collection_summary,
             unsupported_item_count=self.unsupported_item_count,
             visual_fact_count=self.visual_fact_count,
+            host_read_upgrades=self.host_read_upgrades,
             contract_identity=self.contract_identity,
             restricted_raw_output=self.restricted_raw_output,
             rendered_report=None,
@@ -761,33 +869,53 @@ def _execute_reanalysis(
     carried_forward = carry_forward_parts(prior, unaffected)
     builder.carried_forward = carried_forward
 
-    regenerated: tuple[PartGeneration, ...] = ()
-    page_facts_by_segment: dict[tuple[str, int], tuple[VisualPageFact, ...]] = {}
-    proposed_entries: tuple[ProposedCollectionEntry, ...] = _prior_proposed_entries(prior)
+    regeneration = _AffectedRegeneration(
+        parts=(),
+        page_facts_by_segment={},
+        upgrades_by_segment={},
+        upgrades=(),
+        proposed_entries=_prior_proposed_entries(prior),
+    )
     if affected:
-        regenerated, page_facts_by_segment, proposed_entries = _regenerate_affected(
-            builder, inputs, project_root, affected
-        )
-    builder.regenerated_part_ids = tuple(part.part_id for part in regenerated)
+        regeneration = _regenerate_affected(builder, inputs, project_root, affected)
+    builder.regenerated_part_ids = tuple(part.part_id for part in regeneration.parts)
 
     order = combined_part_order(
         prior, builder.regenerated_part_ids, carried_forward, prior.omitted_parts
     )
     composition = compose_reanalysis(
-        regenerated=regenerated,
+        regenerated=regeneration.parts,
         carried_forward=carried_forward,
         omitted_parts=prior.omitted_parts,
-        proposed_entries=proposed_entries,
+        proposed_entries=regeneration.proposed_entries,
         part_order=order,
     )
-    segments = _attach_page_facts(composition.segments, page_facts_by_segment)
+    segments = _attach_visual_evidence(
+        composition.segments,
+        regeneration.page_facts_by_segment,
+        regeneration.upgrades_by_segment,
+    )
     builder.status = composition.status
     builder.segments = segments
     builder.chapters = composition.chapters
     builder.collection_summary = composition.collection_summary
     builder.unsupported_item_count = composition.unsupported_item_count
-    builder.visual_fact_count = sum(len(facts) for facts in page_facts_by_segment.values())
+    builder.visual_fact_count = sum(
+        len(facts) for facts in regeneration.page_facts_by_segment.values()
+    )
+    builder.host_read_upgrades = regeneration.upgrades
     builder.diagnostics = composition.diagnostics
+
+
+@dataclass
+class _AffectedRegeneration:
+    """The evidence one visual re-analysis pass produced over the affected Parts."""
+
+    parts: tuple[PartGeneration, ...]
+    page_facts_by_segment: dict[tuple[str, int], tuple[VisualPageFact, ...]]
+    upgrades_by_segment: dict[tuple[str, int], tuple[HostReadUpgrade, ...]]
+    upgrades: tuple[HostReadUpgrade, ...]
+    proposed_entries: tuple[ProposedCollectionEntry, ...]
 
 
 def _regenerate_affected(
@@ -795,11 +923,7 @@ def _regenerate_affected(
     inputs: _VisualReanalysisInputs,
     project_root: Path,
     affected: Sequence[str],
-) -> tuple[
-    tuple[PartGeneration, ...],
-    dict[tuple[str, int], tuple[VisualPageFact, ...]],
-    tuple[ProposedCollectionEntry, ...],
-]:
+) -> _AffectedRegeneration:
     """Regenerate each affected Part with its visual evidence in play.
 
     The controlled text fixture must be bound to a visual re-analysis manifest that
@@ -807,10 +931,14 @@ def _regenerate_affected(
     projected through the versioned schema, and each affected Part is regenerated by
     the shared per-Part generation -- with its Visual page changes passed as extra
     candidate boundaries -- so it obeys every Phase 6 contract. Each Part's admitted
-    page-text facts are then owned exactly once by the resulting segments. A missing
-    fixture or an invalid projection fails the attempt before any evidence composes.
+    page-text facts are then owned exactly once by the resulting segments, and its
+    background-UI comments are run through the versioned Host-read comment upgrade
+    (ADR 0049); any comment the host read or selected becomes an upgraded fact owned
+    exactly once too. A missing fixture, an invalid projection, or a malformed
+    upgrade ruleset fails the attempt before any evidence composes.
     """
 
+    upgrade_rules = load_host_read_upgrade_ruleset(project_root)
     prior_bases = inputs.prior.part_cue_bases
     affected_bases = {part_id: prior_bases[part_id] for part_id in affected}
     contracts = revalidate_text_generation_contracts(project_root)
@@ -855,9 +983,12 @@ def _regenerate_affected(
     visual_by_part = inputs.visual.parts_by_id
     regenerated: list[PartGeneration] = []
     page_facts_by_segment: dict[tuple[str, int], tuple[VisualPageFact, ...]] = {}
+    upgrades_by_segment: dict[tuple[str, int], tuple[HostReadUpgrade, ...]] = {}
+    upgrades: list[HostReadUpgrade] = []
     for part_id in affected:
         cue_ids = prior_bases[part_id]
-        timed = _timed_cues(part_id, cue_ids, inputs.cues_by_part.get(part_id, ()))
+        retained_cues = inputs.cues_by_part.get(part_id, ())
+        timed = _timed_cues(part_id, cue_ids, retained_cues)
         evidence = visual_by_part[part_id]
         candidates = visual_boundary_candidates(part_id, evidence.page_change_times, timed)
         part = generate_part(
@@ -866,7 +997,14 @@ def _regenerate_affected(
             extra_boundaries=candidates,
         )
         regenerated.append(part)
-        _own_part_facts(part, timed, evidence.page_facts, page_facts_by_segment)
+        _own_items(part, timed, evidence.page_facts, page_facts_by_segment)
+        part_upgrades = evaluate_host_read_upgrades(
+            comments=evidence.background_ui_comments,
+            cues=_cue_texts(retained_cues),
+            rules=upgrade_rules,
+        )
+        upgrades.extend(part_upgrades)
+        _own_items(part, timed, part_upgrades, upgrades_by_segment)
 
     builder.contract_identity = {
         "text_generation_contracts": contracts.as_json(),
@@ -875,26 +1013,34 @@ def _regenerate_affected(
             "sha256": manifest_sha,
         },
         "controlled_adapter_identity": contracts.controlled_adapter.version,
+        "host_read_upgrade_rules": upgrade_rules.as_json(),
     }
-    return tuple(regenerated), page_facts_by_segment, proposed_collection_entries(result_mapping)
+    return _AffectedRegeneration(
+        parts=tuple(regenerated),
+        page_facts_by_segment=page_facts_by_segment,
+        upgrades_by_segment=upgrades_by_segment,
+        upgrades=tuple(upgrades),
+        proposed_entries=proposed_collection_entries(result_mapping),
+    )
 
 
-def _own_part_facts(
+def _own_items(
     part: PartGeneration,
     timed: Sequence[TimedCue],
-    facts: Sequence[VisualPageFact],
-    page_facts_by_segment: dict[tuple[str, int], tuple[VisualPageFact, ...]],
+    items: Sequence[_PtsItemT],
+    sink: dict[tuple[str, int], tuple[_PtsItemT, ...]],
 ) -> None:
-    """Own one Part's admitted page-text facts by exactly one of its segments.
+    """Own one Part's PTS-bearing visual items by exactly one of its segments.
 
-    A fact is owned by the segment in effect at its PTS (``assign_page_facts``).
-    Should a Part's cues carry no retained timing at all -- a drift condition that
-    never arises in the offline synthetic phase -- every fact still falls to the
-    Part's first segment rather than being silently dropped, preserving both
-    exactly-once ownership and full retention.
+    An item is owned by the segment in effect at its PTS (``_assign_by_pts``). Should
+    a Part's cues carry no retained timing at all -- a drift condition that never
+    arises in the offline synthetic phase -- every item still falls to the Part's
+    first segment rather than being silently dropped, preserving both exactly-once
+    ownership and full retention. Both page-text facts and upgraded Host-read
+    comments flow through this one owner, so every visual item is owned identically.
     """
 
-    if not facts or not part.segments:
+    if not items or not part.segments:
         return
     start_by_cue = {cue.cue_id: cue.start for cue in timed}
     segment_starts: list[tuple[int, ExactTime]] = []
@@ -903,22 +1049,23 @@ def _own_part_facts(
         if starts:
             segment_starts.append((segment.ordinal, min(starts, key=lambda t: t.as_fraction())))
     if not segment_starts:
-        page_facts_by_segment[(part.part_id, part.segments[0].ordinal)] = tuple(facts)
+        sink[(part.part_id, part.segments[0].ordinal)] = tuple(items)
         return
-    owned = assign_page_facts(facts, segment_starts)
-    for ordinal, items in owned.items():
-        page_facts_by_segment[(part.part_id, ordinal)] = items
+    for ordinal, owned in _assign_by_pts(items, segment_starts).items():
+        sink[(part.part_id, ordinal)] = owned
 
 
-def _attach_page_facts(
+def _attach_visual_evidence(
     segments: Sequence[dict[str, object]],
     page_facts_by_segment: Mapping[tuple[str, int], tuple[VisualPageFact, ...]],
+    upgrades_by_segment: Mapping[tuple[str, int], tuple[HostReadUpgrade, ...]],
 ) -> tuple[dict[str, object], ...]:
-    """Attach each regenerated segment's owned page facts to its serialized record.
+    """Attach each regenerated segment's owned visual evidence to its record.
 
-    Only a freshly regenerated segment can own new visual facts; a carried-forward
-    segment keeps its retained content untouched. Visual facts ride beside the
-    segment's cue-bound content and never displace subtitle-derived fields.
+    Only a freshly regenerated segment can own new visual evidence; a carried-forward
+    segment keeps its retained content untouched. Both the cited page facts and the
+    upgraded Host-read comments ride beside the segment's cue-bound content and never
+    displace subtitle-derived fields, so the renderer's rendition is unchanged.
     """
 
     attached: list[dict[str, object]] = []
@@ -933,6 +1080,8 @@ def _attach_page_facts(
         ):
             facts = page_facts_by_segment.get((part_id, ordinal), ())
             record["visual_page_facts"] = [fact.as_json() for fact in facts]
+            upgrades = upgrades_by_segment.get((part_id, ordinal), ())
+            record["host_read_comments"] = [upgrade.as_json() for upgrade in upgrades]
         attached.append(record)
     return tuple(attached)
 
@@ -953,6 +1102,26 @@ def _timed_cues(
         TimedCue(cue_id=cue_id, start=start_by_id[cue_id])
         for cue_id in cue_ids
         if cue_id in start_by_id
+    )
+
+
+def _cue_texts(retained: Sequence[RetainedSubtitleCue]) -> tuple[CueText, ...]:
+    """Project retained subtitle cues into the identity/interval/text the upgrade reads.
+
+    The Host-read comment upgrade needs each cue's verbatim text and full raw-PTS
+    interval (not just its start) to test whether a nearby cue read a background-UI
+    comment, so it consumes this richer view rather than the boundary-only
+    ``TimedCue``. Cue identities are the same the prior report's segments own.
+    """
+
+    return tuple(
+        CueText(
+            cue_id=cue.cue_identity,
+            start=cue.interval.start,
+            end=cue.interval.end,
+            text=cue.text,
+        )
+        for cue in retained
     )
 
 

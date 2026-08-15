@@ -112,15 +112,25 @@ def _confirmed_plan(project_root: Path, media_variants: list[bytes]) -> RunPlan:
     return plan
 
 
-def _write_source_candidate(path: Path, cue_starts: list[int]) -> str:
-    """Write a retained ``source-candidate.json`` with one cue per start second."""
+def _write_source_candidate(
+    path: Path, cue_starts: list[int], cue_texts: list[str] | None = None
+) -> str:
+    """Write a retained ``source-candidate.json`` with one cue per start second.
+
+    ``cue_texts`` overrides the default placeholder cue text per ordinal, so a test
+    can make a cue read a background-UI comment aloud for the Host-read upgrade.
+    """
 
     payload = {
         "schema_version": 1,
         "cues": [
             {
                 "source_ordinal": ordinal,
-                "text": f"字幕-{ordinal}",
+                "text": (
+                    cue_texts[ordinal]
+                    if cue_texts is not None and ordinal < len(cue_texts)
+                    else f"字幕-{ordinal}"
+                ),
                 "raw_pts_interval": {
                     "start": {"numerator": start, "denominator": 1},
                     "end": {"numerator": start + 2, "denominator": 1},
@@ -136,7 +146,11 @@ def _write_source_candidate(path: Path, cue_starts: list[int]) -> str:
 
 
 def _retained_subtitle_report(
-    project_root: Path, plan: RunPlan, *, affected_cue_starts: dict[str, list[int]]
+    project_root: Path,
+    plan: RunPlan,
+    *,
+    affected_cue_starts: dict[str, list[int]],
+    affected_cue_texts: dict[str, list[str]] | None = None,
 ) -> SubtitleCandidateReport:
     """Retain a completed subtitle report; affected Parts get real cue evidence."""
 
@@ -145,6 +159,7 @@ def _retained_subtitle_report(
     rules_path.write_text(
         '{"schema_version": 1, "id": "phase-04-fixture-rules"}\n', encoding="utf-8"
     )
+    texts = affected_cue_texts if affected_cue_texts is not None else {}
     report_id = "1" * 32
     report_path = project_root / "work" / "subtitle-reports" / report_id / "report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,7 +168,9 @@ def _retained_subtitle_report(
         part_id = artifact.source_id
         candidate_path = report_path.parent / f"candidate-{index}.json"
         if part_id in affected_cue_starts:
-            digest = _write_source_candidate(candidate_path, affected_cue_starts[part_id])
+            digest = _write_source_candidate(
+                candidate_path, affected_cue_starts[part_id], texts.get(part_id)
+            )
         else:
             digest = _write_source_candidate(candidate_path, [0])
         candidates.append(
@@ -243,6 +260,36 @@ def _write_text_analysis_contracts(project_root: Path) -> None:
         (contract_dir / name).write_text(
             json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8"
         )
+    _write_host_read_upgrade_rules(project_root)
+
+
+def _write_host_read_upgrade_rules(
+    project_root: Path, *, selection_markers: list[str] | None = None
+) -> None:
+    """Ship the versioned Host-read comment upgrade ruleset the re-analysis path binds."""
+
+    path = project_root / "config" / "text-analysis" / "host-read-upgrade.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "version": "phase-08-host-read-upgrade-fixture",
+                "calibration_required": True,
+                "minimum_comment_length": 3,
+                "match_window_seconds": 2,
+                # "这个问题" is deliberately a substring of the test's candidate comment
+                # ("这个问题问得好"): a plain read must stay host_read, proving the
+                # selection-marker test looks at the host's framing, not the quoted comment.
+                "selection_markers": (
+                    selection_markers if selection_markers is not None else ["有人问", "这个问题"]
+                ),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _bind_regeneration(
@@ -658,6 +705,90 @@ def test_disagreeing_boundaries_defer_to_a_conservative_segment(
     owned = [fact["text"] for fact in part_a_segments[0]["visual_page_facts"]]
     assert owned == ["标题甲", "标题乙"]
     assert report["reanalysis"]["visual_fact_count"] == 2
+
+
+def test_host_read_comment_is_upgraded_with_citations_and_leaves_visual_report_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path, [b"visual-part-a", b"visual-part-b"])
+    _write_text_analysis_contracts(tmp_path)
+    part_a = plan.source_artifacts[0].source_id
+    part_b = plan.source_artifacts[1].source_id
+    # The cue at t=4 reads the on-screen comment aloud; the cue at t=0 does not.
+    subtitle = _retained_subtitle_report(
+        tmp_path,
+        plan,
+        affected_cue_starts={part_a: [0, 2, 4]},
+        affected_cue_texts={part_a: ["今天我们开始", "继续讲解", "我来回答这个问题问得好"]},
+    )
+    prior_id = _write_prior_report(tmp_path, plan, subtitle.report_id, part_a, part_b)
+    cue_ids = (_cue(part_a, 0), _cue(part_a, 1), _cue(part_a, 2))
+    visual_id = _write_visual_report(
+        tmp_path,
+        plan,
+        part_a,
+        pages=[("page-01", [(0, 3)]), ("page-02", [(4, 5)])],
+        classified=[
+            _classified(part_a, "page-01", 1, category="page_text", text="标题甲"),
+            # A background-UI comment the host reads aloud at t=4 -- upgrade candidate.
+            _classified(part_a, "page-02", 4, category="background_ui", text="这个问题问得好"),
+            # A background-UI comment no cue ever reads -- must stay background UI.
+            _classified(part_a, "page-01", 1, category="background_ui", text="无关的弹幕内容"),
+        ],
+    )
+    result = {
+        "parts": [{"part_id": part_a, "segments": [], "chapters": []}],
+        "collection_summary": {"entries": []},
+    }
+    _bind_regeneration(
+        tmp_path, {part_a: cue_ids}, prior_id=prior_id, visual_id=visual_id, result=result
+    )
+    visual_path = tmp_path / "work" / "visual-text-reports" / visual_id / "visual-report.json"
+    visual_bytes = visual_path.read_bytes()
+
+    code, response = _run(
+        monkeypatch, capsys, tmp_path, _argv(plan, subtitle.report_id, prior_id, visual_id)
+    )
+
+    assert code == 0
+    report = response["report"]
+
+    # AC1/AC4: exactly the read comment is upgraded, cited to the OCR item and cue.
+    upgrades = report["reanalysis"]["host_read_upgrades"]
+    assert report["reanalysis"]["host_read_upgrade_count"] == 1
+    upgrade = upgrades[0]
+    assert upgrade["selection_basis"] == "host_read"
+    assert upgrade["ocr_evidence_item"]["text"] == "这个问题问得好"
+    assert upgrade["page_time"] == {
+        "visual_page_id": "page-02",
+        "pts": {"numerator": 4, "denominator": 1},
+    }
+    assert upgrade["supporting_cue_ids"] == [_cue(part_a, 2)]
+    # AC2: the decision is under a versioned ruleset recorded in provenance.
+    assert upgrade["rules_version"] == "phase-08-host-read-upgrade-fixture"
+    assert (
+        report["contract_identity"]["host_read_upgrade_rules"]["version"]
+        == "phase-08-host-read-upgrade-fixture"
+    )
+
+    # AC4: the upgraded comment is owned by exactly one regenerated segment (the one
+    # in effect at its page time, t=4 -> the second segment) and cited there too.
+    part_a_segments = [seg for seg in report["segments"] if seg["part_id"] == part_a]
+    assert len(part_a_segments) == 2
+    comments_by_ordinal = {
+        seg["ordinal"]: [c["ocr_evidence_item"]["text"] for c in seg["host_read_comments"]]
+        for seg in part_a_segments
+    }
+    assert comments_by_ordinal == {0: [], 1: ["这个问题问得好"]}
+
+    # AC2: the comment no cue read stays background UI -- never formal content.
+    all_upgraded = {c["ocr_evidence_item"]["text"] for u in [upgrades] for c in u}
+    assert "无关的弹幕内容" not in all_upgraded
+    all_facts = {f["text"] for seg in part_a_segments for f in seg["visual_page_facts"]}
+    assert "无关的弹幕内容" not in all_facts
+
+    # AC3: visual-text performs no upgrade -- the visual-side report is byte-identical.
+    assert visual_path.read_bytes() == visual_bytes
 
 
 def test_visual_report_from_a_different_plan_fails(

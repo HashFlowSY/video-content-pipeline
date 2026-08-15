@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "version": "phase-08-host-read-upgrade-v1",
+  "calibration_required": true,
+  "minimum_comment_length": 3,
+  "match_window_seconds": 2,
+  "selection_markers": [
+    "这条",
+    "这个问题",
+    "这条评论",
+    "有人问",
+    "有观众问",
+    "有网友问",
+    "评论区",
+    "弹幕问"
+  ]
+}
