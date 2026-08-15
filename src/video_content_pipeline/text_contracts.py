@@ -184,11 +184,11 @@ def render_text_analysis_markdown(report: Mapping[str, object]) -> RenderedTextR
     The rendition summarizes the report status, plan and subtitle identities,
     verified segment and chapter counts, the collection-summary entry count with
     its declared subtitle-unavailable Parts and limitation reasons (ticket 06), the
-    mandatory ``audio_completeness=not_verified`` notice, and a diagnostic-reason
-    summary. It never includes raw generated text or item-level validation dumps;
-    the JSON report remains authoritative. Later tickets extend the summary with
-    unsupported-item counts and pending decisions once those fields exist on the
-    report.
+    mandatory ``audio_completeness=not_verified`` notice, a diagnostic-reason
+    summary, and any pending decision (ticket 07). It never includes raw generated
+    text or item-level validation dumps; the JSON report remains authoritative.
+    Later tickets extend the summary with unsupported-item counts once those
+    fields exist on the report.
     """
 
     lines: list[str] = []
@@ -220,6 +220,13 @@ def render_text_analysis_markdown(report: Mapping[str, object]) -> RenderedTextR
     )
     if reasons:
         lines.append("诊断原因 reasons: " + ", ".join(f"`{reason}`" for reason in reasons))
+    required_decision = report.get("required_decision")
+    if isinstance(required_decision, Mapping):
+        lines.append(
+            "待定决策 pending decision: "
+            f"`{_scalar(required_decision.get('reason'))}` "
+            f"→ `{_scalar(required_decision.get('decision'))}`"
+        )
     lines.append("")
     lines.append("> JSON 报告是权威来源；本 Markdown 为工作区确定性再现，不包含原始生成文本。")
     lines.append("")

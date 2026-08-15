@@ -50,20 +50,41 @@ def validated_report_id(value: str, *, invalid_error: Callable[[], Exception]) -
         raise invalid_error() from error
 
 
-def write_json_once(
-    path: Path, payload: object, *, conflict_error: Callable[[str], Exception]
+def write_text_once(
+    path: Path, text: str, *, conflict_error: Callable[[str], Exception]
 ) -> None:
-    """Write a deterministic JSON record once; reject a differing rewrite.
+    """Write a text record once; reject a differing rewrite.
 
     An identical rewrite is a no-op so a repeated write stays idempotent; a
     differing rewrite raises the caller-supplied conflict error to keep the
     workspace immutable.
     """
 
-    encoded = json.dumps(payload, sort_keys=True, indent=2) + "\n"
     if path.exists():
-        if path.read_text(encoding="utf-8") != encoded:
+        if path.read_text(encoding="utf-8") != text:
             raise conflict_error(f"Immutable record differs: {path}")
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(encoded, encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
+
+
+def write_bytes_once(
+    path: Path, data: bytes, *, conflict_error: Callable[[str], Exception]
+) -> None:
+    """Write a bytes record once; reject a differing rewrite (see write_text_once)."""
+
+    if path.exists():
+        if path.read_bytes() != data:
+            raise conflict_error(f"Immutable record differs: {path}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def write_json_once(
+    path: Path, payload: object, *, conflict_error: Callable[[str], Exception]
+) -> None:
+    """Write a deterministic JSON record once; reject a differing rewrite."""
+
+    encoded = json.dumps(payload, sort_keys=True, indent=2) + "\n"
+    write_text_once(path, encoded, conflict_error=conflict_error)

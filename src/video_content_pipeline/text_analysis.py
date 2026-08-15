@@ -16,11 +16,23 @@ identity (see ``text_contracts``), records their hash evidence, and writes a
 deterministic Markdown rendition of the authoritative JSON report into the
 immutable workspace.
 
+Ticket 07 makes every attempt's provenance immutable and auditable: a fully
+revalidated attempt records an ``attempt_provenance`` binding its prompt and
+deterministically rendered prompt, its input-cue manifest, the adapter identity,
+sampling, output-schema and evidence-rule hashes, the raw-output and projection
+state, and an execution-resource measurement. It also evaluates the
+future-real-model 24 GiB resource envelope, retaining a resumable
+``resource_envelope_exceeded`` report when a conservative estimate exceeds it.
+``resume_text_analysis`` continues only such a retained
+pause, from an explicit decision, as a fresh non-overwriting attempt — there is
+no automatic retry. Append-only synthetic human-review records live in
+``text_review``.
+
 No Controlled offline text adapter *generates* yet, so a fully revalidated
-attempt still retains ``controlled_adapter_unavailable`` with no semantic
-content. The generating adapter and semantic segmentation belong to later
-Phase 6 tickets. See ``docs/PHASE_06_SPECIFICATION.md`` and the Text Analysis
-Context.
+attempt with no resource pause still retains ``controlled_adapter_unavailable``
+with no semantic content. The generating adapter and semantic segmentation belong
+to later Phase 6 tickets. See ``docs/PHASE_06_SPECIFICATION.md`` and the Text
+Analysis Context.
 """
 
 from __future__ import annotations
@@ -36,7 +48,9 @@ from pathlib import Path
 from video_content_pipeline.evidence import (
     InputEvidence,
     validated_report_id,
+    write_bytes_once,
     write_json_once,
+    write_text_once,
 )
 from video_content_pipeline.planning import (
     PlanningDiagnostic,
@@ -62,21 +76,41 @@ from video_content_pipeline.text_contracts import (
     revalidate_text_generation_contracts,
 )
 
+# The future-real-model one-large-model rule: a conservative resource estimate
+# above this envelope pauses for an explicit resource decision instead of
+# silently altering the model, quantization, context, or sampling. The Controlled
+# offline text adapter loads no model asset, so its resource measurement is
+# ``not_applicable`` and never exceeds this envelope.
+TEXT_MODEL_RESOURCE_ENVELOPE_BYTES = 24 * 1024**3
+
+# The explicit decision that continues a retained resource-envelope pause. The
+# name matches the Phase 5 audio-analysis resume convention.
+_RESOURCE_DECISION = "resource_configuration_changed"
+
+# Raw adapter or model output is restricted local audit evidence: its pointer
+# may be summarized in workspace diagnostics but never carries the raw content
+# into a formal report or default publication.
+_RESTRICTED_LOCAL_AUDIT = "local_audit_only"
+
 
 class TextAnalysisReportStatus(StrEnum):
     """The recorded outcome of one text-analysis attempt.
 
     ``complete``/``partial``/``failed`` are the formal Text analysis report
     statuses. ``controlled_adapter_unavailable`` is the availability outcome
-    recorded when no eligible offline text adapter exists; it retains no
-    SemanticSegments. (A future real-model path would add its own
-    ``model_acquisition_required`` outcome when that capability is built.)
+    recorded when no eligible offline text adapter exists, and
+    ``resource_envelope_exceeded`` is the resumable decision-pause outcome
+    recorded when a conservative future-real-model resource estimate exceeds the
+    24 GiB envelope; both retain no SemanticSegments. (A future real-model path
+    would add its own ``model_acquisition_required`` outcome when that capability
+    is built.)
     """
 
     COMPLETE = "complete"
     PARTIAL = "partial"
     FAILED = "failed"
     CONTROLLED_ADAPTER_UNAVAILABLE = "controlled_adapter_unavailable"
+    RESOURCE_ENVELOPE_EXCEEDED = "resource_envelope_exceeded"
 
 
 class TextAnalysisError(ValueError):
@@ -104,7 +138,72 @@ class RestrictedRawOutput:
             "path": self.path.as_posix(),
             "sha256": self.sha256,
             "byte_count": self.byte_count,
-            "restriction": "local_audit_only",
+            "restriction": _RESTRICTED_LOCAL_AUDIT,
+        }
+
+
+def record_restricted_raw_output(
+    workspace_path: Path, name: str, raw_output: bytes
+) -> RestrictedRawOutput:
+    """Retain a raw adapter or model output as restricted local audit evidence.
+
+    The bytes are written once into the immutable workspace's restricted area and
+    returned as a hash-only pointer. The pointer never carries the raw content, so
+    it can be summarized in workspace diagnostics without leaking generated text
+    into a formal report or default publication.
+    """
+
+    restricted_path = workspace_path / "restricted" / f"{name}.raw"
+    write_bytes_once(
+        restricted_path,
+        raw_output,
+        conflict_error=lambda message: TextAnalysisError("text_analysis_report_conflict", message),
+    )
+    return RestrictedRawOutput(
+        path=restricted_path,
+        sha256=sha256(raw_output).hexdigest(),
+        byte_count=len(raw_output),
+    )
+
+
+@dataclass(frozen=True)
+class AttemptProvenance:
+    """The immutable identity record linking one attempt to its inputs and rules.
+
+    It binds the prompt template and its deterministically rendered prompt, the
+    input-cue manifest, the Controlled offline text adapter identity, the sampling
+    configuration, the output-schema and evidence-rule hashes, the raw-output and
+    projection state, and the execution-resource measurement. A resume records the
+    prior report it continued; identity-bound inputs are never changed.
+    """
+
+    attempt_id: str
+    resumed_from_report_id: str | None
+    resumption_decision: str | None
+    prompt: dict[str, object] | None
+    input_cue_manifest: dict[str, object] | None
+    adapter_identity: dict[str, object] | None
+    sampling: dict[str, object] | None
+    output_schema_identity: dict[str, object] | None
+    evidence_rules_identity: dict[str, object] | None
+    raw_output: dict[str, object]
+    projection: dict[str, object]
+    resource_measurement: dict[str, object]
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "attempt_id": self.attempt_id,
+            "resumed_from_report_id": self.resumed_from_report_id,
+            "resumption_decision": self.resumption_decision,
+            "prompt": self.prompt,
+            "input_cue_manifest": self.input_cue_manifest,
+            "adapter_identity": self.adapter_identity,
+            "sampling": self.sampling,
+            "output_schema_identity": self.output_schema_identity,
+            "evidence_rules_identity": self.evidence_rules_identity,
+            "raw_output": self.raw_output,
+            "projection": self.projection,
+            "resource_measurement": self.resource_measurement,
         }
 
 
@@ -201,6 +300,8 @@ class TextAnalysisReport:
     audio_analysis: AudioAnalysisBinding
     revalidation: RevalidationEvidence
     text_generation_contracts: TextGenerationContracts | None
+    attempt_provenance: AttemptProvenance
+    required_decision: dict[str, object] | None
     rendered_report: dict[str, object] | None
     restricted_raw_output: tuple[RestrictedRawOutput, ...]
     diagnostics: tuple[PlanningDiagnostic, ...]
@@ -248,6 +349,8 @@ class TextAnalysisReport:
                 if self.text_generation_contracts is not None
                 else None
             ),
+            "attempt_provenance": self.attempt_provenance.as_json(),
+            "required_decision": self.required_decision,
             "rendered_report": self.rendered_report,
             "segments": [],
             "chapters": [],
@@ -309,13 +412,22 @@ def analyze_text(
     subtitle_report_id: str,
     project_root: Path,
     audio_report_id: str | None = None,
+    resumed_from_report: InputEvidence | None = None,
+    resumed_from_report_id: str | None = None,
+    resumption_decision: str | None = None,
 ) -> dict[str, object]:
     """Create one immutable text-analysis report from fully revalidated inputs.
 
     Every bound input identity is revalidated before an attempt proceeds; any
-    drift retains a ``failed`` report. When all inputs revalidate, the attempt —
-    which has no Controlled offline text adapter available yet — retains a
-    ``controlled_adapter_unavailable`` report with no semantic content.
+    drift retains a ``failed`` report. A fully revalidated attempt records its
+    generation-attempt provenance and then evaluates the future-real-model 24 GiB
+    resource envelope: a conservative estimate above the envelope retains a
+    resumable ``resource_envelope_exceeded`` report, and otherwise the attempt —
+    which has no Controlled offline text adapter that generates yet — retains a
+    ``controlled_adapter_unavailable`` report with no semantic content. A resume
+    passes ``resumed_from_report`` and
+    ``resumption_decision``; each attempt owns a fresh workspace and never
+    overwrites prior evidence, so there is no automatic retry.
     """
 
     report_id = uuid.uuid4().hex
@@ -335,6 +447,8 @@ def analyze_text(
     selected_primary_tracks: tuple[SelectedPrimaryTrack, ...] = ()
     audio_binding = AudioAnalysisBinding("not_available")
     contracts: TextGenerationContracts | None = None
+    required_decision: dict[str, object] | None = None
+    resource_measurement: dict[str, object] = _incomplete_resource_measurement()
 
     try:
         plan_path = project_root / "plans" / plan_id / "run-plan.json"
@@ -387,8 +501,23 @@ def analyze_text(
         )
         report_plan_id = plan.plan_id
         report_subtitle_id = subtitle_report.report_id
-        status = TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE
-        diagnostics = (_adapter_unavailable_diagnostic(),)
+        conservative_high_bytes = _resource_plan_high_bytes(project_root)
+        resource_measurement = _resource_measurement(conservative_high_bytes)
+        if resource_measurement["state"] == "resource_envelope_exceeded":
+            status = TextAnalysisReportStatus.RESOURCE_ENVELOPE_EXCEEDED
+            required_decision = {
+                "reason": "resource_envelope_exceeded",
+                "decision": _RESOURCE_DECISION,
+            }
+            diagnostics = (
+                PlanningDiagnostic(
+                    "resource_envelope_exceeded",
+                    "A conservative text-model resource estimate exceeds the 24 GiB envelope.",
+                ),
+            )
+        else:
+            status = TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE
+            diagnostics = (_adapter_unavailable_diagnostic(),)
     except (
         TextAnalysisError,
         TextContractError,
@@ -403,6 +532,8 @@ def analyze_text(
         audio_analysis_report_evidence = None
         audio_binding = AudioAnalysisBinding("not_available")
         contracts = None
+        required_decision = None
+        resource_measurement = _incomplete_resource_measurement()
         diagnostics = (
             PlanningDiagnostic(
                 getattr(error, "reason", "text_analysis_input_invalid"),
@@ -410,6 +541,16 @@ def analyze_text(
             ),
         )
 
+    provenance = _build_attempt_provenance(
+        attempt_id=report_id,
+        resumed_from_report_id=resumed_from_report_id,
+        resumption_decision=resumption_decision,
+        contracts=contracts,
+        selected_primary_tracks=selected_primary_tracks,
+        resource_measurement=resource_measurement,
+        restricted_raw_output=(),
+        workspace_path=workspace_path,
+    )
     report = TextAnalysisReport(
         report_id=report_id,
         plan_id=report_plan_id,
@@ -421,8 +562,8 @@ def analyze_text(
         subtitle_report_evidence=subtitle_report_evidence,
         text_analysis_rules_evidence=text_analysis_rules_evidence,
         audio_analysis_report_evidence=audio_analysis_report_evidence,
-        resumed_from_report=None,
-        resumption_decision=None,
+        resumed_from_report=resumed_from_report,
+        resumption_decision=resumption_decision,
         controlled_text_adapter=ControlledTextAdapterState(
             state=TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE.value,
             diagnostic=_adapter_unavailable_diagnostic(),
@@ -435,6 +576,8 @@ def analyze_text(
             selected_primary_tracks=selected_primary_tracks,
         ),
         text_generation_contracts=contracts,
+        attempt_provenance=provenance,
+        required_decision=required_decision,
         rendered_report=None,
         restricted_raw_output=(),
         diagnostics=diagnostics,
@@ -468,18 +611,212 @@ def _render_and_bind_markdown(report: TextAnalysisReport) -> TextAnalysisReport:
     return replace(report, rendered_report=rendered_report)
 
 
+def _build_attempt_provenance(
+    *,
+    attempt_id: str,
+    resumed_from_report_id: str | None,
+    resumption_decision: str | None,
+    contracts: TextGenerationContracts | None,
+    selected_primary_tracks: tuple[SelectedPrimaryTrack, ...],
+    resource_measurement: dict[str, object],
+    restricted_raw_output: tuple[RestrictedRawOutput, ...],
+    workspace_path: Path,
+) -> AttemptProvenance:
+    """Compose the immutable provenance record for one attempt.
+
+    When the contracts revalidated, the rendered prompt and input-cue manifest are
+    written into the immutable workspace and bound by hash so a future real-model
+    boundary can prove exactly which prompt, adapter, sampling, schema, and
+    evidence rules produced a candidate. A failed attempt records only the
+    identities it managed to bind. No raw output is generated in this phase, so the
+    raw-output and projection state stay ``not_generated``/``not_projected`` while
+    the restriction is still declared.
+    """
+
+    prompt: dict[str, object] | None = None
+    input_cue_manifest: dict[str, object] | None = None
+    adapter_identity: dict[str, object] | None = None
+    sampling: dict[str, object] | None = None
+    output_schema_identity: dict[str, object] | None = None
+    evidence_rules_identity: dict[str, object] | None = None
+    if contracts is not None:
+        adapter = contracts.controlled_adapter
+        adapter_identity = {
+            "version": adapter.version,
+            "implementation_version": adapter.document.get("implementation_version"),
+            "sha256": adapter.evidence.sha256,
+        }
+        sampling = _sampling_identity(adapter.document)
+        output_schema_identity = {
+            "version": contracts.output_schema.version,
+            "sha256": contracts.output_schema.evidence.sha256,
+        }
+        evidence_rules_identity = {
+            "version": contracts.evidence_rules.version,
+            "sha256": contracts.evidence_rules.evidence.sha256,
+        }
+        manifest_document = _input_cue_manifest_document(selected_primary_tracks)
+        manifest_path = workspace_path / "provenance" / "input-cue-manifest.json"
+        _write_json_once(manifest_path, manifest_document)
+        manifest_evidence = _input_evidence(manifest_path)
+        input_cue_manifest = {
+            **manifest_evidence.as_json(),
+            "track_count": len(selected_primary_tracks),
+        }
+        rendered = _render_prompt(contracts, selected_primary_tracks)
+        rendered_path = workspace_path / "provenance" / "rendered-prompt.txt"
+        _write_text_once(rendered_path, rendered)
+        prompt = {
+            "version": contracts.prompt_template.version,
+            "sha256": contracts.prompt_template.evidence.sha256,
+            "rendered_prompt": _input_evidence(rendered_path).as_json(),
+        }
+    return AttemptProvenance(
+        attempt_id=attempt_id,
+        resumed_from_report_id=resumed_from_report_id,
+        resumption_decision=resumption_decision,
+        prompt=prompt,
+        input_cue_manifest=input_cue_manifest,
+        adapter_identity=adapter_identity,
+        sampling=sampling,
+        output_schema_identity=output_schema_identity,
+        evidence_rules_identity=evidence_rules_identity,
+        raw_output={
+            "state": "not_generated",
+            "restriction": _RESTRICTED_LOCAL_AUDIT,
+            "artifacts": [output.as_json() for output in restricted_raw_output],
+        },
+        projection={"state": "not_projected"},
+        resource_measurement=resource_measurement,
+    )
+
+
+def _sampling_identity(adapter_document: Mapping[str, object]) -> dict[str, object]:
+    configuration = adapter_document.get("sampling_configuration")
+    if not isinstance(configuration, Mapping):
+        configuration = {}
+    encoded = json.dumps(dict(configuration), sort_keys=True).encode("utf-8")
+    return {"sha256": sha256(encoded).hexdigest(), "configuration": dict(configuration)}
+
+
+def _input_cue_manifest_document(
+    selected_primary_tracks: tuple[SelectedPrimaryTrack, ...],
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "track_count": len(selected_primary_tracks),
+        "tracks": [track.as_json() for track in selected_primary_tracks],
+    }
+
+
+def _render_prompt(
+    contracts: TextGenerationContracts, selected_primary_tracks: tuple[SelectedPrimaryTrack, ...]
+) -> str:
+    """Deterministically render the prompt bound to one attempt.
+
+    The rendition concatenates the versioned prompt-template sections and the
+    input-cue manifest so its hash is a stable fingerprint of exactly what an
+    adapter would be shown. It is restricted workspace evidence, not a formal
+    report artifact.
+    """
+
+    lines = [f"# prompt-template {contracts.prompt_template.version}"]
+    sections = contracts.prompt_template.document.get("sections")
+    if isinstance(sections, list):
+        for section in sections:
+            if not isinstance(section, Mapping):
+                continue
+            role = section.get("role")
+            section_id = section.get("id")
+            text = section.get("text")
+            lines.append(f"[{role}:{section_id}] {text}")
+    lines.append("# input-cue-manifest")
+    for track in selected_primary_tracks:
+        lines.append(f"- {track.source_id} stream {track.stream_index} sha256 {track.sha256}")
+    return "\n".join(lines) + "\n"
+
+
+def _resource_plan_high_bytes(project_root: Path) -> int | None:
+    """Return the optional future-real-model conservative resource estimate.
+
+    The versioned rules bundle may declare a ``resource_plan`` for a future real
+    model. Its conservative high estimate, when present, gates the one-large-model
+    resource envelope. The Controlled offline text adapter declares none, so the
+    envelope never trips for controlled verification.
+    """
+
+    rules_path = project_root / "config" / "text-analysis-rules.json"
+    try:
+        decoded = json.loads(rules_path.read_bytes())
+    except (OSError, json.JSONDecodeError) as error:
+        raise TextAnalysisError(
+            "text_analysis_rules_invalid", "Text analysis rules cannot be read."
+        ) from error
+    plan = decoded.get("resource_plan") if isinstance(decoded, Mapping) else None
+    if plan is None:
+        return None
+    if not isinstance(plan, Mapping):
+        raise TextAnalysisError(
+            "text_analysis_rules_invalid", "Text analysis rules have an invalid resource plan."
+        )
+    high_bytes = plan.get("conservative_high_bytes")
+    if not isinstance(high_bytes, int) or isinstance(high_bytes, bool) or high_bytes < 0:
+        raise TextAnalysisError(
+            "text_analysis_rules_invalid",
+            "A resource plan requires a non-negative conservative_high_bytes.",
+        )
+    return high_bytes
+
+
+def _resource_measurement(conservative_high_bytes: int | None) -> dict[str, object]:
+    if (
+        conservative_high_bytes is not None
+        and conservative_high_bytes > TEXT_MODEL_RESOURCE_ENVELOPE_BYTES
+    ):
+        return {
+            "state": "resource_envelope_exceeded",
+            "reason": "conservative_estimate_exceeds_envelope",
+            "conservative_high_bytes": conservative_high_bytes,
+            "envelope_limit_bytes": TEXT_MODEL_RESOURCE_ENVELOPE_BYTES,
+            "peak_bytes": None,
+            "unload_evidence": None,
+        }
+    return {
+        "state": "not_applicable",
+        "reason": "controlled_offline_adapter",
+        "conservative_high_bytes": conservative_high_bytes,
+        "envelope_limit_bytes": TEXT_MODEL_RESOURCE_ENVELOPE_BYTES,
+        "peak_bytes": None,
+        "unload_evidence": None,
+    }
+
+
+def _incomplete_resource_measurement() -> dict[str, object]:
+    return {
+        "state": "not_applicable",
+        "reason": "attempt_incomplete",
+        "conservative_high_bytes": None,
+        "envelope_limit_bytes": TEXT_MODEL_RESOURCE_ENVELOPE_BYTES,
+        "peak_bytes": None,
+        "unload_evidence": None,
+    }
+
+
 def resume_text_analysis(
     report_id: str,
     decision: str | None,
     project_root: Path,
 ) -> dict[str, object]:
-    """Resume one retained text-analysis attempt from an explicit user decision.
+    """Resume one retained text-analysis decision pause from an explicit decision.
 
     Resumption never auto-resumes and never changes identity-bound inputs: it
     requires an explicit report ID and an explicit user decision, and it may
-    continue only a retained decision pause. Ticket 02 produces no decision
-    pause yet, so any resume request against a terminal report is rejected;
-    ticket 07 adds the resource and model-release pauses this continues.
+    continue only a retained ``partial`` report whose decision pause it recognizes.
+    The single resumable decision pause in this phase is the future-real-model
+    ``resource_envelope_exceeded`` pause, continued with
+    ``resource_configuration_changed``. A resume starts a fresh attempt from the
+    retained plan and subtitle identities — it never overwrites the paused report,
+    so there is no automatic retry.
     """
 
     prior_path = _text_analysis_report_path(project_root, report_id)
@@ -495,13 +832,66 @@ def resume_text_analysis(
         raise TextAnalysisError(
             "text_analysis_resume_invalid", "Resume requires an explicit user decision."
         )
-    # Ticket 02 produces no decision pause, so no retained report is resumable
-    # yet. Ticket 07 adds the resource and model-release pauses this will
-    # continue from the retained identities, without changing any identity-bound
-    # input. Until then a resume request against a terminal report is rejected.
-    raise TextAnalysisError(
-        "text_analysis_resume_invalid",
-        "Only a retained Phase 6 decision pause can be resumed.",
+    pause_reason = _resumable_pause_reason(prior_document)
+    if pause_reason is None:
+        raise TextAnalysisError(
+            "text_analysis_resume_invalid",
+            "Only a retained Phase 6 decision pause can be resumed.",
+        )
+    if pause_reason == "resource_envelope_exceeded" and decision != _RESOURCE_DECISION:
+        raise TextAnalysisError(
+            "text_analysis_resume_invalid",
+            "A resource-envelope pause requires --decision resource_configuration_changed.",
+        )
+    plan_id, subtitle_report_id, audio_report_id = _resumed_identities(prior_document)
+    return analyze_text(
+        plan_id,
+        subtitle_report_id,
+        project_root,
+        audio_report_id,
+        resumed_from_report=_input_evidence(prior_path),
+        resumed_from_report_id=report_id,
+        resumption_decision=decision,
+    )
+
+
+def _resumable_pause_reason(report: Mapping[str, object]) -> str | None:
+    """Return the resumable decision-pause reason of a retained report, if any."""
+
+    if report.get("status") != TextAnalysisReportStatus.RESOURCE_ENVELOPE_EXCEEDED.value:
+        return None
+    required_decision = report.get("required_decision")
+    if not isinstance(required_decision, Mapping):
+        return None
+    if required_decision.get("reason") == "resource_envelope_exceeded":
+        return "resource_envelope_exceeded"
+    return None
+
+
+def _resumed_identities(report: Mapping[str, object]) -> tuple[str, str, str | None]:
+    """Read the identity-bound plan and subtitle inputs from a paused report."""
+
+    plan_id = report.get("plan_id")
+    subtitle_report_id = report.get("subtitle_report_id")
+    if not isinstance(plan_id, str) or not isinstance(subtitle_report_id, str):
+        raise TextAnalysisError(
+            "text_analysis_report_invalid", "Paused report omits its identity-bound inputs."
+        )
+    audio_report_id: str | None = None
+    input_evidence = report.get("input_evidence")
+    if isinstance(input_evidence, Mapping):
+        audio_binding = report.get("audio_analysis")
+        if isinstance(audio_binding, Mapping) and audio_binding.get("state") == "bound":
+            bound_id = audio_binding.get("report_id")
+            audio_report_id = bound_id if isinstance(bound_id, str) else None
+    return plan_id, subtitle_report_id, audio_report_id
+
+
+def _write_text_once(path: Path, text: str) -> None:
+    write_text_once(
+        path,
+        text,
+        conflict_error=lambda message: TextAnalysisError("text_analysis_report_conflict", message),
     )
 
 

@@ -17,7 +17,7 @@ model, reads user media, accesses a network, or writes `outputs/`.
    structured details, contradictions, unresolved questions, and diagnostics.
 6. [x] Aggregate Part-local chapters and collection summaries while preserving
    limitations, unavailable Parts, and source-language boundaries.
-7. [ ] Implement immutable attempt provenance, state/decision/resource rules,
+7. [x] Implement immutable attempt provenance, state/decision/resource rules,
    restricted diagnostics, and synthetic append-only human-review records.
 8. [ ] Prove the complete offline `analyze-text` CLI contract, no-side-effect
    guarantees, and project verification gates.
