@@ -10,7 +10,7 @@ from video_content_pipeline.environment import (
     assert_runtime_policy,
 )
 
-PROJECT_ROOT = Path("/Users/apple/Desktop/wp/video-content-pipeline")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_VENV = PROJECT_ROOT / ".venv"
 
 

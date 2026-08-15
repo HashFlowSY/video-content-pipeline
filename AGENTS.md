@@ -2,7 +2,8 @@
 
 ## Scope
 
-- The project root is `/Users/shangyang/Desktop/workspace/projects/video-content-pipeline`.
+- The project root is this repository's root directory (the directory that
+  contains this `AGENTS.md`).
 - Keep all project code, downloads, caches, temporary files, models, input,
   work products, plans, and outputs inside this root.
 - Do not mark the project `production_validated`.

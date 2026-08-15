@@ -5,7 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
-PROJECT_ROOT = Path("/Users/apple/Desktop/wp/video-content-pipeline")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VCP_WRAPPER = PROJECT_ROOT / "scripts" / "run-vcp.sh"
 
 
