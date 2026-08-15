@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "version": "phase-06-evidence-rules-v1",
+  "factual_citation_basis": "normalized_cue_id",
+  "minimum_citations_per_fact": 1,
+  "segment_title_requires_citation": true,
+  "boundary_positions": "between_presentation_cues",
+  "cue_ownership": "exactly_once_per_segment",
+  "external_knowledge": "forbidden",
+  "translation": "forbidden",
+  "audio_evidence": "informing_only",
+  "audio_completeness": "not_verified"
+}

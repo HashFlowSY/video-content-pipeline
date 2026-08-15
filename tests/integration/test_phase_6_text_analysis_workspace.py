@@ -38,6 +38,66 @@ from video_content_pipeline.subtitle_pipeline import (
 )
 
 
+def _write_text_analysis_contracts(project_root: Path) -> None:
+    """Provision the versioned Phase 6 rules and generation-contract artifacts."""
+
+    config = project_root / "config"
+    (config / "text-analysis-rules.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "phase-06-fixture-rules",
+                "cue_rules_version": "phase-06-cue-rules-fixture",
+                "prompt_template_version": "phase-06-prompt-fixture",
+                "output_schema_version": "phase-06-output-schema-fixture",
+                "evidence_rules_version": "phase-06-evidence-rules-fixture",
+                "controlled_adapter_identity": "phase-06-controlled-text-adapter-fixture",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    contract_dir = config / "text-analysis"
+    contract_dir.mkdir(parents=True, exist_ok=True)
+    artifacts = {
+        "prompt-template.json": {"schema_version": 1, "version": "phase-06-prompt-fixture"},
+        "output-schema.json": {
+            "schema_version": 1,
+            "version": "phase-06-output-schema-fixture",
+            "envelope": {
+                "expected_schema_version": 1,
+                "required_fields": [
+                    "schema_version",
+                    "output_schema_version",
+                    "adapter_identity",
+                    "result",
+                ],
+                "result": {
+                    "required_fields": ["parts"],
+                    "list_fields": ["parts"],
+                    "optional_object_or_null_fields": ["collection_summary"],
+                },
+            },
+        },
+        "evidence-rules.json": {
+            "schema_version": 1,
+            "version": "phase-06-evidence-rules-fixture",
+        },
+        "controlled-adapter.json": {
+            "schema_version": 1,
+            "version": "phase-06-controlled-text-adapter-fixture",
+            "prompt_template_version": "phase-06-prompt-fixture",
+            "output_schema_version": "phase-06-output-schema-fixture",
+            "evidence_rules_version": "phase-06-evidence-rules-fixture",
+        },
+    }
+    for name, payload in artifacts.items():
+        (contract_dir / name).write_text(
+            json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+
 def _retained_plan(project_root: Path) -> RunPlan:
     """Write a confirmed RunPlan and its PlanReport with one SourceArtifact.
 
@@ -104,10 +164,7 @@ def _retained_subtitle_report(project_root: Path, plan: RunPlan) -> SubtitleCand
     rules_path.write_text(
         '{"schema_version": 1, "id": "phase-04-fixture-rules"}\n', encoding="utf-8"
     )
-    text_rules_path = project_root / "config" / "text-analysis-rules.json"
-    text_rules_path.write_text(
-        '{"schema_version": 1, "id": "phase-06-fixture-rules"}\n', encoding="utf-8"
-    )
+    _write_text_analysis_contracts(project_root)
     source_artifact_path = report_path.parent / "source.vtt"
     readable_artifact_path = report_path.parent / "readable.vtt"
     source_candidate_path = report_path.parent / "source-candidate.json"

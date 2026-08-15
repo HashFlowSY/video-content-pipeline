@@ -9,10 +9,16 @@ inspection evidence), the retained Subtitle candidate report with every selected
 Primary track, the versioned subtitle and text-analysis rules, and an optional
 Audio analysis report binding. Any drift blocks the attempt as ``failed``.
 
-No Controlled offline text adapter exists yet, so a fully revalidated attempt
-still retains ``controlled_adapter_unavailable`` with no semantic content. The
-Controlled offline text adapter's generation and projection contracts, the
-deterministic Markdown renderer, and semantic segmentation belong to later
+Ticket 03 binds the versioned generation and rendering contracts: a fully
+revalidated attempt now also revalidates the versioned prompt template, output
+projection schema, evidence-rule record, and Controlled offline text adapter
+identity (see ``text_contracts``), records their hash evidence, and writes a
+deterministic Markdown rendition of the authoritative JSON report into the
+immutable workspace.
+
+No Controlled offline text adapter *generates* yet, so a fully revalidated
+attempt still retains ``controlled_adapter_unavailable`` with no semantic
+content. The generating adapter and semantic segmentation belong to later
 Phase 6 tickets. See ``docs/PHASE_06_SPECIFICATION.md`` and the Text Analysis
 Context.
 """
@@ -22,7 +28,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
@@ -48,6 +54,12 @@ from video_content_pipeline.subtitle_pipeline import (
     SubtitleCandidateReport,
     SubtitleReportError,
     subtitle_rules_fingerprint,
+)
+from video_content_pipeline.text_contracts import (
+    TextContractError,
+    TextGenerationContracts,
+    render_text_analysis_markdown,
+    revalidate_text_generation_contracts,
 )
 
 
@@ -188,6 +200,8 @@ class TextAnalysisReport:
     controlled_text_adapter: ControlledTextAdapterState
     audio_analysis: AudioAnalysisBinding
     revalidation: RevalidationEvidence
+    text_generation_contracts: TextGenerationContracts | None
+    rendered_report: dict[str, object] | None
     restricted_raw_output: tuple[RestrictedRawOutput, ...]
     diagnostics: tuple[PlanningDiagnostic, ...]
 
@@ -229,6 +243,12 @@ class TextAnalysisReport:
             "audio_analysis": self.audio_analysis.as_json(),
             "audio_completeness": "not_verified",
             "revalidation": self.revalidation.as_json(),
+            "text_generation_contracts": (
+                self.text_generation_contracts.as_json()
+                if self.text_generation_contracts is not None
+                else None
+            ),
+            "rendered_report": self.rendered_report,
             "segments": [],
             "chapters": [],
             "collection_summary": None,
@@ -314,6 +334,7 @@ def analyze_text(
     text_rules_value: str | None = None
     selected_primary_tracks: tuple[SelectedPrimaryTrack, ...] = ()
     audio_binding = AudioAnalysisBinding("not_available")
+    contracts: TextGenerationContracts | None = None
 
     try:
         plan_path = project_root / "plans" / plan_id / "run-plan.json"
@@ -354,6 +375,7 @@ def analyze_text(
         subtitle_rules_value = _revalidate_subtitle_rules(subtitle_report, project_root)
         selected_primary_tracks = _selected_primary_tracks(plan, subtitle_report)
         text_rules_value = text_analysis_rules_fingerprint(project_root)
+        contracts = revalidate_text_generation_contracts(project_root)
         if audio_report_id is not None:
             audio_analysis_report_evidence, audio_binding = _bind_audio_report(
                 project_root, audio_report_id, plan.plan_id, subtitle_report.report_id
@@ -367,12 +389,20 @@ def analyze_text(
         report_subtitle_id = subtitle_report.report_id
         status = TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE
         diagnostics = (_adapter_unavailable_diagnostic(),)
-    except (TextAnalysisError, PlanningError, SubtitleReportError, OSError, ValueError) as error:
+    except (
+        TextAnalysisError,
+        TextContractError,
+        PlanningError,
+        SubtitleReportError,
+        OSError,
+        ValueError,
+    ) as error:
         status = TextAnalysisReportStatus.FAILED
         run_plan_confirmed = False
         selected_primary_tracks = ()
         audio_analysis_report_evidence = None
         audio_binding = AudioAnalysisBinding("not_available")
+        contracts = None
         diagnostics = (
             PlanningDiagnostic(
                 getattr(error, "reason", "text_analysis_input_invalid"),
@@ -404,11 +434,38 @@ def analyze_text(
             text_analysis_rules_fingerprint=text_rules_value,
             selected_primary_tracks=selected_primary_tracks,
         ),
+        text_generation_contracts=contracts,
+        rendered_report=None,
         restricted_raw_output=(),
         diagnostics=diagnostics,
     )
+    report = _render_and_bind_markdown(report)
     _write_json_once(report_path, report.as_json())
     return {"status": report.status.value, "report": report.as_json()}
+
+
+def _render_and_bind_markdown(report: TextAnalysisReport) -> TextAnalysisReport:
+    """Render the deterministic Markdown rendition and bind its version and hash.
+
+    The renderer reads only verified report content, never the ``rendered_report``
+    provenance it produces, so the Markdown hash is stable and the JSON report
+    stays authoritative. The rendition is written into the immutable workspace.
+    """
+
+    rendition = render_text_analysis_markdown(report.as_json())
+    markdown_path = report.workspace_path / "text-analysis-report.md"
+    if markdown_path.exists():
+        if markdown_path.read_text(encoding="utf-8") != rendition.text:
+            raise TextAnalysisError(
+                "text_analysis_report_conflict",
+                f"Immutable Markdown rendition differs: {markdown_path}",
+            )
+    else:
+        markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        markdown_path.write_text(rendition.text, encoding="utf-8")
+    rendered_report = dict(rendition.as_json())
+    rendered_report["path"] = markdown_path.as_posix()
+    return replace(report, rendered_report=rendered_report)
 
 
 def resume_text_analysis(

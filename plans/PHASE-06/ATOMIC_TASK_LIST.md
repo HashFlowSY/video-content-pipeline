@@ -9,7 +9,7 @@ model, reads user media, accesses a network, or writes `outputs/`.
    and unavailable-adapter result.
 2. [x] Add `vcp analyze-text` and explicit `vcp resume-text-analysis`
    contracts with complete input revalidation.
-3. [ ] Define versioned prompt, schema, evidence-rule, adapter-projection, and
+3. [x] Define versioned prompt, schema, evidence-rule, adapter-projection, and
    deterministic Markdown-renderer contracts.
 4. [ ] Implement cue-bound semantic-boundary adjudication, exactly-once cue
    ownership, technical-block deduplication, and conservative fallback.

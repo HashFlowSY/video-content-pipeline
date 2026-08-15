@@ -63,6 +63,53 @@ def _write_text_analysis_rules(project_root: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    _write_text_generation_contracts(project_root)
+
+
+def _write_text_generation_contracts(project_root: Path) -> None:
+    """Provision the versioned prompt, schema, evidence-rule, and adapter artifacts."""
+
+    contract_dir = project_root / "config" / "text-analysis"
+    contract_dir.mkdir(parents=True, exist_ok=True)
+    artifacts = {
+        "prompt-template.json": {
+            "schema_version": 1,
+            "version": "phase-06-prompt-fixture",
+        },
+        "output-schema.json": {
+            "schema_version": 1,
+            "version": "phase-06-output-schema-fixture",
+            "envelope": {
+                "expected_schema_version": 1,
+                "required_fields": [
+                    "schema_version",
+                    "output_schema_version",
+                    "adapter_identity",
+                    "result",
+                ],
+                "result": {
+                    "required_fields": ["parts"],
+                    "list_fields": ["parts"],
+                    "optional_object_or_null_fields": ["collection_summary"],
+                },
+            },
+        },
+        "evidence-rules.json": {
+            "schema_version": 1,
+            "version": "phase-06-evidence-rules-fixture",
+        },
+        "controlled-adapter.json": {
+            "schema_version": 1,
+            "version": "phase-06-controlled-text-adapter-fixture",
+            "prompt_template_version": "phase-06-prompt-fixture",
+            "output_schema_version": "phase-06-output-schema-fixture",
+            "evidence_rules_version": "phase-06-evidence-rules-fixture",
+        },
+    }
+    for name, payload in artifacts.items():
+        (contract_dir / name).write_text(
+            json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8"
+        )
 
 
 def _confirmed_plan(project_root: Path) -> RunPlan:
@@ -241,6 +288,25 @@ def test_analyze_text_cli_retains_controlled_adapter_unavailable_without_side_ef
     ]
 
     report_path = Path(report["report_path"])
+    contracts = report["text_generation_contracts"]
+    assert contracts["prompt_template"]["version"] == "phase-06-prompt-fixture"
+    assert contracts["output_schema"]["version"] == "phase-06-output-schema-fixture"
+    assert contracts["evidence_rules"]["version"] == "phase-06-evidence-rules-fixture"
+    assert contracts["controlled_adapter"]["version"] == (
+        "phase-06-controlled-text-adapter-fixture"
+    )
+    prompt_bytes = (tmp_path / "config" / "text-analysis" / "prompt-template.json").read_bytes()
+    assert contracts["prompt_template"]["sha256"] == sha256(prompt_bytes).hexdigest()
+
+    rendered = report["rendered_report"]
+    assert rendered["version"] == "phase-06-text-report-renderer-v1"
+    markdown_path = Path(rendered["path"])
+    markdown_text = markdown_path.read_text(encoding="utf-8")
+    assert rendered["sha256"] == sha256(markdown_text.encode("utf-8")).hexdigest()
+    assert rendered["byte_count"] == len(markdown_text.encode("utf-8"))
+    assert "not_verified" in markdown_text
+    assert markdown_path.parent == report_path.parent
+
     assert json.loads(report_path.read_text(encoding="utf-8")) == report
     assert plan_path.read_bytes() == plan_before
     assert subtitle_report.report_path.read_bytes() == subtitles_before
@@ -468,6 +534,48 @@ def test_analyze_text_cli_blocks_when_text_analysis_rules_are_absent(
     report = response["report"]
     assert report["status"] == "failed"
     assert report["diagnostics"][0]["reason"] == "text_analysis_rules_invalid"
+
+
+def test_analyze_text_cli_blocks_when_a_generation_contract_drifts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    subtitle_report = _retained_subtitle_report(tmp_path, plan)
+    output_schema_path = tmp_path / "config" / "text-analysis" / "output-schema.json"
+    drifted = json.loads(output_schema_path.read_text(encoding="utf-8"))
+    drifted["version"] = "phase-06-output-schema-DRIFTED"
+    output_schema_path.write_text(json.dumps(drifted, sort_keys=True) + "\n", encoding="utf-8")
+
+    _, response = _run(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        ["analyze-text", plan.plan_id, subtitle_report.report_id, "--json"],
+    )
+
+    report = response["report"]
+    assert report["status"] == "failed"
+    assert report["diagnostics"][0]["reason"] == "output_schema_invalid"
+    assert report["text_generation_contracts"] is None
+
+
+def test_analyze_text_cli_blocks_when_a_generation_contract_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    subtitle_report = _retained_subtitle_report(tmp_path, plan)
+    (tmp_path / "config" / "text-analysis" / "controlled-adapter.json").unlink()
+
+    _, response = _run(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        ["analyze-text", plan.plan_id, subtitle_report.report_id, "--json"],
+    )
+
+    report = response["report"]
+    assert report["status"] == "failed"
+    assert report["diagnostics"][0]["reason"] == "controlled_adapter_invalid"
 
 
 def test_analyze_text_cli_blocks_when_subtitle_selection_is_unresolved(
