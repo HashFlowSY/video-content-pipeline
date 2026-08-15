@@ -48,6 +48,11 @@ from video_content_pipeline.source import (
     validate_local_source_candidate,
 )
 from video_content_pipeline.subtitle_pipeline import process_subtitles, resume_subtitles
+from video_content_pipeline.text_analysis import (
+    TextAnalysisError,
+    analyze_text,
+    resume_text_analysis,
+)
 from video_content_pipeline.url_policy import (
     COLLECTION_CLOSURE_SIGNAL,
     ManualCollectionSession,
@@ -108,6 +113,15 @@ def _parser() -> argparse.ArgumentParser:
         "--role-metadata", action="append", default=[], metavar="PART_ID=CLUSTER_ID=ROLE"
     )
     resume_audio_command.add_argument("--json", action="store_true")
+    analyze_text_command = subcommands.add_parser("analyze-text")
+    analyze_text_command.add_argument("plan_id")
+    analyze_text_command.add_argument("subtitle_report_id")
+    analyze_text_command.add_argument("--audio-report", metavar="REPORT_ID")
+    analyze_text_command.add_argument("--json", action="store_true")
+    resume_text_command = subcommands.add_parser("resume-text-analysis")
+    resume_text_command.add_argument("report_id")
+    resume_text_command.add_argument("--decision", metavar="DECISION")
+    resume_text_command.add_argument("--json", action="store_true")
     return parser
 
 
@@ -178,6 +192,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.decision,
             tuple(arguments.audio_stream),
         )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "analyze-text":
+        result = analyze_text(
+            arguments.plan_id,
+            arguments.subtitle_report_id,
+            _project_root(),
+            arguments.audio_report,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command == "resume-text-analysis":
+        try:
+            result = resume_text_analysis(arguments.report_id, arguments.decision, _project_root())
+        except TextAnalysisError as error:
+            print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
+            return 2
         print(json.dumps(result, sort_keys=True))
         return 0
     raise AssertionError(f"Unhandled command: {arguments.command}")

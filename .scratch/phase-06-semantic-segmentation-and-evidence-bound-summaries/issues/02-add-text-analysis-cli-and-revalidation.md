@@ -5,13 +5,13 @@
 
 **Blocked by:** 01 -- Establish immutable text-analysis workspace.
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Labels:** ready-for-agent
 
-- [ ] Accept confirmed RunPlan and subtitle report identities, plus an optional
+- [x] Accept confirmed RunPlan and subtitle report identities, plus an optional
   Audio analysis report, through JSON-only public command contracts.
-- [ ] Revalidate source, subtitle selection, cue rules, prompts, schemas,
+- [x] Revalidate source, subtitle selection, cue rules, prompts, schemas,
   evidence rules, adapter identity, and optional audio-report bindings; drift
   blocks a new attempt.
-- [ ] Require an explicit report ID and user decision for resumption; no
+- [x] Require an explicit report ID and user decision for resumption; no
   automatic resume or identity-changing recovery is permitted.

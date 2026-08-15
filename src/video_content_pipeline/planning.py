@@ -9,6 +9,7 @@ import shutil
 import stat
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from fractions import Fraction
@@ -699,6 +700,41 @@ def inspection_evidence_fingerprints(
         )
         for evidence in inspection_evidence
     )
+
+
+def confirmed_plan_matches(confirmed_report: PlanReport, plan: RunPlan) -> bool:
+    """Report whether a ready PlanReport still matches a confirmed RunPlan's evidence.
+
+    Downstream analysis phases share this predicate so each revalidates a
+    RunPlan against its confirmation identity in exactly one place.
+    """
+
+    return (
+        confirmed_report.state is PlanState.READY_FOR_CONFIRMATION
+        and confirmed_report.source_artifacts == plan.source_artifacts
+        and confirmed_report.tools == plan.tools
+        and confirmed_report.disk_headroom == plan.disk_headroom
+        and confirmed_report.configuration_fingerprint == plan.configuration_fingerprint
+        and confirmed_report.url_authorizations == plan.url_authorizations
+    )
+
+
+def revalidate_confirmed_inspection_evidence(
+    confirmed_report: PlanReport,
+    plan: RunPlan,
+    *,
+    drift_error: Callable[[], Exception],
+) -> None:
+    """Reject mutable PlanReport inspection drift before a phase may use it.
+
+    The caller supplies its own diagnostic error so each Context keeps its
+    error identity while the drift comparison lives in one place.
+    """
+
+    expected = plan.inspection_evidence_fingerprints
+    actual = inspection_evidence_fingerprints(confirmed_report.inspection_evidence)
+    if not expected or actual != expected:
+        raise drift_error()
 
 
 def _inspection_evidence_fingerprints_from_json(value: object) -> tuple[tuple[str, str], ...]:

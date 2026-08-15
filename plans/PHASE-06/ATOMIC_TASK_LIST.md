@@ -5,9 +5,9 @@ offline-only, and must run Python only after activating `.venv` and passing
 `scripts/require-project-venv.sh`. No task downloads a model, invokes a real
 model, reads user media, accesses a network, or writes `outputs/`.
 
-1. [ ] Establish Phase 6 domain records, immutable workspace, report identity,
+1. [x] Establish Phase 6 domain records, immutable workspace, report identity,
    and unavailable-adapter result.
-2. [ ] Add `vcp analyze-text` and explicit `vcp resume-text-analysis`
+2. [x] Add `vcp analyze-text` and explicit `vcp resume-text-analysis`
    contracts with complete input revalidation.
 3. [ ] Define versioned prompt, schema, evidence-rule, adapter-projection, and
    deterministic Markdown-renderer contracts.
