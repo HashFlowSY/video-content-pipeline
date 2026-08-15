@@ -58,14 +58,14 @@ governed separately in [Runtime Governance](docs/RUNTIME_GOVERNANCE.md).
   chapters, and cited summaries; audio analysis may inform limitations but is
   optional for basic subtitle-derived claims.
 * Dependencies: `media-foundation`, `source-planning`, `subtitles`
-* Optional context: `audio-analysis` (its absence does not block
-  subtitle-derived claims)
+* Optional contexts: `audio-analysis` and `visual-text` (their absence does
+  not block subtitle-derived claims)
 * Direct dependencies: `subtitles`
 * Transitive dependencies: `media-foundation`, `source-planning`; optional
-  `audio-analysis` and its dependencies
+  `audio-analysis`, `visual-text`, and their dependencies
 * Context file: [contexts/text-analysis/CONTEXT.md](docs/contexts/text-analysis/CONTEXT.md)
 * Owned vocabulary: see the owner index below.
-* Relevant global ADRs: ADRs 0026, 0034–0039, 0040–0042, 0046.
+* Relevant global ADRs: ADRs 0026, 0034–0039, 0040–0042, 0046, 0049.
 
 ### transcription
 
@@ -82,6 +82,21 @@ governed separately in [Runtime Governance](docs/RUNTIME_GOVERNANCE.md).
 * Owned vocabulary: see the owner index below.
 * Relevant global ADRs: ADRs 0026, 0036–0037, 0042–0046.
 
+### visual-text
+
+* Purpose: produces optional on-screen text evidence — deterministic
+  page-change detection, adaptive frame sampling, Part-local page indices, and
+  OCR evidence items — without deciding cross-modal facts.
+* Dependencies: `media-foundation`, `source-planning`
+* Optional context: `audio-analysis` (used only by embedded-media suspicion;
+  its absence does not block visual evidence)
+* Direct dependencies: `source-planning`
+* Transitive dependencies: `media-foundation`; optional `audio-analysis` and
+  its dependencies
+* Context file: [contexts/visual-text/CONTEXT.md](docs/contexts/visual-text/CONTEXT.md)
+* Owned vocabulary: see the owner index below.
+* Relevant global ADRs: ADRs 0001, 0036–0037, 0042, 0047–0049.
+
 ## Dependency routing
 
 The conceptual dependency route is `media-foundation → source-planning →
@@ -95,6 +110,13 @@ text-analysis`. Transcription requires audio-analysis evidence (ADR 0043) and
 produces a changed cue basis; text-analysis consumes that basis through
 affected-Part re-analysis (ADR 0046) while remaining fully usable without
 transcription for subtitle-derived claims.
+
+The visual-text route is `source-planning → visual-text → text-analysis`.
+Visual-text is explicitly enabled, optionally consumes audio-analysis evidence
+(picture-plus-audio embedded-media suspicion), and never depends on subtitles;
+text-analysis consumes retained visual-text reports as an optional evidence
+input through affected-Part re-analysis (ADR 0046) and owns the host-read
+comment upgrade (ADR 0049).
 
 When a change crosses contexts, name every affected owner and read each owner's
 relevant ADR index. Add a new global ADR to `docs/adr/` and this map's index when
@@ -133,6 +155,7 @@ definition may be changed.
 - `Phase 5 offline verification boundary` → `media-foundation`
 - `Phase 6 offline text-verification boundary` → `media-foundation`
 - `Phase 7 offline transcription-verification boundary` → `media-foundation`
+- `Phase 8 offline visual-verification boundary` → `media-foundation`
 - `RunBundle` → `media-foundation`
 - `Publication boundary` → `media-foundation`
 - `Future publication stage` → `media-foundation`
@@ -304,6 +327,8 @@ definition may be changed.
 - `Phase 6 deterministic contract verification` → `text-analysis`
 - `Affected-Part re-analysis` → `text-analysis`
 - `Carried-forward analysis Part` → `text-analysis`
+- `Optional visual-text context` → `text-analysis`
+- `Host-read comment upgrade` → `text-analysis`
 
 ### transcription
 
@@ -326,6 +351,31 @@ definition may be changed.
 - `Full-ASR resource confirmation pause` → `transcription`
 - `Transcription resource-envelope pause` → `transcription`
 - `Serialized ASR execution` → `transcription`
+
+### visual-text
+
+- `Visual-text capability contract` → `visual-text`
+- `Controlled offline OCR adapter` → `visual-text`
+- `Model-acquisition-required visual-text result` → `visual-text`
+- `Deterministic page-change detection` → `visual-text`
+- `Versioned frame-sampling rules` → `visual-text`
+- `Text-value proxy metric` → `visual-text`
+- `Visual page` → `visual-text`
+- `Part-local visual page identity` → `visual-text`
+- `Page appearance record` → `visual-text`
+- `OCR evidence item` → `visual-text`
+- `Versioned OCR-item classification rules` → `visual-text`
+- `Excluded visual item` → `visual-text`
+- `Classification-uncertain visual item` → `visual-text`
+- `Suspected embedded-media interval` → `visual-text`
+- `Retained frame inventory` → `visual-text`
+- `Unpublished internal frame` → `visual-text`
+- `Explicit visual-text command boundary` → `visual-text`
+- `OCR resource confirmation pause` → `visual-text`
+- `Visual-text resource-envelope pause` → `visual-text`
+- `Immutable visual-text workspace` → `visual-text`
+- `Serialized OCR execution` → `visual-text`
+- `OCR-not-requested record` → `visual-text`
 
 ## Reading and writing protocol
 
@@ -393,3 +443,6 @@ future ADR can be routed without creating a context-local tree.
 - [ADR 0044](docs/adr/0044-use-deterministic-transcription-arbitration-with-retained-conflicts.md)
 - [ADR 0045](docs/adr/0045-use-gate-checked-interval-replacement-for-enhanced-subtitles.md)
 - [ADR 0046](docs/adr/0046-recompute-affected-parts-with-carried-forward-analysis.md)
+- [ADR 0047](docs/adr/0047-introduce-a-visual-text-context-with-deterministic-detection-and-ocr-only-model-capability.md)
+- [ADR 0048](docs/adr/0048-keep-visual-page-identity-part-local.md)
+- [ADR 0049](docs/adr/0049-separate-visual-evidence-classification-from-fact-upgrade.md)

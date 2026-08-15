@@ -128,6 +128,11 @@ The synthetic boundary that proves transcription and enhancement contracts
 without a real ASR model, user media, or network.
 _Avoid_: accuracy benchmark
 
+**Phase 8 offline visual-verification boundary**:
+The synthetic boundary that proves visual-text contracts without a real OCR
+model, frame extraction from user media, or network.
+_Avoid_: OCR quality benchmark
+
 **RunBundle**:
 The immutable bundle that a future authorized publication stage may promote
 from verified evidence and reports.

@@ -8,8 +8,9 @@ and ADRs.
 
 Relevant global decisions include [ADR 0040](../../adr/0040-require-cue-level-evidence-for-phase-6-facts.md),
 [ADR 0041](../../adr/0041-keep-phase-6-text-analysis-in-immutable-workspaces.md),
-[ADR 0042](../../adr/0042-use-context-map-and-domain-owned-glossaries.md), and
-[ADR 0046](../../adr/0046-recompute-affected-parts-with-carried-forward-analysis.md).
+[ADR 0042](../../adr/0042-use-context-map-and-domain-owned-glossaries.md),
+[ADR 0046](../../adr/0046-recompute-affected-parts-with-carried-forward-analysis.md), and
+[ADR 0049](../../adr/0049-separate-visual-evidence-classification-from-fact-upgrade.md).
 
 ## Language
 
@@ -261,3 +262,15 @@ _Avoid_: whole-collection re-run
 A Part whose verified prior analysis is reused in a new attempt with an
 explicit provenance link to the retained source report.
 _Avoid_: silently copied segments
+
+**Optional visual-text context**:
+Retained visual-text evidence (page indices and OCR items) that may inform
+organization, boundaries, and cited page facts; its absence never blocks
+subtitle-derived claims.
+_Avoid_: required visual coverage
+
+**Host-read comment upgrade**:
+The text-analysis rule that a background-UI comment becomes formal evidence
+only when cross-modal comparison shows the host explicitly selected or read
+it, recorded with page time and selection basis.
+_Avoid_: visual-side fact promotion
