@@ -43,6 +43,15 @@ from video_content_pipeline.planning import (
 )
 from video_content_pipeline.probe import project_probe_document
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval, TimeValidationError
+from video_content_pipeline.visual_page_index import (
+    FrameMetricFixture,
+    PageIndexRules,
+    PartPageIndex,
+    build_part_page_index,
+    frames_in_scope,
+    load_frame_metric_fixture,
+    load_page_index_rules,
+)
 from video_content_pipeline.visual_text import (
     VisualTextCapabilityReport,
     VisualTextError,
@@ -398,9 +407,37 @@ class _VisualTextInputs:
     plan_path: Path
     confirmed_report_path: Path
     rule_versions: VisualTextRuleVersions
+    page_index_rules: PageIndexRules
     scope: tuple[PartVisualScope, ...]
     limitations: tuple[PlanningDiagnostic, ...]
     capability_report: VisualTextCapabilityReport
+
+
+@dataclass(frozen=True)
+class _PartFrameInventory:
+    """A retained per-Part page index paired with its workspace inventory pointer.
+
+    The full Retained frame inventory is written to a workspace-internal artifact
+    (never a formal output); the report embeds the pages, appearance records, and
+    frame records together with the artifact's hash pointer and the hash-pinned
+    frame-metric fixture evidence.
+    """
+
+    index: PartPageIndex
+    fixture_evidence: InputEvidence
+    inventory: InputEvidence
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            **self.index.as_json(),
+            "frame_metric_fixture": self.fixture_evidence.as_json(),
+            "inventory_artifact": {
+                "path": self.inventory.path.as_posix(),
+                "sha256": self.inventory.sha256,
+                "byte_count": self.inventory.byte_count,
+                "published": False,
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -418,6 +455,7 @@ class VisualTextReport:
     rule_versions: VisualTextRuleVersions | None
     scope: tuple[PartVisualScope, ...]
     capability: VisualTextCapabilityReport | None
+    page_index: tuple[_PartFrameInventory, ...]
     limitations: tuple[PlanningDiagnostic, ...]
     diagnostics: tuple[PlanningDiagnostic, ...]
 
@@ -440,6 +478,9 @@ class VisualTextReport:
             "rule_versions": (
                 self.rule_versions.as_json() if self.rule_versions is not None else None
             ),
+            "page_index": {
+                "parts": [inventory.as_json() for inventory in self.page_index],
+            },
             "limitations": [limitation.as_json() for limitation in self.limitations],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
             "guarantees": offline_guarantees(),
@@ -459,6 +500,7 @@ class _ReportBuilder:
     rule_versions: VisualTextRuleVersions | None = None
     scope: tuple[PartVisualScope, ...] = ()
     capability: VisualTextCapabilityReport | None = None
+    page_index: tuple[_PartFrameInventory, ...] = ()
     limitations: tuple[PlanningDiagnostic, ...] = ()
     diagnostics: tuple[PlanningDiagnostic, ...] = ()
 
@@ -490,6 +532,7 @@ class _ReportBuilder:
             rule_versions=self.rule_versions,
             scope=self.scope,
             capability=self.capability,
+            page_index=self.page_index,
             limitations=self.limitations,
             diagnostics=self.diagnostics,
         )
@@ -531,7 +574,7 @@ def run_visual_text(
     try:
         inputs = _revalidate_inputs(plan_id, selectors, project_root)
         builder.bind(inputs)
-        _finalize(builder, inputs)
+        _finalize(builder, inputs, project_root)
     except (VisualTextError, PlanningError, OSError, ValueError) as error:
         builder.fail(error)
 
@@ -572,6 +615,7 @@ def _revalidate_inputs(
         ),
     )
     rule_versions = load_visual_text_rule_versions(project_root)
+    page_index_rules = load_page_index_rules(project_root)
     coverage_by_part = part_video_coverage(confirmed_report)
     plan_part_ids = {artifact.source_id for artifact in plan.source_artifacts}
     scope = resolve_visual_text_scope(
@@ -584,6 +628,7 @@ def _revalidate_inputs(
         plan_path=plan_path,
         confirmed_report_path=confirmed_report_path,
         rule_versions=rule_versions,
+        page_index_rules=page_index_rules,
         scope=scope,
         limitations=limitations,
         capability_report=capability_report,
@@ -613,18 +658,108 @@ def _uncovered_part_limitations(
     )
 
 
-def _finalize(builder: _ReportBuilder, inputs: _VisualTextInputs) -> None:
-    """Derive the terminal status from the OCR capability once revalidation has passed.
+def _finalize(builder: _ReportBuilder, inputs: _VisualTextInputs, project_root: Path) -> None:
+    """Build the deterministic page index, then derive the terminal status.
 
-    Detection, the OCR resource confirmation pause, and OCR arrive in later tickets;
-    at this boundary the outcome follows the evaluated capability directly. With no
-    eligible, acquired OCR capability that is the Model-acquisition-required
-    visual-text result, carrying its retained scope and rule versions but no visual
-    evidence. Deriving the status from ``capability_report.result`` -- rather than
-    asserting it -- keeps the boundary honest as later tickets add capability states.
+    Detection and sampling are deterministic and carry no model capability, so the
+    Part-local page index is always built when frame metrics exist -- even when no
+    OCR capability is available, matching the Model-acquisition-required outcome that
+    retains a page index with no OCR evidence (ticket 04 adds the OCR pause). Each
+    Part in scope consumes its hash-pinned frame-metric fixture; a Part with no
+    fixture records an auditable limitation rather than a silent gap, and a fixture
+    naming stale rule versions is rule drift that blocks the attempt. The OCR
+    resource confirmation pause and OCR itself arrive in later tickets, so at this
+    boundary the status still follows the evaluated capability directly.
     """
 
+    builder.page_index, absences = _build_page_index(inputs, project_root, builder.workspace_path)
+    builder.limitations = inputs.limitations + absences
     builder.status = VisualTextReportStatus(inputs.capability_report.result)
+
+
+def _build_page_index(
+    inputs: _VisualTextInputs, project_root: Path, workspace_path: Path
+) -> tuple[tuple[_PartFrameInventory, ...], tuple[PlanningDiagnostic, ...]]:
+    """Load fixtures and build one deterministic page index per Part in scope.
+
+    Fixtures are validated whole before any inventory is written: a stale fixture
+    (naming detection or sampling rule versions other than the loaded rules) raises
+    ``visual_text_frame_metrics_stale`` and blocks the attempt before a single
+    artifact lands, so a ``failed`` attempt never leaves a partial inventory. Parts
+    without a fixture are recorded as limitations and simply produce no index.
+    """
+
+    rules = inputs.page_index_rules
+    loaded: list[tuple[PartVisualScope, FrameMetricFixture]] = []
+    absences: list[PlanningDiagnostic] = []
+    for part_scope in inputs.scope:
+        fixture_path = _frame_metric_fixture_path(project_root, part_scope.part_id)
+        if not fixture_path.exists():
+            absences.append(
+                PlanningDiagnostic(
+                    "visual_text_frame_metrics_absent",
+                    f"Part {part_scope.part_id!r} has no frame-metric fixture; "
+                    "no page index was built.",
+                )
+            )
+            continue
+        fixture = load_frame_metric_fixture(fixture_path, part_scope.part_id)
+        if (
+            fixture.detection_version != rules.detection_version
+            or fixture.sampling_version != rules.sampling_version
+        ):
+            raise VisualTextError(
+                "visual_text_frame_metrics_stale",
+                f"Frame-metric fixture for Part {part_scope.part_id!r} names stale rule versions.",
+            )
+        loaded.append((part_scope, fixture))
+
+    inventories = tuple(
+        _write_part_inventory(part_scope, fixture, rules, workspace_path)
+        for part_scope, fixture in loaded
+    )
+    return inventories, tuple(absences)
+
+
+def _write_part_inventory(
+    part_scope: PartVisualScope,
+    fixture: FrameMetricFixture,
+    rules: PageIndexRules,
+    workspace_path: Path,
+) -> _PartFrameInventory:
+    """Build one Part's page index and write its Retained frame inventory to the workspace.
+
+    Only the frames inside the resolved scope intervals are indexed. The full
+    inventory is written once as a workspace-internal artifact (an Unpublished
+    internal frame set); its hash pointer is returned for the report.
+    """
+
+    scoped = frames_in_scope(fixture.frames, part_scope.intervals)
+    index = build_part_page_index(part_scope.part_id, scoped, rules)
+    inventory_path = workspace_path / "page-index" / part_scope.part_id / "retained-frames.json"
+    write_json_once(
+        inventory_path,
+        index.as_json(),
+        conflict_error=lambda message: VisualTextError("visual_text_report_conflict", message),
+    )
+    # Hash the written artifact rather than re-serializing the payload, so the pointer
+    # cannot drift from write_json_once's canonical on-disk format.
+    return _PartFrameInventory(
+        index=index,
+        fixture_evidence=fixture.evidence,
+        inventory=input_evidence(inventory_path),
+    )
+
+
+def _frame_metric_fixture_path(project_root: Path, part_id: str) -> Path:
+    """Locate a Part's hash-pinned synthetic frame-metric fixture.
+
+    The fixture stands in for pinned-ffmpeg extraction plus deterministic metric
+    computation; offline verification supplies it here and no frame of user media is
+    read. A real future path would instead produce these metrics under the workspace.
+    """
+
+    return project_root / "input" / "visual-text-frame-metrics" / f"{part_id}.json"
 
 
 # --- Serialization helpers --------------------------------------------------
