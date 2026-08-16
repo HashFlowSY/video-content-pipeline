@@ -55,7 +55,12 @@ from video_content_pipeline.external_tools import (
 #: it so a stale build from an earlier version never masquerades as current.
 #: v2: audio moved to a 32 kHz sample rate so decoded packet coverage is gap-free
 #: (see :data:`_AUDIO_SAMPLE_RATE`).
-RECIPES_VERSION = 2
+#: v3: the multi-Part collection's three files were byte-identical (same recipe →
+#: same bitexact bytes → one content-addressed source id), which collapsed a
+#: multi-source plan to a single Part and tripped the projector's distinct-Part
+#: guard. Each Part now has a distinct duration so the collection is genuinely
+#: three Parts end to end, not just three filenames.
+RECIPES_VERSION = 3
 
 #: Placeholders substituted into a recipe's argv at generation time. Keeping the
 #: argv otherwise fully literal means no shell and no path interpolation.
@@ -324,6 +329,9 @@ FIXTURE_RECIPES: tuple[FixtureRecipe, ...] = (
         fixture_id="multi-part",
         description="A three-file multi-Part collection of video + audio.",
         subtitle_source=None,
+        # Distinct durations give each Part distinct bytes and therefore a distinct
+        # content-addressed source id, so the collection is genuinely three Parts
+        # (identical bytes would collapse to one source id — see RECIPES_VERSION v3).
         builds=(
             MediaBuild(
                 output="multi-part-01.mkv",
@@ -332,12 +340,12 @@ FIXTURE_RECIPES: tuple[FixtureRecipe, ...] = (
             ),
             MediaBuild(
                 output="multi-part-02.mkv",
-                argv=_video_audio_only_argv(2),
+                argv=_video_audio_only_argv(3),
                 expected_streams=("audio", "video"),
             ),
             MediaBuild(
                 output="multi-part-03.mkv",
-                argv=_video_audio_only_argv(2),
+                argv=_video_audio_only_argv(4),
                 expected_streams=("audio", "video"),
             ),
         ),

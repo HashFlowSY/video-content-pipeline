@@ -15,6 +15,7 @@ tests that drive it.
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -151,6 +152,11 @@ def test_multi_part_collection_has_three_distinct_parts(
     generated = generate_fixture(recipe, toolchain, fixture_cache)
     names = {part.name for part in generated.parts}
     assert len(names) == 3, "a multi-Part collection must be several separate files"
+    # Distinct filenames are not enough: byte-identical Parts share a
+    # content-addressed source id and collapse a multi-source plan to one Part, so
+    # the three Parts must differ in bytes to be a genuine collection end to end.
+    digests = {sha256(part.read_bytes()).hexdigest() for part in generated.parts}
+    assert len(digests) == 3, "each multi-Part file must have distinct bytes"
 
 
 def test_probe_projection_accepts_the_muxed_subtitle_branch(
