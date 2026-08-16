@@ -58,3 +58,16 @@ untouched. That gate is recorded `confirmed: false` with
 `governance_status: deferred_to_maintainer`, and the deferral is itself
 machine-checked (the state is verified un-flipped). Full suite green;
 ruff check/format and mypy(src) clean.
+
+**Closure (2026-08-16, explicit maintainer instruction):** the deferred
+governance was performed in the closure commit — `docs/PHASE_10_COMPLETION_REPORT.md`
+written (five known limitations verbatim); `project-state.json` flipped
+(current_phase 10 completed, next_phase 11, `overall_stage` →
+`real_world_testing`, `real_world_testing: true`; media/model constraints
+untouched); the inventory's third plan gate re-recorded
+`confirmed: true / governance_status: performed_by_maintainer` and the
+acceptance test rewritten in the same commit to machine-check the flipped
+state (`test_project_state_reflects_the_closure_flip`), with
+`phase_exit_gates: all_confirmed`. Two ticket-08 test files carrying
+formatter-owned drift were reformatted at closure re-verification. All
+twelve gates now confirmed.

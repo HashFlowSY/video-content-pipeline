@@ -11,7 +11,7 @@ Golden run, Fault matrix). Every other context is exercised as a consumer.
 
 ## Status
 
-`approved_for_implementation_planning` (grilling consensus 2026-08-16, 20
+`completed_and_verified_offline` (grilling consensus 2026-08-16, 20
 questions, all recommendations accepted).
 
 Scope disclaimer: this phase proves engineering correctness only. It cannot

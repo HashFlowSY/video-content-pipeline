@@ -123,16 +123,25 @@ def _confirmed_plan(
     choices = RunPlanChoices.build(
         (
             RunChoice(
-                STAGE_RUN, KEY_ASR_MODE, COLLECTION_SCOPE,
-                AsrMode.SUBTITLE_FIRST.value, ChoiceProvenance.USER_CHOSEN,
+                STAGE_RUN,
+                KEY_ASR_MODE,
+                COLLECTION_SCOPE,
+                AsrMode.SUBTITLE_FIRST.value,
+                ChoiceProvenance.USER_CHOSEN,
             ),
             RunChoice(
-                STAGE_RUN, KEY_VISUAL_TEXT_ENABLED, COLLECTION_SCOPE,
-                "false", ChoiceProvenance.USER_CHOSEN,
+                STAGE_RUN,
+                KEY_VISUAL_TEXT_ENABLED,
+                COLLECTION_SCOPE,
+                "false",
+                ChoiceProvenance.USER_CHOSEN,
             ),
             RunChoice(
-                STAGE_AUDIO_ANALYSIS, KEY_DIARIZATION_CANDIDATE, COLLECTION_SCOPE,
-                CONTROLLED_DIARIZATION_CANDIDATE, ChoiceProvenance.USER_CHOSEN,
+                STAGE_AUDIO_ANALYSIS,
+                KEY_DIARIZATION_CANDIDATE,
+                COLLECTION_SCOPE,
+                CONTROLLED_DIARIZATION_CANDIDATE,
+                ChoiceProvenance.USER_CHOSEN,
             ),
         )
     )

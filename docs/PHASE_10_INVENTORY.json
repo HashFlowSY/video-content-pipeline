@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "phase": 10,
-  "status": "engineering_verification_complete",
+  "status": "completed",
   "ticket_11_verification": "passed_offline",
-  "phase_exit_gates": "engineering_confirmed_governance_deferred",
-  "phase_completion_note": "Ticket 11 closes Phase 10's engineering-verification work offline: the three 阶段 10 退出门禁 from docs/PHASED_EXECUTION_PLAN.md plus the nine derived gates named in docs/PHASE_10_SPECIFICATION.md :: Exit gates are each mapped to named proving tests and cross-linked to a summary boolean, the five 本阶段不能验证 known limitations are recorded verbatim, and the measured full-suite wall time is recorded against the ≤ 5-minute budget. Two of the three plan gates (工程自动化测试通过 and 已知限制全部写入报告) are confirmed here. The third plan gate — flipping project-state.json's overall_stage to real_world_testing — is a maintainer governance action deferred to explicit maintainer instruction (see governance and implementation_audit.open_requirements), following the Phase 8 and Phase 9 closure pattern; project-state.json is intentionally left untouched by this ticket.",
+  "phase_exit_gates": "all_confirmed",
+  "phase_completion_note": "Ticket 11 closed Phase 10's engineering-verification work offline: the three 阶段 10 退出门禁 from docs/PHASED_EXECUTION_PLAN.md plus the nine derived gates named in docs/PHASE_10_SPECIFICATION.md :: Exit gates are each mapped to named proving tests and cross-linked to a summary boolean, the five 本阶段不能验证 known limitations are recorded verbatim, and the measured full-suite wall time is recorded against the ≤ 5-minute budget. At closure (2026-08-16, explicit maintainer instruction) the deferred third plan gate was performed: project-state.json's overall_stage flipped to real_world_testing and docs/PHASE_10_COMPLETION_REPORT.md was written, completing all twelve gates.",
   "recorded_at": "2026-08-16T22:30:00+0800",
   "project_root": "/Users/apple/Desktop/wp/video-content-pipeline",
   "summary": {
     "engineering_automation_tests_pass_confirmed": true,
     "known_limitations_all_recorded_confirmed": true,
-    "overall_stage_flips_to_real_world_testing_confirmed": false,
+    "overall_stage_flips_to_real_world_testing_confirmed": true,
     "property_layer_exists_and_is_deterministic_confirmed": true,
     "five_fixture_branches_generate_and_probe_verify_confirmed": true,
     "vcp_run_completes_end_to_end_and_publishes_valid_bundle_confirmed": true,
@@ -52,13 +52,13 @@
       "id": "overall_stage_flips_to_real_world_testing",
       "requirement": "项目整体状态切换为： `real_world_testing / 当前阶段：真实测试，尚未完成生产验收`。",
       "source": "plan",
-      "confirmed": false,
-      "governance_status": "deferred_to_maintainer",
+      "confirmed": true,
+      "governance_status": "performed_by_maintainer",
       "summary_key": "overall_stage_flips_to_real_world_testing_confirmed",
       "proving_tests": [
-        "tests/acceptance/test_phase_10_inventory.py::test_project_state_constraints_remain_untouched"
+        "tests/acceptance/test_phase_10_inventory.py::test_project_state_reflects_the_closure_flip"
       ],
-      "note": "This is a maintainer closure action that uniquely flips project-state.json's overall_stage to real_world_testing (plus the usual phase fields). Per the Phase 8/9 precedent, the flip and the completion report are deferred to explicit maintainer instruction and are NOT performed by this ticket; the cited test confirms project-state.json is still `engineering_development` with constraints untouched, so the deferral is honestly reflected. See `governance`."
+      "note": "Performed at closure on explicit maintainer instruction (2026-08-16): project-state.json overall_stage flipped to real_world_testing with the usual phase fields (current_phase 10, phase_status completed, next_phase 11, real_world_testing true). The cited test machine-checks the flipped state while confirming the media/model constraints remain untouched. See `governance`."
     },
     {
       "id": "property_layer_exists_and_is_deterministic",
@@ -270,11 +270,12 @@
   ],
   "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted.",
   "governance": {
-    "deferred_to_maintainer": [
-      "Flip project-state.json overall_stage to `real_world_testing` (plus the usual phase fields: current_phase 10, phase_status completed, next_phase 11, real_world_testing true) — the third 阶段 10 退出门禁.",
-      "Write docs/PHASE_10_COMPLETION_REPORT.md with the five known limitations."
+    "performed_by_maintainer": [
+      "Flipped project-state.json overall_stage to `real_world_testing` (current_phase 10, phase_status completed, next_phase 11, real_world_testing true) — the third 阶段 10 退出门禁.",
+      "Wrote docs/PHASE_10_COMPLETION_REPORT.md with the five known limitations verbatim."
     ],
-    "note": "Per the Phase 8 and Phase 9 closure precedent, the project-state.json flip and the completion report are maintainer governance decisions performed only on explicit maintainer instruction, not by this closing ticket. project-state.json is intentionally left untouched; this inventory and its acceptance test verify it is still `engineering_development` so the deferral is honest and machine-checked."
+    "performed_at": "2026-08-16T10:33:40Z",
+    "note": "Both actions were deferred by ticket 11 per the Phase 8/9 precedent and performed at closure on explicit maintainer instruction. The acceptance test now verifies the flipped state instead of the deferral, in the same commit."
   },
   "implementation_audit": {
     "head": "49956bd",
@@ -299,8 +300,7 @@
       "The stage-fault tier and real SIGKILL subprocess spot checks recovering via the real CLI; the five-branch CLI acceptance layer (plan/run/status/pause/resume/cancel/verify/inventory plus improve) driving the real composition to published, hash-verified terminals; and this closing exit-gate inventory with tests/acceptance/test_phase_10_inventory.py."
     ],
     "open_requirements": [
-      "The five 本阶段不能验证 domain-quality questions (real zh/en ASR accuracy, real overlapping-speech quality, real subtitle forced-alignment success, real OCR recall and digit accuracy, real long-video summary faithfulness) are out of reach offline by design and are the subject of Phase 11 real-video testing.",
-      "Flipping project-state.json's overall_stage to `real_world_testing` and writing docs/PHASE_10_COMPLETION_REPORT.md are maintainer governance decisions, intentionally not performed by ticket 11 (see governance)."
+      "The five 本阶段不能验证 domain-quality questions (real zh/en ASR accuracy, real overlapping-speech quality, real subtitle forced-alignment success, real OCR recall and digit accuracy, real long-video summary faithfulness) are out of reach offline by design and are the subject of Phase 11 real-video testing."
     ],
     "current_head_verification": {
       "pytest": "1332 passed",

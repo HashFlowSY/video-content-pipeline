@@ -258,9 +258,7 @@ def _seed_audio_registry(project_root: Path, bindings: Sequence[_SourceBinding])
     registry = {
         "schema_version": 2,
         "candidates": [
-            _audio_candidate(
-                "controlled-vad", "vad", vad_projection, "vad.json", vad_fixture
-            ),
+            _audio_candidate("controlled-vad", "vad", vad_projection, "vad.json", vad_fixture),
             _audio_candidate(
                 "controlled-alignment",
                 "forced_alignment",

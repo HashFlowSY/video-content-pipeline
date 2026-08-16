@@ -15,11 +15,11 @@ that carry real evidence:
   nine the specification names. Every gate carries a ``summary_key`` whose summary
   boolean agrees with its ``confirmed`` flag, and cites proving tests that exist.
 * The third plan gate — flipping ``project-state.json``'s ``overall_stage`` to
-  ``real_world_testing`` — is a maintainer governance action deferred per the
-  Phase 8/9 precedent. It is recorded ``confirmed: false`` with a
-  ``governance_status``, and the deferral is itself machine-checked:
-  ``project-state.json`` is still ``engineering_development`` with its constraints
-  untouched.
+  ``real_world_testing`` — was deferred by ticket 11 per the Phase 8/9 precedent
+  and performed at closure on explicit maintainer instruction. It is recorded
+  ``confirmed: true`` with ``governance_status: performed_by_maintainer``, and the
+  flip is itself machine-checked: ``project-state.json`` is ``real_world_testing``
+  at phase 10 completed while the media/model constraints remain untouched.
 * ``known_limitations`` -- exactly the five 本阶段不能验证 items, re-derived from the
   plan verbatim.
 * ``guarantees_asserted_at_cli`` -- media/frame processing become
@@ -114,7 +114,7 @@ def test_inventory_is_well_formed() -> None:
     assert inventory["schema_version"] == 1
     assert inventory["phase"] == 10
     assert inventory["ticket_11_verification"] == "passed_offline"
-    assert inventory["phase_exit_gates"] == "engineering_confirmed_governance_deferred"
+    assert inventory["phase_exit_gates"] == "all_confirmed"
 
 
 def test_plan_exit_gates_map_exactly_to_the_plan() -> None:
@@ -149,36 +149,45 @@ def test_confirmed_gates_agree_with_the_summary_and_cite_existing_tests() -> Non
         summary_key = gate["summary_key"]
         assert summary_key in summary, f"gate {gate['id']!r} summary_key not in summary"
         assert gate["proving_tests"], f"gate {gate['id']!r} cites no proving test"
-        if gate.get("governance_status") is not None:
-            # The one deferred governance gate: not confirmed, boolean is false.
-            assert gate["confirmed"] is False, gate["id"]
-            assert summary[summary_key] is False, gate["id"]
-        else:
-            assert gate["confirmed"] is True, f"gate {gate['id']!r} is not confirmed"
-            assert summary[summary_key] is True, (
-                f"gate {gate['id']!r} summary boolean disagrees with confirmed"
-            )
+        assert gate["confirmed"] is True, f"gate {gate['id']!r} is not confirmed"
+        assert summary[summary_key] is True, (
+            f"gate {gate['id']!r} summary boolean disagrees with confirmed"
+        )
 
 
-def test_the_state_flip_gate_is_deferred_to_the_maintainer() -> None:
-    """Gate 3 is the only deferred gate; the deferral is explicit."""
+def test_the_state_flip_gate_was_performed_by_the_maintainer() -> None:
+    """Gate 3 is the only governance gate; the closure flip is explicit and confirmed."""
 
-    deferred = [g for g in _inventory()["exit_gates"] if g.get("governance_status")]
-    assert len(deferred) == 1, deferred
-    assert deferred[0]["id"] == "overall_stage_flips_to_real_world_testing"
-    assert deferred[0]["governance_status"] == "deferred_to_maintainer"
+    governed = [g for g in _inventory()["exit_gates"] if g.get("governance_status")]
+    assert len(governed) == 1, governed
+    assert governed[0]["id"] == "overall_stage_flips_to_real_world_testing"
+    assert governed[0]["governance_status"] == "performed_by_maintainer"
+    assert governed[0]["confirmed"] is True
+
+
+def test_project_state_reflects_the_closure_flip() -> None:
+    """The third plan gate happened: overall_stage flipped with the phase fields."""
+
+    state = json.loads(PROJECT_STATE_PATH.read_text(encoding="utf-8"))
+    assert state["overall_stage"] == "real_world_testing"
+    assert state["real_world_testing"] is True
+    assert state["current_phase"] == 10
+    assert state["phase_status"] == "completed"
+    assert state["next_phase"] == 11
+    phase_10 = [entry for entry in state["phase_history"] if entry["phase"] == 10]
+    assert len(phase_10) == 1
+    assert phase_10[0]["status"] == "completed"
+    assert phase_10[0]["verification"] == "passed_offline"
 
 
 def test_project_state_constraints_remain_untouched() -> None:
-    """The deferred state flip has NOT happened: project-state.json is unchanged.
+    """Synthetic verification never touched the media/model constraints.
 
     Backs the ``media_processed still false`` / ``models_downloaded still false``
-    derived gates and the deferral of the third plan gate.
+    derived gates: the closure flip changes the stage fields only.
     """
 
     state = json.loads(PROJECT_STATE_PATH.read_text(encoding="utf-8"))
-    assert state["overall_stage"] == "engineering_development"
-    assert state["real_world_testing"] is False
     constraints = state["constraints"]
     assert constraints["media_processed"] is False
     assert constraints["models_downloaded"] is False
