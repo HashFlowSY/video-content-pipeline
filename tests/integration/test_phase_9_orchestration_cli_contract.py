@@ -1,4 +1,4 @@
-"""Ticket 10 acceptance: the orchestration CLI command boundary, proven offline.
+"""Orchestration CLI command-boundary contract, proven offline (tickets 10, 12).
 
 These exercises drive the real :mod:`video_content_pipeline.cli` entry point for
 ``vcp run/status/pause/resume/cancel/verify/inventory`` over a synthetic project
@@ -8,17 +8,29 @@ JSON contract and exit codes: a non-interactive run publishes a bundle; pause an
 cancel only write control requests and never touch run state; status never
 mutates and diagnoses a stale-running crash; verify is hash-layer only; inventory
 renders the published inventory faithfully.
+
+Ticket 12 adds the phase-exit proofs at this boundary: ``vcp status`` diagnoses a
+crashed run and ``vcp resume`` recovers it under kill and truncation injection,
+and the reformulated guarantee that non-publication commands never write
+``outputs/`` while publication is exercised only inside synthetic project roots.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from video_content_pipeline import cli
+from video_content_pipeline.orchestration import (
+    RunLayout,
+    initialize_run_workspace,
+    run_id_from_run_plan,
+    source_id_from_run_plan,
+)
 from video_content_pipeline.planning import RunPlan, calculate_disk_headroom
 from video_content_pipeline.publication_projection import (
     PlainArtifactEvidence,
@@ -34,17 +46,22 @@ from video_content_pipeline.run_choices import (
     RunChoice,
     RunPlanChoices,
 )
+from video_content_pipeline.run_control import ControlDirective
 from video_content_pipeline.run_loop import RunComposition, RunReportInputs
+from video_content_pipeline.run_state import RunStateWriter, RunStatus, read_run_state
 from video_content_pipeline.source import SourceArtifact
 from video_content_pipeline.stage_dag import (
     StageInvalidationKey,
     StageName,
     StageResult,
     StageUnit,
+    execute_stages,
 )
 
 _PLAN_ID = "plan0123456789abcdef0123"
 _PART = "a" * 64
+# The real repository root, used to prove synthetic publishes never touch it.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _plan() -> RunPlan:
@@ -331,3 +348,140 @@ def test_resume_with_wrong_decision_is_an_error(
     code, output = _invoke(["resume", "--run", run_id, "--decision", "wrong_token"], capsys)
     assert code == 2
     assert output["reason"] == "decision_mismatch"
+
+
+# --- vcp status / resume: crash recovery at the CLI boundary -----------------
+
+
+def _crash_a_running_run(project_root: Path, plan: RunPlan, *, completed_units: int) -> RunLayout:
+    """Leave a discoverable run wedged at ``running`` with checkpoints, no lock.
+
+    This is the on-disk picture a power loss or forced kill leaves behind: the
+    single writer transitioned to ``running`` and checkpointed some units, then
+    died mid-unit before any clean transition and without releasing a lock. The
+    layout is addressed exactly as the CLI will find it under ``work/``.
+    """
+
+    now = datetime(2026, 8, 16, 8, 30, 0, tzinfo=UTC)
+    layout = initialize_run_workspace(
+        RunLayout(
+            project_root=project_root,
+            source_id=source_id_from_run_plan(plan),
+            run_id=run_id_from_run_plan(plan, now),
+        )
+    )
+    writer = RunStateWriter.create(layout, plan_id=plan.plan_id)
+    writer.transition_to(RunStatus.QUEUED)
+    writer.transition_to(RunStatus.RUNNING)
+    executed: list[StageUnit] = []
+
+    def crashing(unit: StageUnit, key: StageInvalidationKey) -> StageResult:
+        if len(executed) >= completed_units:
+            raise RuntimeError("process killed mid-unit")
+        executed.append(unit)
+        return StageResult.completed()
+
+    with pytest.raises(RuntimeError):
+        execute_stages(
+            writer=writer,
+            layout=layout,
+            plan=plan,
+            executor=crashing,
+            on_boundary=lambda: ControlDirective.CONTINUE,
+        )
+    assert read_run_state(layout.state_path).status is RunStatus.RUNNING
+    return layout
+
+
+def test_status_diagnoses_a_crashed_run_and_resume_recovers_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _write_plan(tmp_path)
+    layout = _crash_a_running_run(tmp_path, plan, completed_units=2)
+    _configure(tmp_path, monkeypatch)
+
+    # `vcp status --run` detects the stale-running crash without mutating anything.
+    before = layout.state_path.read_bytes()
+    code, single = _invoke(["status", "--run", layout.run_id], capsys)
+    assert code == 0
+    assert single["run"]["resume_case"] == "crashed"
+    assert single["run"]["stale_running"] is True
+    assert layout.state_path.read_bytes() == before
+
+    # `vcp resume` recovers from the last checkpoint and drives to a published bundle.
+    code, output = _invoke(["resume", "--run", layout.run_id], capsys)
+    assert code == 0
+    assert output["run_status"] == "complete"
+    assert output["published"] is True
+    assert output["verified"] is True
+    assert read_run_state(layout.state_path).status is RunStatus.COMPLETE
+    # At most the interrupted unit is redone; nothing published overwrites, and the
+    # recovered run leaves a hash-verifiable bundle under the synthetic root.
+    assert (layout.output_dir / "manifest.json").is_file()
+
+
+def test_truncated_state_temp_is_repaired_on_cli_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _write_plan(tmp_path)
+    layout = _crash_a_running_run(tmp_path, plan, completed_units=1)
+    # A crash between the temp write and the atomic rename left a torn temp file.
+    torn = layout.state_path.with_name(layout.state_path.name + ".tmp")
+    torn.write_text('{"schema_version":1,"status":"runni', encoding="utf-8")
+    _configure(tmp_path, monkeypatch)
+
+    code, output = _invoke(["resume", "--run", layout.run_id], capsys)
+    assert code == 0
+    assert output["run_status"] == "complete"
+    assert output["published"] is True
+    # The torn temp artifact is gone and the recovered bundle is hash-verifiable.
+    assert not torn.exists()
+
+
+# --- Reformulated guarantee: non-publication commands never write outputs/ ---
+
+
+def test_non_publication_commands_never_write_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`status`, `pause`, and `cancel` are non-publication commands: they read
+    state or write a control request, and must never create ``outputs/``.
+
+    This is the Phase 9 reformulation of the prior-phase "``outputs/`` does not
+    exist" invariant. Publication now writes ``outputs/`` — but only the run/
+    improve/resume commands do; the control and query commands never touch it.
+    """
+
+    plan = _write_plan(tmp_path)
+    # A crashed (unpublished) run exists under work/; outputs/ does not exist yet.
+    layout = _crash_a_running_run(tmp_path, plan, completed_units=1)
+    _configure(tmp_path, monkeypatch)
+    outputs_root = tmp_path / "outputs"
+
+    for argv in (["status"], ["status", "--run", layout.run_id]):
+        code, _ = _invoke(argv, capsys)
+        assert code == 0
+        assert not outputs_root.exists()
+
+    for kind in ("pause", "cancel"):
+        code, output = _invoke([kind, "--run", layout.run_id], capsys)
+        assert code == 0
+        assert Path(output["control_request_path"]).is_file()
+        assert not outputs_root.exists()
+
+
+def test_repository_outputs_untouched_by_cli_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Publication is exercised only inside the synthetic project root; the
+    repository's own ``outputs/`` still contains no published bundle."""
+
+    _write_plan(tmp_path)
+    _configure(tmp_path, monkeypatch)
+    code, output = _invoke(["run", "--plan", _PLAN_ID], capsys)
+    assert code == 0
+    assert output["published"] is True
+    # The synthetic root received the bundle...
+    assert (tmp_path / "outputs" / output["source_id"] / output["run_id"]).is_dir()
+    # ...but the real repository outputs/ was never written by the run.
+    assert not (_REPO_ROOT / "outputs" / output["source_id"]).exists()

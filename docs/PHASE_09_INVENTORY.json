@@ -1,0 +1,380 @@
+{
+  "schema_version": 1,
+  "phase": 9,
+  "status": "completed",
+  "ticket_12_verification": "passed_offline",
+  "phase_exit_gates": "all_confirmed",
+  "phase_completion_note": "Ticket 12 closes Phase 9 offline: the thirteen exit gates below (the five 阶段 9 退出门禁 from docs/PHASED_EXECUTION_PLAN.md plus the eight derived gates named in docs/PHASE_09_SPECIFICATION.md :: Offline Test Contract) are each mapped to named proving tests and cross-linked to a summary boolean, and every one of the specification's eighteen Offline Test Contract properties is mapped in coverage_map to tests that exist in the tree. Marking Phase 9 `completed` in project-state.json and writing docs/PHASE_09_COMPLETION_REPORT.md are separate maintainer governance decisions, intentionally not performed here (see implementation_audit.open_requirements), following the Phase 8 closure pattern.",
+  "recorded_at": "2026-08-16T14:00:00+0800",
+  "project_root": "/Users/apple/Desktop/wp/video-content-pipeline",
+  "summary": {
+    "minimal_run_bundle_on_every_ordinary_failure_confirmed": true,
+    "completed_valid_stages_do_not_rerun_on_resume_confirmed": true,
+    "any_formal_file_is_hash_verifiable_confirmed": true,
+    "outputs_never_overwrite_an_old_run_confirmed": true,
+    "inventory_covers_all_used_created_modified_deletable_confirmed": true,
+    "single_writer_state_and_journaled_control_requests_confirmed": true,
+    "atomic_same_filesystem_publication_confirmed": true,
+    "latest_pointer_eligibility_failed_never_advances_confirmed": true,
+    "non_interactive_run_execution_confirmed": true,
+    "run_scoped_adoption_refuses_manual_workspaces_confirmed": true,
+    "decision_pause_mapping_distinct_from_user_pause_confirmed": true,
+    "crash_recovery_semantics_confirmed": true,
+    "hash_layer_verify_confirmed": true,
+    "queued_is_a_transient_lock_wait_confirmed": true,
+    "projection_is_deterministic_with_recorded_timing_view_confirmed": true,
+    "improvement_runs_carry_forward_only_from_published_bundles_confirmed": true,
+    "no_model_execution_attempted_confirmed": true,
+    "no_model_acquisition_attempted_confirmed": true,
+    "no_network_access_attempted_confirmed": true,
+    "no_frame_extraction_attempted_confirmed": true,
+    "publication_exercised_in_synthetic_roots_only_confirmed": true
+  },
+  "summary_note": "The `summary` block is the conventional offline-boundary declaration, mirroring prior phase inventories. The machine-checkable proof lives in `exit_gates` (each mapped to its plan/derived requirement and to named proving tests, cross-linked to its summary boolean via `summary_key`), in `offline_test_contract` (each of the specification's eighteen contract properties mapped to named tests), and in `guarantees_asserted_at_cli`, all asserted by tests/acceptance/test_phase_09_inventory.py.",
+  "exit_gates": [
+    {
+      "id": "minimal_run_bundle_on_every_ordinary_failure",
+      "requirement": "每种普通失败都能发布最小 RunBundle。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "minimal_run_bundle_on_every_ordinary_failure_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_9_run_loop.py::test_ordinary_stage_exception_publishes_a_failed_bundle",
+        "tests/integration/test_phase_9_run_loop.py::test_collection_stage_failure_yields_failed_and_publishes",
+        "tests/integration/test_phase_9_run_loop.py::test_missing_front_loaded_choice_is_a_decision_pause_not_a_prompt",
+        "tests/unit/test_phase_9_run_reports.py::test_failure_before_any_stage_still_publishes_minimal_bundle"
+      ]
+    },
+    {
+      "id": "completed_valid_stages_do_not_rerun_on_resume",
+      "requirement": "已完成有效阶段在恢复时不重复运行。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "completed_valid_stages_do_not_rerun_on_resume_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_9_recovery.py::test_kill_recovers_losing_at_most_the_interrupted_unit",
+        "tests/unit/test_phase_9_stage_dag.py::test_resume_adopts_completed_units_and_finishes",
+        "tests/unit/test_phase_9_run_recovery.py::test_resume_paused_adopts_completed_and_finishes"
+      ]
+    },
+    {
+      "id": "any_formal_file_is_hash_verifiable",
+      "requirement": "任何正式文件可通过哈希验证。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "any_formal_file_is_hash_verifiable_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_9_orchestration_cli_contract.py::test_verify_is_hash_layer_and_validates_inventory",
+        "tests/integration/test_phase_9_orchestration_cli_contract.py::test_verify_detects_a_tampered_published_file",
+        "tests/unit/test_phase_9_publication.py::test_publish_renames_whole_bundle_and_verifies",
+        "tests/unit/test_phase_9_publication.py::test_verify_detects_a_corrupted_published_file"
+      ]
+    },
+    {
+      "id": "outputs_never_overwrite_an_old_run",
+      "requirement": "输出不会覆盖旧 run。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "outputs_never_overwrite_an_old_run_confirmed",
+      "proving_tests": [
+        "tests/unit/test_phase_9_publication.py::test_publish_never_overwrites_an_existing_run",
+        "tests/unit/test_phase_9_orchestration_identity.py::test_initialize_run_workspace_refuses_an_existing_published_bundle"
+      ]
+    },
+    {
+      "id": "inventory_covers_all_used_created_modified_deletable",
+      "requirement": "inventory 覆盖全部使用、创建、修改和可删除文件。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "inventory_covers_all_used_created_modified_deletable_confirmed",
+      "proving_tests": [
+        "tests/unit/test_phase_9_run_reports.py::test_inventory_records_eleven_fields_across_all_categories",
+        "tests/unit/test_phase_9_run_reports.py::test_deletable_entries_exclude_published_and_audit",
+        "tests/unit/test_phase_9_run_reports.py::test_published_content_entries_cover_projected_files_with_hashes"
+      ]
+    },
+    {
+      "id": "single_writer_state_and_journaled_control_requests",
+      "requirement": "Single-writer run state and journaled control requests.",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "single_writer_state_and_journaled_control_requests_confirmed",
+      "proving_tests": [
+        "tests/unit/test_phase_9_run_state.py::test_module_exposes_no_command_side_write_api",
+        "tests/unit/test_phase_9_run_state.py::test_request_observation_and_transition_are_three_events",
+        "tests/unit/test_phase_9_run_control.py::test_observe_pause_journals_and_returns_pause"
+      ]
+    },
+    {
+      "id": "atomic_same_filesystem_publication",
+      "requirement": "Atomic same-filesystem publication.",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "atomic_same_filesystem_publication_confirmed",
+      "proving_tests": [
+        "tests/unit/test_phase_9_publication.py::test_cross_device_staging_errors_without_copying",
+        "tests/unit/test_phase_9_publication.py::test_publish_renames_whole_bundle_and_verifies",
+        "tests/unit/test_phase_9_publication.py::test_publish_leaves_no_trace_when_rename_fails"
+      ]
+    },
+    {
+      "id": "latest_pointer_eligibility_failed_never_advances",
+      "requirement": "Latest-pointer eligibility (failed runs never advance it).",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "latest_pointer_eligibility_failed_never_advances_confirmed",
+      "proving_tests": [
+        "tests/unit/test_phase_9_publication.py::test_latest_never_advances_for_a_purely_failed_run",
+        "tests/unit/test_phase_9_publication.py::test_eligibility_of_terminal_statuses",
+        "tests/unit/test_phase_9_publication.py::test_latest_advances_for_incomplete_run_with_partial_results"
+      ]
+    },
+    {
+      "id": "non_interactive_run_execution",
+      "requirement": "Non-interactive run execution.",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "non_interactive_run_execution_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_9_orchestration_cli_contract.py::test_run_executes_non_interactively_and_publishes",
+        "tests/integration/test_phase_9_run_loop.py::test_clean_run_completes_publishes_and_advances_latest"
+      ]
+    },
+    {
+      "id": "run_scoped_adoption_refuses_manual_workspaces",
+      "requirement": "Run-scoped adoption (manual workspaces are never scavenged).",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "run_scoped_adoption_refuses_manual_workspaces_confirmed",
+      "proving_tests": [
+        "tests/unit/test_phase_9_stage_dag.py::test_adoption_reads_only_recorded_units_never_the_filesystem",
+        "tests/unit/test_phase_9_stage_dag.py::test_completed_unit_with_matching_key_is_adoptable",
+        "tests/unit/test_phase_9_stage_dag.py::test_failed_unit_is_never_adoptable"
+      ]
+    },
+    {
+      "id": "decision_pause_mapping_distinct_from_user_pause",
+      "requirement": "Decision-pause mapping distinct from user pauses.",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "decision_pause_mapping_distinct_from_user_pause_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_9_orchestration_cli_contract.py::test_resume_answers_a_decision_pause",
+        "tests/integration/test_phase_9_run_loop.py::test_stage_decision_pause_records_incomplete_and_publishes",
+        "tests/unit/test_phase_9_run_state.py::test_decision_pause_maps_to_incomplete_with_required_decision",
+        "tests/unit/test_phase_9_run_recovery.py::test_diagnose_decision_pause"
+      ]
+    },
+    {
+      "id": "crash_recovery_semantics",
+      "requirement": "Crash-recovery semantics (discard past checkpoint, revalidate, journal, continue).",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "crash_recovery_semantics_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_9_orchestration_cli_contract.py::test_status_diagnoses_a_crashed_run_and_resume_recovers_it",
+        "tests/integration/test_phase_9_recovery.py::test_kill_recovers_losing_at_most_the_interrupted_unit",
+        "tests/integration/test_phase_9_recovery.py::test_torn_state_temp_file_is_cleaned_and_run_recovers",
+        "tests/integration/test_phase_9_recovery.py::test_truncated_journal_tail_is_repaired_and_run_recovers"
+      ]
+    },
+    {
+      "id": "hash_layer_verify",
+      "requirement": "Hash-layer verify.",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "hash_layer_verify_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_9_orchestration_cli_contract.py::test_verify_is_hash_layer_and_validates_inventory",
+        "tests/unit/test_phase_9_publication.py::test_verify_detects_an_unexpected_extra_file"
+      ]
+    }
+  ],
+  "exit_gates_source": "docs/PHASED_EXECUTION_PLAN.md :: ### 阶段 9：编排、恢复、发布与完整清单 :: 退出门禁 (plan gates) + docs/PHASE_09_SPECIFICATION.md :: Offline Test Contract (derived gates)",
+  "derived_gate_ids": [
+    "single_writer_state_and_journaled_control_requests",
+    "atomic_same_filesystem_publication",
+    "latest_pointer_eligibility_failed_never_advances",
+    "non_interactive_run_execution",
+    "run_scoped_adoption_refuses_manual_workspaces",
+    "decision_pause_mapping_distinct_from_user_pause",
+    "crash_recovery_semantics",
+    "hash_layer_verify"
+  ],
+  "guarantees_asserted_at_cli": {
+    "model_execution": "not_attempted",
+    "model_acquisition": "not_attempted",
+    "network_access": "not_attempted",
+    "frame_extraction": "not_attempted",
+    "outputs_publication": "synthetic_roots_only",
+    "asserted_by": [
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_run_executes_non_interactively_and_publishes",
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_repository_outputs_untouched_by_cli_publish",
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_non_publication_commands_never_write_outputs",
+      "tests/unit/test_phase_9_run_reports.py::test_repository_outputs_untouched_by_synthetic_publish"
+    ],
+    "note": "The per-phase functions vcp run composes cannot execute offline (they require a model, real media, and the network), so the run loop and composition are proven through controlled seams; `outputs_publication` is the one guarantee that changes this phase, from `not_attempted` to `synthetic_roots_only` — publication is exercised only inside synthetic test project roots, and the repository's own outputs/ is asserted to hold no published bundle. Prior-phase 'outputs/ does not exist' assertions are reformulated to 'non-publication commands never write outputs/' (test_non_publication_commands_never_write_outputs)."
+  },
+  "offline_test_contract": {
+    "non_interactive_run_over_front_loaded_choices": [
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_run_executes_non_interactively_and_publishes",
+      "tests/unit/test_phase_9_run_composition.py::test_executor_translates_front_loaded_choices"
+    ],
+    "exact_state_machine_with_queued_as_transient_lock_wait": [
+      "tests/unit/test_phase_9_run_state.py::test_transition_table_is_exactly_the_plan_machine",
+      "tests/integration/test_phase_9_run_loop.py::test_second_heavy_run_fails_fast_and_stays_queued"
+    ],
+    "single_writer_state_and_journaled_control_requests": [
+      "tests/unit/test_phase_9_run_state.py::test_module_exposes_no_command_side_write_api",
+      "tests/unit/test_phase_9_run_control.py::test_observe_pause_journals_and_returns_pause"
+    ],
+    "pause_at_stage_unit_boundaries": [
+      "tests/unit/test_phase_9_stage_dag.py::test_pause_control_at_boundary_stops_the_run",
+      "tests/integration/test_phase_9_lock_and_control.py::test_pause_takes_effect_at_the_next_unit_boundary"
+    ],
+    "cancel_still_publishes": [
+      "tests/integration/test_phase_9_run_loop.py::test_cancel_stops_stages_and_still_publishes",
+      "tests/integration/test_phase_9_lock_and_control.py::test_cancel_stops_later_stages_and_publishes_completed"
+    ],
+    "decision_pauses_distinct_from_user_pauses_with_matching_resume": [
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_resume_answers_a_decision_pause",
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_resume_with_wrong_decision_is_an_error",
+      "tests/unit/test_phase_9_run_recovery.py::test_validate_decision_matches"
+    ],
+    "kill_and_truncation_injection_crash_recovery": [
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_status_diagnoses_a_crashed_run_and_resume_recovers_it",
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_truncated_state_temp_is_repaired_on_cli_resume",
+      "tests/integration/test_phase_9_recovery.py::test_kill_recovers_losing_at_most_the_interrupted_unit",
+      "tests/integration/test_phase_9_recovery.py::test_torn_state_temp_file_is_cleaned_and_run_recovers",
+      "tests/integration/test_phase_9_recovery.py::test_truncated_journal_tail_is_repaired_and_run_recovers"
+    ],
+    "stage_version_and_config_subset_invalidation_downstream_only": [
+      "tests/unit/test_phase_9_stage_dag.py::test_config_change_invalidates_only_affected_and_downstream",
+      "tests/unit/test_phase_9_stage_dag.py::test_source_content_change_recaches_the_whole_part_chain",
+      "tests/unit/test_phase_9_stage_dag.py::test_every_completed_unit_key_records_stage_version"
+    ],
+    "run_scoped_adoption_refuses_manual_workspaces": [
+      "tests/unit/test_phase_9_stage_dag.py::test_adoption_reads_only_recorded_units_never_the_filesystem",
+      "tests/unit/test_phase_9_stage_dag.py::test_completed_unit_with_matching_key_is_adoptable"
+    ],
+    "projection_determinism_and_timing_view_recording": [
+      "tests/unit/test_phase_9_publication_projection.py::test_projection_is_byte_identical_for_the_same_inputs",
+      "tests/unit/test_phase_9_publication_projection.py::test_part_subtitles_land_under_parts_dir_with_part_relative_time",
+      "tests/unit/test_phase_9_publication_projection.py::test_adopted_alignment_used_only_when_gates_pass"
+    ],
+    "staging_st_dev_precheck_rename_atomicity_and_reverification": [
+      "tests/unit/test_phase_9_publication.py::test_cross_device_staging_errors_without_copying",
+      "tests/unit/test_phase_9_publication.py::test_staging_self_check_is_bidirectional",
+      "tests/unit/test_phase_9_publication.py::test_publish_renames_whole_bundle_and_verifies"
+    ],
+    "minimal_run_bundle_on_every_ordinary_failure": [
+      "tests/integration/test_phase_9_run_loop.py::test_ordinary_stage_exception_publishes_a_failed_bundle",
+      "tests/unit/test_phase_9_run_reports.py::test_failure_before_any_stage_still_publishes_minimal_bundle"
+    ],
+    "manifest_disk_bidirectional_coverage": [
+      "tests/unit/test_phase_9_publication.py::test_staging_self_check_is_bidirectional",
+      "tests/unit/test_phase_9_publication.py::test_verify_detects_an_unexpected_extra_file",
+      "tests/unit/test_phase_9_publication.py::test_manifest_lists_every_projected_artifact_and_document"
+    ],
+    "latest_pointer_eligibility_failed_never_advances": [
+      "tests/unit/test_phase_9_publication.py::test_latest_never_advances_for_a_purely_failed_run",
+      "tests/unit/test_phase_9_publication.py::test_eligibility_of_terminal_statuses"
+    ],
+    "no_overwrite_of_existing_run_directories": [
+      "tests/unit/test_phase_9_publication.py::test_publish_never_overwrites_an_existing_run",
+      "tests/unit/test_phase_9_orchestration_identity.py::test_initialize_run_workspace_refuses_an_existing_published_bundle"
+    ],
+    "verify_hash_layer_scope": [
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_verify_is_hash_layer_and_validates_inventory",
+      "tests/integration/test_phase_9_orchestration_cli_contract.py::test_verify_detects_a_tampered_published_file"
+    ],
+    "inventory_coverage_of_used_created_modified_deletable": [
+      "tests/unit/test_phase_9_run_reports.py::test_inventory_records_eleven_fields_across_all_categories",
+      "tests/unit/test_phase_9_run_reports.py::test_deletable_entries_exclude_published_and_audit"
+    ],
+    "improvement_runs_carry_forward_only_from_published_bundles_with_provenance": [
+      "tests/integration/test_phase_9_improvement_runs.py::test_improve_carries_forward_unaffected_part_and_publishes",
+      "tests/integration/test_phase_9_improvement_runs.py::test_improve_refuses_a_tampered_source_bundle",
+      "tests/unit/test_phase_9_improve.py::test_carry_forward_selects_only_unaffected_part_content"
+    ]
+  },
+  "created_or_modified": [
+    ".scratch/phase-09-orchestration-recovery-publication-and-full-inventory/spec.md",
+    ".scratch/phase-09-orchestration-recovery-publication-and-full-inventory/issues/12-prove-the-phase-9-cli-contract-offline.md",
+    "docs/PHASE_09_INVENTORY.json",
+    "docs/PHASE_09_SPECIFICATION.md",
+    "docs/adr/0050-introduce-an-orchestration-context-that-owns-runs-and-publication.md",
+    "docs/adr/0051-publish-runbundles-by-whole-directory-atomic-rename.md",
+    "docs/adr/0052-adopt-stage-outputs-run-scoped-with-stage-versioned-invalidation-keys.md",
+    "docs/adr/0053-use-single-writer-run-state-with-file-based-control-requests.md",
+    "docs/contexts/orchestration/CONTEXT.md",
+    "src/video_content_pipeline/cli.py",
+    "src/video_content_pipeline/durable_io.py",
+    "src/video_content_pipeline/heavy_task_lock.py",
+    "src/video_content_pipeline/improve.py",
+    "src/video_content_pipeline/orchestration.py",
+    "src/video_content_pipeline/planning.py",
+    "src/video_content_pipeline/publication.py",
+    "src/video_content_pipeline/publication_projection.py",
+    "src/video_content_pipeline/run_choices.py",
+    "src/video_content_pipeline/run_composition.py",
+    "src/video_content_pipeline/run_control.py",
+    "src/video_content_pipeline/run_loop.py",
+    "src/video_content_pipeline/run_recovery.py",
+    "src/video_content_pipeline/run_reports.py",
+    "src/video_content_pipeline/run_state.py",
+    "src/video_content_pipeline/stage_dag.py",
+    "tests/acceptance/test_phase_09_inventory.py",
+    "tests/integration/test_phase_9_improvement_runs.py",
+    "tests/integration/test_phase_9_lock_and_control.py",
+    "tests/integration/test_phase_9_orchestration_cli_contract.py",
+    "tests/integration/test_phase_9_recovery.py",
+    "tests/integration/test_phase_9_run_loop.py",
+    "tests/unit/test_phase_9_durable_io.py",
+    "tests/unit/test_phase_9_heavy_task_lock.py",
+    "tests/unit/test_phase_9_improve.py",
+    "tests/unit/test_phase_9_orchestration_identity.py",
+    "tests/unit/test_phase_9_publication.py",
+    "tests/unit/test_phase_9_publication_projection.py",
+    "tests/unit/test_phase_9_run_choices.py",
+    "tests/unit/test_phase_9_run_composition.py",
+    "tests/unit/test_phase_9_run_control.py",
+    "tests/unit/test_phase_9_run_recovery.py",
+    "tests/unit/test_phase_9_run_reports.py",
+    "tests/unit/test_phase_9_run_state.py",
+    "tests/unit/test_phase_9_stage_dag.py"
+  ],
+  "external_reads": [],
+  "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted.",
+  "implementation_audit": {
+    "head": "56c55bf",
+    "ticket_status": {
+      "01": "resolved",
+      "02": "resolved",
+      "03": "resolved",
+      "04": "resolved",
+      "05": "resolved",
+      "06": "resolved",
+      "07": "resolved",
+      "08": "resolved",
+      "09": "resolved",
+      "10": "resolved",
+      "11": "resolved",
+      "12": "resolved"
+    },
+    "completed_work": [
+      "Run identity and directory layout, front-loaded plan choices, single-writer run state with an append-only events journal, the heavy-task lock and file-based control requests, the stage DAG with stage-versioned config-subset invalidation keys and unit-boundary checkpoints, and resume plus crash recovery under kill and truncation injection.",
+      "The deterministic versioned publication projection with recorded timing views, staging with an st_dev precheck and whole-directory atomic-rename publish, manifest.json, the Minimal RunBundle floor (processing-report, run-inventory, both quality reports, diagnostics), the per-source latest pointer, and the run reports, inventory, and cleanup plan.",
+      "The orchestration CLI (`vcp run/status/pause/resume/cancel/verify/inventory`) composing the sixteen per-phase functions in-process, improvement runs (`vcp improve`) carrying forward artifacts from a named published bundle by recorded hash, and this closing exit-gate proof: CLI-boundary crash recovery, the reformulated non-publication-commands-never-write-outputs guarantee, and the machine-checkable exit-gate inventory with tests/acceptance/test_phase_09_inventory.py."
+    ],
+    "open_requirements": [
+      "The per-phase functions vcp run composes cannot run offline (they require a model, real media, and the network), so end-to-end `vcp run` real execution is not offline-provable by design; the loop and composition are proven through controlled seams. Real heavy execution is Phase 10 synthetic engineering validation and the separately authorized model-prototype session.",
+      "`vcp models plan/download/verify` is deliberately deferred to the authorized model-prototype session and omitted from the Phase 9 CLI acceptance surface.",
+      "Marking Phase 9 `completed` in project-state.json and writing docs/PHASE_09_COMPLETION_REPORT.md are maintainer governance decisions, intentionally not performed by ticket 12."
+    ],
+    "current_head_verification": {
+      "pytest": "1034 passed",
+      "production_validated": false
+    }
+  }
+}

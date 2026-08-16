@@ -50,9 +50,7 @@ def _tick_clock(start: datetime | None = None) -> Callable[[], datetime]:
 
 
 def _writer(tmp_path: Path, clock: Callable[[], datetime] | None = None) -> RunStateWriter:
-    return RunStateWriter.create(
-        _layout(tmp_path), plan_id=_PLAN_ID, clock=clock or _tick_clock()
-    )
+    return RunStateWriter.create(_layout(tmp_path), plan_id=_PLAN_ID, clock=clock or _tick_clock())
 
 
 # --- Initial creation -------------------------------------------------------
