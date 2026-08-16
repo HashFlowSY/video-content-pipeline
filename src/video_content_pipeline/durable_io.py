@@ -61,6 +61,22 @@ def atomic_replace(path: Path, text: str) -> None:
     os.replace(tmp_path, path)
 
 
+def fsync_directory(path: Path) -> None:
+    """Fsync a directory so a rename or fresh entry within it survives a crash.
+
+    A file's own fsync flushes its bytes, but the *name* that makes it reachable
+    lives in the parent directory's data; only fsyncing the directory guarantees
+    a newly renamed entry — the published RunBundle after ADR 0051's atomic
+    rename — is durably linked.
+    """
+
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def utc_now() -> datetime:
     """The current time as a timezone-aware UTC instant."""
 
