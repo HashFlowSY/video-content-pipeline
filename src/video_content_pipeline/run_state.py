@@ -75,6 +75,7 @@ class EventKind(StrEnum):
     CONTROL_REQUEST_OBSERVED = "control_request_observed"
     DECISION_PAUSE = "decision_pause"
     RECOVERY = "recovery"
+    PUBLICATION_VERIFICATION_FAILED = "publication_verification_failed"
 
 
 #: The terminal statuses: a run that reaches one of these never transitions
@@ -499,6 +500,19 @@ class RunStateWriter:
         """
 
         self._append_event(EventKind.RECOVERY, {"detail": dict(detail)})
+
+    def record_publication_verification_failure(self, detail: Mapping[str, object]) -> None:
+        """Journal a post-publish hash-reverification failure (no transition).
+
+        Publication re-hashes every published file against the RunBundle manifest
+        and, on a discrepancy, reports it through a journal seam. The run process
+        is the sole writer of ``events.jsonl`` (ADR 0053), so the publication
+        mechanism cannot self-journal; the run loop wires this method as that
+        seam. It records the discrepancy only — publication itself has already
+        committed and the run's terminal status is unchanged.
+        """
+
+        self._append_event(EventKind.PUBLICATION_VERIFICATION_FAILED, {"detail": dict(detail)})
 
     def set_progress(
         self,

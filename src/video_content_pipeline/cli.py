@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from fractions import Fraction
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from video_content_pipeline import __version__
 from video_content_pipeline.acquisition import URLAcquisitionError, acquire_public_source
 from video_content_pipeline.audio_analysis import analyze_audio, resume_audio_analysis
+from video_content_pipeline.durable_io import utc_now
 from video_content_pipeline.enhancement import (
     EnhancementError,
     enhance,
@@ -20,6 +21,7 @@ from video_content_pipeline.enhancement import (
 )
 from video_content_pipeline.environment import assert_project_venv, assert_runtime_policy
 from video_content_pipeline.external_tools import PinnedExternalTool, identify_external_tool
+from video_content_pipeline.heavy_task_lock import HeavyTaskLockError, heavy_task_lock_path
 from video_content_pipeline.inspection import (
     InspectionError,
     PlanInspectionEvidence,
@@ -27,10 +29,12 @@ from video_content_pipeline.inspection import (
     capture_probe_documents,
     inspect_documents,
 )
+from video_content_pipeline.orchestration import OrchestrationError, RunLayout
 from video_content_pipeline.planning import (
     PlanningDiagnostic,
     PlanningError,
     PlanState,
+    RunPlan,
     confirm_run_plan,
     create_plan_report,
     estimate_full_decode,
@@ -44,6 +48,19 @@ from video_content_pipeline.planning import (
     record_decode_measurement,
     revalidate_report,
 )
+from video_content_pipeline.publication import PublicationError, verify_published_bundle
+from video_content_pipeline.run_composition import build_run_composition
+from video_content_pipeline.run_control import ControlKind, ControlRequestError, request_control
+from video_content_pipeline.run_loop import (
+    RunComposition,
+    RunLoopError,
+    load_confirmed_plan,
+    resume_and_finalize,
+    start_run,
+)
+from video_content_pipeline.run_recovery import RunRecoveryError, diagnose_run
+from video_content_pipeline.run_reports import RUN_INVENTORY_PATH, RunReportError
+from video_content_pipeline.run_state import RunStateError, read_run_state
 from video_content_pipeline.source import (
     SourceArtifact,
     SourceIntakeError,
@@ -52,6 +69,7 @@ from video_content_pipeline.source import (
     snapshot_local_source,
     validate_local_source_candidate,
 )
+from video_content_pipeline.stage_dag import StageDagError
 from video_content_pipeline.subtitle_pipeline import process_subtitles, resume_subtitles
 from video_content_pipeline.text_analysis import (
     TextAnalysisError,
@@ -187,6 +205,28 @@ def _parser() -> argparse.ArgumentParser:
     resume_visual_text_command.add_argument("report_id")
     resume_visual_text_command.add_argument("--decision", metavar="DECISION")
     resume_visual_text_command.add_argument("--json", action="store_true")
+    run_command = subcommands.add_parser("run")
+    run_command.add_argument("--plan", required=True, metavar="PLAN_ID")
+    run_command.add_argument("--json", action="store_true")
+    status_command = subcommands.add_parser("status")
+    status_command.add_argument("--run", metavar="RUN_ID")
+    status_command.add_argument("--json", action="store_true")
+    pause_command = subcommands.add_parser("pause")
+    pause_command.add_argument("--run", required=True, metavar="RUN_ID")
+    pause_command.add_argument("--json", action="store_true")
+    resume_command = subcommands.add_parser("resume")
+    resume_command.add_argument("--run", required=True, metavar="RUN_ID")
+    resume_command.add_argument("--decision", metavar="DECISION")
+    resume_command.add_argument("--json", action="store_true")
+    cancel_command = subcommands.add_parser("cancel")
+    cancel_command.add_argument("--run", required=True, metavar="RUN_ID")
+    cancel_command.add_argument("--json", action="store_true")
+    verify_command = subcommands.add_parser("verify")
+    verify_command.add_argument("--run", required=True, metavar="RUN_ID")
+    verify_command.add_argument("--json", action="store_true")
+    inventory_command = subcommands.add_parser("inventory")
+    inventory_command.add_argument("--run", required=True, metavar="RUN_ID")
+    inventory_command.add_argument("--json", action="store_true")
     return parser
 
 
@@ -354,6 +394,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = resume_visual_text(arguments.report_id, arguments.decision, _project_root())
         except VisualTextError as error:
             print(json.dumps({"status": "error", "reason": error.reason, "message": str(error)}))
+            return 2
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if arguments.command in _ORCHESTRATION_COMMANDS:
+        try:
+            result = _handle_orchestration(arguments)
+        except _ORCHESTRATION_ERRORS as error:
+            print(
+                json.dumps(
+                    {"status": "error", "reason": _reason(error), "message": str(error)},
+                    sort_keys=True,
+                )
+            )
             return 2
         print(json.dumps(result, sort_keys=True))
         return 0
@@ -824,6 +877,245 @@ def _complete_inspection_evidence(
         )
         for artifact in source_artifacts
     )
+
+
+_ORCHESTRATION_COMMANDS = frozenset(
+    {"run", "status", "pause", "resume", "cancel", "verify", "inventory"}
+)
+
+#: Every orchestration failure carries a machine-readable ``reason``; the CLI
+#: turns any of them into the existing error contract (exit code 2).
+_ORCHESTRATION_ERRORS: tuple[type[BaseException], ...] = (
+    RunLoopError,
+    OrchestrationError,
+    PlanningError,
+    RunStateError,
+    RunRecoveryError,
+    HeavyTaskLockError,
+    PublicationError,
+    ControlRequestError,
+    StageDagError,
+    RunReportError,
+)
+
+#: The eleven plan §18.2 fields every inventory record must carry; ``vcp verify``
+#: confirms the published inventory's structure without re-running any gate.
+_INVENTORY_FIELDS = frozenset(
+    {
+        "path",
+        "kind",
+        "action",
+        "purpose",
+        "size_bytes",
+        "sha256",
+        "stage",
+        "used_by",
+        "rebuildable",
+        "deletion_class",
+        "deletion_consequence",
+    }
+)
+
+
+def _composition_factory(layout: RunLayout, plan: RunPlan) -> RunComposition:
+    """The production run composition seam; the offline tests replace it."""
+
+    return build_run_composition(layout, plan)
+
+
+def _handle_orchestration(arguments: argparse.Namespace) -> dict[str, object]:
+    if arguments.command == "run":
+        return _handle_run(arguments)
+    if arguments.command == "status":
+        return _handle_status(arguments)
+    if arguments.command == "pause":
+        return _handle_control(arguments, ControlKind.PAUSE)
+    if arguments.command == "cancel":
+        return _handle_control(arguments, ControlKind.CANCEL)
+    if arguments.command == "resume":
+        return _handle_resume(arguments)
+    if arguments.command == "verify":
+        return _handle_verify(arguments)
+    return _handle_inventory(arguments)
+
+
+def _handle_run(arguments: argparse.Namespace) -> dict[str, object]:
+    outcome = start_run(
+        _project_root(),
+        arguments.plan,
+        composition_factory=_composition_factory,
+        run_start=utc_now(),
+    )
+    return outcome.to_document()
+
+
+def _handle_status(arguments: argparse.Namespace) -> dict[str, object]:
+    project_root = _project_root()
+    if arguments.run is None:
+        return {"status": "ok", "runs": _list_runs(project_root)}
+    layout = _find_run_layout(project_root, arguments.run)
+    diagnosis = diagnose_run(layout, lock_path=heavy_task_lock_path(project_root))
+    return {
+        "status": "ok",
+        "run": {
+            "run_id": layout.run_id,
+            "source_id": layout.source_id,
+            **diagnosis.to_document(),
+        },
+    }
+
+
+def _handle_control(arguments: argparse.Namespace, kind: ControlKind) -> dict[str, object]:
+    layout = _find_run_layout(_project_root(), arguments.run)
+    path = request_control(layout, kind)
+    return {
+        "status": "ok",
+        "requested": kind.value,
+        "run_id": layout.run_id,
+        "source_id": layout.source_id,
+        "control_request_path": str(path),
+    }
+
+
+def _handle_resume(arguments: argparse.Namespace) -> dict[str, object]:
+    project_root = _project_root()
+    layout = _find_run_layout(project_root, arguments.run)
+    plan = load_confirmed_plan(project_root, read_run_state(layout.state_path).plan_id)
+    outcome = resume_and_finalize(
+        layout=layout,
+        plan=plan,
+        composition=_composition_factory(layout, plan),
+        lock_path=heavy_task_lock_path(project_root),
+        decision=arguments.decision,
+        now=utc_now(),
+    )
+    return outcome.to_document()
+
+
+def _handle_verify(arguments: argparse.Namespace) -> dict[str, object]:
+    layout = _find_published_layout(_project_root(), arguments.run)
+    verification = verify_published_bundle(layout.output_dir)
+    inventory_valid, inventory_reason = _validate_inventory_structure(layout.output_dir)
+    return {
+        "status": "ok",
+        "run_id": layout.run_id,
+        "source_id": layout.source_id,
+        "verified": verification.verified and inventory_valid,
+        "hash_verified": verification.verified,
+        "inventory_valid": inventory_valid,
+        "inventory_reason": inventory_reason,
+        "discrepancies": [{"path": d.path, "reason": d.reason} for d in verification.discrepancies],
+    }
+
+
+def _handle_inventory(arguments: argparse.Namespace) -> dict[str, object]:
+    layout = _find_published_layout(_project_root(), arguments.run)
+    inventory_path = layout.output_dir / RUN_INVENTORY_PATH
+    try:
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RunReportError(
+            "inventory_unreadable", f"No readable inventory at {inventory_path}."
+        ) from error
+    return {
+        "status": "ok",
+        "run_id": layout.run_id,
+        "source_id": layout.source_id,
+        "inventory": inventory,
+    }
+
+
+def _find_layout(
+    project_root: Path,
+    parent: Path,
+    run_id: str,
+    present: Callable[[Path], bool],
+    *,
+    reason: str,
+    message: str,
+) -> RunLayout:
+    """Locate a run's layout by scanning ``<parent>/<source>/`` for its run id.
+
+    ``present`` decides whether the run exists under a source directory — a work
+    run is identified by its ``run-state.json``, a published run by its bundle
+    directory — so both lookups share one scan and one not-found contract.
+    """
+
+    if parent.is_dir():
+        for source_dir in sorted(parent.iterdir()):
+            if present(source_dir / run_id):
+                return RunLayout(project_root, source_dir.name, run_id)
+    raise RunLoopError(reason, message)
+
+
+def _find_run_layout(project_root: Path, run_id: str) -> RunLayout:
+    """Locate a run's work-directory layout by scanning ``work/<source>/<run>/``."""
+
+    return _find_layout(
+        project_root,
+        project_root / "work",
+        run_id,
+        lambda run_dir: (run_dir / "run-state.json").is_file(),
+        reason="run_not_found",
+        message=f"No run {run_id} exists under work/.",
+    )
+
+
+def _find_published_layout(project_root: Path, run_id: str) -> RunLayout:
+    """Locate a published run's bundle layout by scanning ``outputs/<source>/``."""
+
+    return _find_layout(
+        project_root,
+        project_root / "outputs",
+        run_id,
+        lambda run_dir: run_dir.is_dir(),
+        reason="published_run_not_found",
+        message=f"No published bundle for run {run_id}.",
+    )
+
+
+def _list_runs(project_root: Path) -> list[dict[str, object]]:
+    """List known runs under ``work/`` with their persisted status (read-only)."""
+
+    runs: list[dict[str, object]] = []
+    work_root = project_root / "work"
+    if work_root.is_dir():
+        for source_dir in sorted(work_root.iterdir()):
+            for run_dir in sorted(source_dir.glob("*/run-state.json")):
+                state = read_run_state(run_dir)
+                runs.append(
+                    {
+                        "run_id": state.run_id,
+                        "source_id": state.source_id,
+                        "run_status": state.status.value,
+                    }
+                )
+    runs.sort(key=lambda run: (run["run_id"], run["source_id"]))
+    return runs
+
+
+def _validate_inventory_structure(bundle_dir: Path) -> tuple[bool, str]:
+    """Confirm the published inventory carries the plan §18.2 record shape.
+
+    A hash-layer check on the bytes (the manifest reverification) already proves
+    the inventory is intact; this adds the structural check ``vcp verify`` owes:
+    the schema version, an entries list, and the eleven fields on every record.
+    """
+
+    inventory_path = bundle_dir / RUN_INVENTORY_PATH
+    try:
+        document = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False, "inventory_unreadable"
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        return False, "inventory_schema_mismatch"
+    entries = document.get("entries")
+    if not isinstance(entries, list):
+        return False, "inventory_entries_invalid"
+    for entry in entries:
+        if not isinstance(entry, dict) or not _INVENTORY_FIELDS <= entry.keys():
+            return False, "inventory_entry_invalid"
+    return True, "ok"
 
 
 def _project_root() -> Path:
