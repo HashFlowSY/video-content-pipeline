@@ -467,6 +467,13 @@ class InventoryEntry:
         }
 
 
+#: The manifest/projection provenance key an Improvement run stamps on a
+#: carried-forward artifact, naming the published run it came from. The inventory
+#: records it so the run's *reports* — not only the manifest — state where a
+#: carried-forward output originated (ADR 0046 carry-forward at run level).
+CARRIED_FORWARD_FROM_RUN_KEY = "carried_forward_from_run"
+
+
 def published_content_entries(
     projection: ProjectionResult, *, stage: str = "publication"
 ) -> tuple[InventoryEntry, ...]:
@@ -478,6 +485,11 @@ def published_content_entries(
     Minimal RunBundle still lists those in the manifest, while the inventory
     records only the paths that are genuinely published files. Entries follow the
     projection's sorted-path order.
+
+    An Improvement run's carried-forward artifact (one whose projection provenance
+    names a source run) records that source run id and its source hash in the
+    entry's ``purpose`` and ``used_by``, so the run inventory and the processing
+    report — not only the manifest — state where the output came from.
     """
 
     entries: list[InventoryEntry] = []
@@ -485,16 +497,22 @@ def published_content_entries(
         if artifact.status not in _PUBLISHED_CONTENT_STATUSES or artifact.content is None:
             continue
         assert artifact.sha256 is not None  # a valid/partial artifact always has bytes
+        source_run = artifact.provenance.get(CARRIED_FORWARD_FROM_RUN_KEY)
+        carried = isinstance(source_run, str) and bool(source_run)
         entries.append(
             InventoryEntry(
                 path=artifact.path,
                 kind=InventoryKind.FILE,
                 action=InventoryAction.PUBLISHED,
-                purpose=f"发布的 {artifact.kind.value} 制品",
+                purpose=(
+                    f"从源运行 {source_run} 结转的 {artifact.kind.value} 制品"
+                    if carried
+                    else f"发布的 {artifact.kind.value} 制品"
+                ),
                 size_bytes=len(artifact.content.encode("utf-8")),
                 sha256=artifact.sha256,
                 stage=stage,
-                used_by=(),
+                used_by=(str(source_run),) if carried else (),
                 rebuildable=True,
                 deletion_class=DeletionClass.PUBLISHED,
                 deletion_consequence="删除后需要重新发布该正式输出。",

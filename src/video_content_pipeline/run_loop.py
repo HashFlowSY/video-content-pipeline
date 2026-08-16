@@ -50,6 +50,7 @@ from video_content_pipeline.publication import (
 )
 from video_content_pipeline.publication_projection import (
     PUBLICATION_PROJECTION_STAGE_VERSION,
+    ProjectedArtifact,
     ProjectionEvidence,
     ProjectionResult,
     project_publication,
@@ -240,6 +241,32 @@ def _project(plan: RunPlan, evidence: ProjectionEvidence) -> ProjectionResult:
     return project_publication(plan, evidence)
 
 
+def _merge_carried_forward(
+    projection: ProjectionResult, carried_forward: Sequence[ProjectedArtifact]
+) -> ProjectionResult:
+    """Fold an Improvement run's carried-forward artifacts into its projection.
+
+    The re-projection is authoritative for every path it produced with real
+    content (the affected Parts and the recomputed collection artifacts); a
+    carried-forward artifact fills a path the re-projection left ``unavailable`` or
+    never produced — an unaffected Part's retained output (ADR 0046 at run level,
+    the ADR 0052 improvement exception). Merged artifacts keep the projection's
+    sorted-path order so the manifest stays byte-identical across equal runs.
+    """
+
+    if not carried_forward:
+        return projection
+    by_path: dict[str, ProjectedArtifact] = {
+        artifact.path: artifact for artifact in projection.artifacts
+    }
+    for artifact in carried_forward:
+        existing = by_path.get(artifact.path)
+        if existing is None or existing.content is None:
+            by_path[artifact.path] = artifact
+    merged = tuple(sorted(by_path.values(), key=lambda artifact: artifact.path))
+    return ProjectionResult(artifacts=merged, stage_version=projection.stage_version)
+
+
 def _bundle_documents(
     *,
     layout: RunLayout,
@@ -295,18 +322,21 @@ def finalize_and_publish(
     composition: RunComposition,
     run_status: RunStatus,
     now: datetime,
+    carried_forward: Sequence[ProjectedArtifact] = (),
 ) -> PublicationOutcome:
     """Project, assemble the Minimal RunBundle floor, and atomically publish.
 
     Called once the run has reached a terminal status other than ``paused``. The
-    projection selects among the composition's gathered evidence; the audit
-    documents render the composition's recorded values; a publication
+    projection selects among the composition's gathered evidence; an Improvement
+    run's carried-forward artifacts (:func:`_merge_carried_forward`) are folded in
+    so an unaffected Part's retained output publishes without re-analysis. The
+    audit documents render the composition's recorded values; a publication
     verification failure is journaled through the single writer and returned in
     the outcome. The heavy-task lock is not required here — the run is terminal
     and publication does no heavy work.
     """
 
-    projection = _project(plan, composition.evidence())
+    projection = _merge_carried_forward(_project(plan, composition.evidence()), carried_forward)
     documents = _bundle_documents(
         layout=layout,
         plan=plan,
@@ -319,6 +349,7 @@ def finalize_and_publish(
         run_status=run_status,
         projection=projection,
         documents=documents,
+        plan_id=plan.plan_id,
         now=now,
         journal=writer.record_publication_verification_failure,
     )
@@ -335,6 +366,7 @@ def _terminal_outcome(
     composition: RunComposition,
     result: StageRunResult,
     now: datetime,
+    carried_forward: Sequence[ProjectedArtifact] = (),
 ) -> RunOutcome:
     """Drive a completed execution pass to its terminal status and publish.
 
@@ -366,6 +398,7 @@ def _terminal_outcome(
         composition=composition,
         run_status=run_status,
         now=now,
+        carried_forward=carried_forward,
     )
     return RunOutcome(
         layout=layout,
@@ -385,6 +418,7 @@ def _fail_and_publish(
     composition: RunComposition,
     reason: str,
     now: datetime,
+    carried_forward: Sequence[ProjectedArtifact] = (),
 ) -> RunOutcome:
     """Record a ``failed`` run and publish its Minimal RunBundle.
 
@@ -401,6 +435,7 @@ def _fail_and_publish(
         composition=composition,
         run_status=RunStatus.FAILED,
         now=now,
+        carried_forward=carried_forward,
     )
     return RunOutcome(
         layout=layout,
@@ -421,6 +456,7 @@ def execute_confirmed_run(
     clock: Callable[[], datetime] = utc_now,
     now: datetime | None = None,
     on_boundary: Callable[[], ControlDirective] | None = None,
+    carried_forward: Sequence[ProjectedArtifact] = (),
 ) -> RunOutcome:
     """Execute a confirmed plan non-interactively over an initialized workspace.
 
@@ -432,6 +468,10 @@ def execute_confirmed_run(
     to a terminal status with a published bundle (an ordinary exception yields a
     ``failed`` bundle). ``paused`` and ``cancelled`` are honoured at unit
     boundaries; only ``paused`` skips publication.
+
+    ``carried_forward`` is the Improvement run's retained artifacts from a named
+    published RunBundle (:mod:`~video_content_pipeline.improve`); it is empty for
+    an ordinary run and folded into the projection at publication time.
     """
 
     published_now = now if now is not None else clock()
@@ -455,6 +495,7 @@ def execute_confirmed_run(
                 composition=composition,
                 run_status=RunStatus.INCOMPLETE,
                 now=published_now,
+                carried_forward=carried_forward,
             )
             return RunOutcome(
                 layout=layout,
@@ -479,6 +520,7 @@ def execute_confirmed_run(
                 composition=composition,
                 reason=getattr(error, "reason", type(error).__name__),
                 now=published_now,
+                carried_forward=carried_forward,
             )
         return _terminal_outcome(
             writer=writer,
@@ -487,6 +529,7 @@ def execute_confirmed_run(
             composition=composition,
             result=result,
             now=published_now,
+            carried_forward=carried_forward,
         )
 
 

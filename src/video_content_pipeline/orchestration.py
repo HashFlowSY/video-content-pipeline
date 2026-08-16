@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -159,6 +160,28 @@ class RunLayout:
     @property
     def latest_path(self) -> Path:
         return self.source_output_dir / "latest.json"
+
+
+def find_run_layout(
+    project_root: Path,
+    parent: Path,
+    run_id: str,
+    present: Callable[[Path], bool],
+) -> RunLayout | None:
+    """Locate a run's layout by scanning ``<parent>/<source>/`` for its run id.
+
+    ``present`` decides whether the run exists under a source directory — a work
+    run is identified by its ``run-state.json``, a published run by its bundle
+    directory — so both the ``work/`` and ``outputs/`` lookups share one scan.
+    Returns ``None`` when no source directory holds the run, leaving each caller
+    to raise its own not-found error with its own machine-readable reason.
+    """
+
+    if parent.is_dir():
+        for source_dir in sorted(parent.iterdir()):
+            if present(source_dir / run_id):
+                return RunLayout(project_root, source_dir.name, run_id)
+    return None
 
 
 def initialize_run_workspace(layout: RunLayout) -> RunLayout:

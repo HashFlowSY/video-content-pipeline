@@ -216,13 +216,22 @@ class ManifestArtifact:
 
 @dataclass(frozen=True)
 class RunBundleManifest:
-    """The manifest listing every expected RunBundle file with status and hash."""
+    """The manifest listing every expected RunBundle file with status and hash.
+
+    ``plan_id`` records the confirmed plan that produced the bundle, so a
+    published RunBundle is self-describing: an Improvement run
+    (:mod:`~video_content_pipeline.improve`) reads it to locate the source plan it
+    derives a new plan from, without reading any workspace. The publication
+    mechanism itself is plan-agnostic — the run loop supplies the identity — so it
+    defaults to empty for the isolated mechanism unit tests that carry no plan.
+    """
 
     source_id: str
     run_id: str
     run_status: RunStatus
     projection_stage_version: int
     artifacts: tuple[ManifestArtifact, ...]
+    plan_id: str = ""
     schema_version: int = _MANIFEST_SCHEMA_VERSION
 
     def as_json(self) -> dict[str, object]:
@@ -230,6 +239,7 @@ class RunBundleManifest:
             "schema_version": self.schema_version,
             "source_id": self.source_id,
             "run_id": self.run_id,
+            "plan_id": self.plan_id,
             "run_status": self.run_status.value,
             "projection_stage_version": self.projection_stage_version,
             "artifacts": [artifact.as_json() for artifact in self.artifacts],
@@ -255,12 +265,16 @@ class RunBundleManifest:
             raise PublicationError(
                 "manifest_invalid", "projection_stage_version must be an integer."
             )
+        plan_id = value.get("plan_id", "")
+        if not isinstance(plan_id, str):
+            raise PublicationError("manifest_invalid", "plan_id must be a string.")
         return cls(
             source_id=_required_str(value, "source_id"),
             run_id=_required_str(value, "run_id"),
             run_status=_parse_run_status(value.get("run_status")),
             projection_stage_version=version,
             artifacts=tuple(ManifestArtifact.from_json(item) for item in raw_artifacts),
+            plan_id=plan_id,
         )
 
 
@@ -335,6 +349,7 @@ def build_run_bundle_manifest(
     run_status: RunStatus,
     projection: ProjectionResult,
     documents: Sequence[BundleDocument],
+    plan_id: str = "",
 ) -> RunBundleManifest:
     """Merge the projected artifacts and report documents into one manifest.
 
@@ -371,6 +386,7 @@ def build_run_bundle_manifest(
         run_status=run_status,
         projection_stage_version=projection.stage_version,
         artifacts=tuple(entries),
+        plan_id=plan_id,
     )
 
 
@@ -418,6 +434,7 @@ def assemble_staging(
     run_status: RunStatus,
     projection: ProjectionResult,
     documents: Sequence[BundleDocument],
+    plan_id: str = "",
 ) -> RunBundleManifest:
     """Assemble the RunBundle in staging and return its verified manifest.
 
@@ -434,6 +451,7 @@ def assemble_staging(
         run_status=run_status,
         projection=projection,
         documents=documents,
+        plan_id=plan_id,
     )
 
     staging = layout.staging_dir
@@ -590,6 +608,7 @@ def publish_run_bundle(
     run_status: RunStatus,
     projection: ProjectionResult,
     documents: Sequence[BundleDocument],
+    plan_id: str = "",
     now: datetime | None = None,
     journal: Callable[[Mapping[str, object]], None] | None = None,
 ) -> PublicationOutcome:
@@ -604,7 +623,11 @@ def publish_run_bundle(
     """
 
     manifest = assemble_staging(
-        layout, run_status=run_status, projection=projection, documents=documents
+        layout,
+        run_status=run_status,
+        projection=projection,
+        documents=documents,
+        plan_id=plan_id,
     )
 
     if layout.output_dir.exists():

@@ -677,6 +677,20 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
     return plan
 
 
+def persist_confirmed_run_plan(plan: RunPlan, plans_root: Path) -> Path:
+    """Persist a RunPlan at ``plans/<plan-id>/run-plan.json``, idempotently.
+
+    The plan id is content-addressed, so re-persisting an identical plan is a
+    no-op and a differing plan under the same id is a conflict. Used by the
+    Improvement run, which derives a new confirmed plan from a published RunBundle
+    outside the interactive ``plan confirm`` flow.
+    """
+
+    path = plans_root / plan.plan_id / "run-plan.json"
+    _write_json_once(path, plan.as_json())
+    return path
+
+
 def _ceil_fraction(value: Fraction) -> int:
     return (value.numerator + value.denominator - 1) // value.denominator
 

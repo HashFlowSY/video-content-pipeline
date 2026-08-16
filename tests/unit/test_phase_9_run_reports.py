@@ -26,11 +26,15 @@ from video_content_pipeline.publication import (
     verify_published_bundle,
 )
 from video_content_pipeline.publication_projection import (
+    ArtifactKind,
     ArtifactStatus,
     PlainArtifactEvidence,
+    ProjectedArtifact,
     ProjectionEvidence,
+    ProjectionResult,
     PublicationBasis,
     TimedArtifactEvidence,
+    TimingView,
     expected_subtitle_bases,
     project_publication,
 )
@@ -456,6 +460,32 @@ def test_published_content_entries_omit_invalid_artifacts() -> None:
     assert invalid, "fixture must produce at least one invalid artifact"
     entries = published_content_entries(projection)
     assert all(entry.path != invalid[0].path for entry in entries)
+
+
+def test_published_content_entries_record_carried_forward_source_run() -> None:
+    # An Improvement run's carried-forward artifact records its source run id in
+    # the inventory (reports), not only the manifest (criterion 3).
+    carried = ProjectedArtifact(
+        path="parts/p1/subtitles.enhanced.srt",
+        kind=ArtifactKind.SUBTITLES,
+        status=ArtifactStatus.VALID,
+        content="1\ncue\n",
+        sha256="deadbeef",
+        timing_view=TimingView.PART_RELATIVE,
+        timing_basis=None,
+        provenance={
+            "carried_forward_from_run": "20260816T090000Z-abcdef0123456789",
+            "carried_forward_sha256": "deadbeef",
+        },
+    )
+    projection = ProjectionResult(artifacts=(carried,), stage_version=1)
+    entries = published_content_entries(projection)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.action is InventoryAction.PUBLISHED
+    assert entry.used_by == ("20260816T090000Z-abcdef0123456789",)
+    assert "20260816T090000Z-abcdef0123456789" in entry.purpose
+    assert entry.sha256 == "deadbeef"
 
 
 def test_deletable_entries_exclude_published_and_audit() -> None:

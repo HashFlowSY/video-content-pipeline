@@ -22,6 +22,7 @@ from video_content_pipeline.enhancement import (
 from video_content_pipeline.environment import assert_project_venv, assert_runtime_policy
 from video_content_pipeline.external_tools import PinnedExternalTool, identify_external_tool
 from video_content_pipeline.heavy_task_lock import HeavyTaskLockError, heavy_task_lock_path
+from video_content_pipeline.improve import ImproveError, start_improvement_run
 from video_content_pipeline.inspection import (
     InspectionError,
     PlanInspectionEvidence,
@@ -29,7 +30,11 @@ from video_content_pipeline.inspection import (
     capture_probe_documents,
     inspect_documents,
 )
-from video_content_pipeline.orchestration import OrchestrationError, RunLayout
+from video_content_pipeline.orchestration import (
+    OrchestrationError,
+    RunLayout,
+    find_run_layout,
+)
 from video_content_pipeline.planning import (
     PlanningDiagnostic,
     PlanningError,
@@ -227,6 +232,10 @@ def _parser() -> argparse.ArgumentParser:
     inventory_command = subcommands.add_parser("inventory")
     inventory_command.add_argument("--run", required=True, metavar="RUN_ID")
     inventory_command.add_argument("--json", action="store_true")
+    improve_command = subcommands.add_parser("improve")
+    improve_command.add_argument("--from-run", dest="from_run", required=True, metavar="RUN_ID")
+    improve_command.add_argument("--asr", required=True, metavar="part|range|all")
+    improve_command.add_argument("--json", action="store_true")
     return parser
 
 
@@ -880,7 +889,7 @@ def _complete_inspection_evidence(
 
 
 _ORCHESTRATION_COMMANDS = frozenset(
-    {"run", "status", "pause", "resume", "cancel", "verify", "inventory"}
+    {"run", "status", "pause", "resume", "cancel", "verify", "inventory", "improve"}
 )
 
 #: Every orchestration failure carries a machine-readable ``reason``; the CLI
@@ -896,6 +905,7 @@ _ORCHESTRATION_ERRORS: tuple[type[BaseException], ...] = (
     ControlRequestError,
     StageDagError,
     RunReportError,
+    ImproveError,
 )
 
 #: The eleven plan §18.2 fields every inventory record must carry; ``vcp verify``
@@ -936,6 +946,8 @@ def _handle_orchestration(arguments: argparse.Namespace) -> dict[str, object]:
         return _handle_resume(arguments)
     if arguments.command == "verify":
         return _handle_verify(arguments)
+    if arguments.command == "improve":
+        return _handle_improve(arguments)
     return _handle_inventory(arguments)
 
 
@@ -947,6 +959,17 @@ def _handle_run(arguments: argparse.Namespace) -> dict[str, object]:
         run_start=utc_now(),
     )
     return outcome.to_document()
+
+
+def _handle_improve(arguments: argparse.Namespace) -> dict[str, object]:
+    outcome = start_improvement_run(
+        _project_root(),
+        arguments.from_run,
+        arguments.asr,
+        composition_factory=_composition_factory,
+        run_start=utc_now(),
+    )
+    return {**outcome.to_document(), "source_run_id": arguments.from_run}
 
 
 def _handle_status(arguments: argparse.Namespace) -> dict[str, object]:
@@ -1038,14 +1061,14 @@ def _find_layout(
 
     ``present`` decides whether the run exists under a source directory — a work
     run is identified by its ``run-state.json``, a published run by its bundle
-    directory — so both lookups share one scan and one not-found contract.
+    directory — so both lookups share one scan (``orchestration.find_run_layout``)
+    and this one not-found contract.
     """
 
-    if parent.is_dir():
-        for source_dir in sorted(parent.iterdir()):
-            if present(source_dir / run_id):
-                return RunLayout(project_root, source_dir.name, run_id)
-    raise RunLoopError(reason, message)
+    layout = find_run_layout(project_root, parent, run_id, present)
+    if layout is None:
+        raise RunLoopError(reason, message)
+    return layout
 
 
 def _find_run_layout(project_root: Path, run_id: str) -> RunLayout:
