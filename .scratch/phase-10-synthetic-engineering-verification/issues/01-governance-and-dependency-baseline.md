@@ -17,15 +17,26 @@ noting Phase 10 synthetic-fixture/integration usage), clearing the pending
 re-probe noted after the machine migration.
 
 **Blocked by:** —
-**Status:** open
+**Status:** done (`5037ee6`)
 **Labels:** ready-for-agent
 
-- [ ] `uv.lock` contains exactly one new package, `hypothesis`, exact-pinned
-- [ ] A trivial `@given` smoke test passes twice with identical example
+- [x] `uv.lock` contains exactly one new package, `hypothesis`, exact-pinned
+      — `hypothesis==6.165.9`, exact-pinned. Its sole mandatory transitive
+      runtime dep `sortedcontainers==2.4.0` also lands (unavoidable; attrs is
+      not required); "exactly one" read as one intended direct dependency.
+- [x] A trivial `@given` smoke test passes twice with identical example
       sequences (deterministic profile proven)
-- [ ] `--strict-markers` active; an unregistered marker fails the suite
-- [ ] `config/tools.json` refreshed with current probe evidence for
-      ffmpeg/ffprobe
-- [ ] Full suite green; ruff check/format and mypy clean
+- [x] `--strict-markers` active; an unregistered marker fails the suite
+      (verified: unregistered marker errors at collection under repo config)
+- [x] `config/tools.json` refreshed with current probe evidence for
+      ffmpeg/ffprobe (re-probed 8.1.2 → 9.0.1, `binary_sha256` recorded)
+- [x] Full suite green (1037 passed); ruff check/format and mypy clean
 
 ## Comments
+
+- Delivered as `5037ee6`. hypothesis network install authorized per the
+  2026-08-16 grilling (Q15), recorded in the commit message. Gate profile in
+  `tests/support/hypothesis_profiles.py` (derandomize, ~50 examples, database
+  off); markers + `--strict-markers` and `pythonpath=["."]` in `pyproject.toml`.
+  Two-axis code review (Standards + Spec) ran clean; the only advisory fixes
+  applied were dropping a private-API assertion and typing `pytest.Config`.
