@@ -127,9 +127,13 @@ def request_control(
 def _read_request(path: Path, kind: ControlKind) -> ControlRequest:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        # A crash can leave a request file torn (a valid-UTF-8 prefix that no
+        # longer parses as JSON) or filled with raw non-UTF-8 bytes; both are
+        # corruption the reader must reject with its own typed reason rather than
+        # leaking a bare ``UnicodeDecodeError`` to the run loop.
         raise ControlRequestError(
-            "control_request_unreadable", f"Control request at {path} is not JSON."
+            "control_request_unreadable", f"Control request at {path} is not readable JSON."
         ) from error
     if not isinstance(document, Mapping):
         raise ControlRequestError(

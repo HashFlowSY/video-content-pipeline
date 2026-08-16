@@ -425,7 +425,16 @@ def _require_same_filesystem(layout: RunLayout) -> None:
 def _write_bundle_file(root: Path, relative_path: str, content: str) -> None:
     destination = root / relative_path
     destination.parent.mkdir(parents=True, exist_ok=True)
-    durable_write(destination, content, flags=os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    try:
+        durable_write(destination, content, flags=os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    except OSError as exc:
+        # A full disk (ENOSPC) mid-assembly must surface as the module's typed
+        # reason — the CLI's error contract catches ``PublicationError`` but not a
+        # bare ``OSError`` — and it is safe to do so: staging is a scratch tree the
+        # atomic publish rename has not yet exposed, so nothing partial is visible.
+        raise PublicationError(
+            "staging_write_failed", f"Writing staged bundle file {relative_path} failed."
+        ) from exc
 
 
 def assemble_staging(
@@ -643,7 +652,16 @@ def publish_run_bundle(
             "publish_rename_failed",
             f"Publishing the RunBundle to {layout.output_dir} failed.",
         ) from exc
-    fsync_directory(layout.source_output_dir)
+    try:
+        fsync_directory(layout.source_output_dir)
+    except OSError as exc:
+        # The rename already committed the whole bundle; only the durability
+        # flush of its directory entry failed. Surface the typed reason so the
+        # CLI reports it cleanly rather than leaking a bare ``OSError``.
+        raise PublicationError(
+            "publish_fsync_failed",
+            f"Flushing the published RunBundle at {layout.output_dir} failed.",
+        ) from exc
 
     verification = verify_published_bundle(layout.output_dir)
     if not verification.verified and journal is not None:
@@ -660,9 +678,18 @@ def publish_run_bundle(
 
     latest_advanced = False
     if latest_pointer_eligible(run_status, projection, verification):
-        latest_advanced = _advance_latest_pointer(
-            layout, run_status, now if now is not None else utc_now()
-        )
+        try:
+            latest_advanced = _advance_latest_pointer(
+                layout, run_status, now if now is not None else utc_now()
+            )
+        except OSError as exc:
+            # ``_advance_latest_pointer`` writes ``latest.json`` through an atomic
+            # temp-then-rename, so a full disk leaves the previous pointer (or
+            # none) intact — never a torn one. Report the typed reason.
+            raise PublicationError(
+                "latest_pointer_write_failed",
+                f"Advancing the latest pointer at {layout.latest_path} failed.",
+            ) from exc
 
     return PublicationOutcome(
         output_dir=layout.output_dir,
