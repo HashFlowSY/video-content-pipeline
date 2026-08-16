@@ -12,15 +12,15 @@ Diarization-VAD conflict evidence keeps its existing meaning against the
 real partition from ticket 06.
 
 **Blocked by:** 03, 04
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Real pipeline over a fixture-derived wav yields contract-valid
+- [x] Real pipeline over a fixture-derived wav yields contract-valid
       SpeakerTurns with anonymous Part-local labels (integration test,
       offline, registry-path models)
-- [ ] Missing/mismatched assets yield the typed acquisition failure
-- [ ] Overlapping speech in input produces overlap-marked turns, not
+- [x] Missing/mismatched assets yield the typed acquisition failure
+- [x] Overlapping speech in input produces overlap-marked turns, not
       silent merging
-- [ ] Diarization calibration record produced and gate-checked per ADR
+- [x] Diarization calibration record produced and gate-checked per ADR
       0031
-- [ ] Full suite green within budget
+- [x] Full suite green within budget

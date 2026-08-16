@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "capability": "diarization",
+  "candidate_id": "sherpa-onnx-pyannote-segmentation-3-0",
+  "calibration_version": "sherpa-onnx-1.13.5-diarization-first-device-baseline-2026-08-17",
+  "model_identity": {
+    "segmentation_asset_sha256": "6f071d8c3ca7a66185e751a95efc0fde645b73d0844b36e686552e0280ddecc0",
+    "embedding_asset_sha256": "6149b3fa977ff2befe157ce009a03b2b37fb2258fe5032b3e2ccdc37d0067db8",
+    "backend": "sherpa-onnx",
+    "backend_version": "1.13.5",
+    "precision": "fp32",
+    "device_class": "apple-m1-cpu",
+    "rules_fingerprint": "diarization-rules-v1"
+  },
+  "sample_rate": 16000,
+  "qualification_scope": "first_device_baseline",
+  "pipeline": {
+    "num_clusters": -1,
+    "cluster_threshold": 0.5,
+    "min_duration_on": 0.3,
+    "min_duration_off": 0.5,
+    "num_threads": 1
+  },
+  "thresholds": {
+    "minimum_confidence": 0.5
+  },
+  "notes": "Model-specific diarization calibration record (ADR 0031) for the credential-free sherpa-onnx pipeline (D5): pyannote-segmentation-3.0 ONNX (segmentation) + 3D-Speaker CAM++ zh-en advanced (embedding) + FastClustering. model_identity binds both pinned asset SHA-256s, the sherpa-onnx backend and version, fp32 precision, the M1 CPU device class, and the rules fingerprint; a bound-identity change invalidates the qualification. The pipeline block records the exact execution configuration (agglomerative clustering with an unknown speaker count, 0.5 cosine threshold; 300 ms minimum speech-on and 500 ms minimum speech-off, sherpa-onnx defaults). thresholds.minimum_confidence gates formal SpeakerTurn publication: the sherpa pipeline emits hard post-clustering speaker assignments (a decided assignment carries confidence 1.0, not a soft probability), so the threshold reserves the gate for any future soft-scoring backend while keeping ADR 0030's meaning. qualification_scope is 'first_device_baseline': these settings qualify formal, anonymous, Part-local SpeakerTurns (uncalibrated diarization stays raw candidates per ADR 0031), but the zh+en speaker-separation quality of the selection is only confirmed by the maintainer sample review in the Phase 11 prototype ticket, not by this record."
+}

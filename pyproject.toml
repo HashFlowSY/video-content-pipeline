@@ -89,3 +89,10 @@ warn_unused_configs = true
 [[tool.mypy.overrides]]
 module = ["onnxruntime", "onnxruntime.*"]
 ignore_missing_imports = true
+
+# sherpa-onnx ships no py.typed; the real diarization engine (Phase 11 ticket 07)
+# runs its offline speaker-diarization pipeline in-process. Its wrapper is fully
+# typed at our boundary.
+[[tool.mypy.overrides]]
+module = ["sherpa_onnx", "sherpa_onnx.*"]
+ignore_missing_imports = true

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -207,6 +207,131 @@ class ProjectedDiarizationPart:
 
     turns: tuple[SpeakerTurnCandidate, ...]
     role_candidates: tuple[RoleCandidateProposal, ...]
+
+
+@dataclass(frozen=True)
+class PublishedSpeakerTurn:
+    """A formal SpeakerTurn after the ADR 0030 gate: labelled, VAD-clear, confident."""
+
+    speaker_label: str
+    interval: HalfOpenInterval
+    confidence: float
+
+
+@dataclass(frozen=True)
+class DiarizationVadConflict:
+    """A retained turn overlapping non-``speech_likely`` VAD audio (ADR 0030).
+
+    It carries its anonymous Part-local label and confidence but cannot become a
+    formal SpeakerTurn; the pipeline never trims or shifts it to force agreement.
+    """
+
+    candidate_speaker_label: str
+    interval: HalfOpenInterval
+    confidence: float
+    vad_states: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SpeakerTurnPartition:
+    """The ADR 0030 gate applied to one Part's diarization turns.
+
+    ``labels_by_cluster`` maps every anonymous cluster id to its Part-local
+    ``part-NN:speaker-MM`` label; ``published`` are the formal SpeakerTurns and
+    ``conflicts`` the retained diarization-VAD conflicts. Overlapping turns stay
+    independent records -- the gate never merges concurrent speakers.
+    """
+
+    labels_by_cluster: dict[str, str]
+    published: tuple[PublishedSpeakerTurn, ...]
+    conflicts: tuple[DiarizationVadConflict, ...]
+
+
+def assign_part_local_speaker_labels(cluster_ids: Iterable[str], part_label: str) -> dict[str, str]:
+    """Assign each anonymous cluster a stable ``part-NN:speaker-MM`` label (ADR 0030).
+
+    Labels are deterministic in sorted cluster order, anonymous, and Part-local:
+    no cross-Part, cross-run, or real-person identity is asserted.
+    """
+
+    return {
+        cluster_id: f"{part_label}:speaker-{ordinal:02d}"
+        for ordinal, cluster_id in enumerate(sorted(set(cluster_ids)), start=1)
+    }
+
+
+def speaker_turn_vad_conflict_states(
+    interval: HalfOpenInterval,
+    voice_activity_intervals: tuple[VoiceActivityInterval, ...],
+) -> tuple[str, ...]:
+    """The sorted non-``speech_likely`` VAD states a turn overlaps (empty if clear)."""
+
+    return tuple(
+        sorted(
+            {
+                activity.state.value
+                for activity in voice_activity_intervals
+                if activity.state is not VoiceActivityState.SPEECH_LIKELY
+                and _intervals_overlap(interval, activity.interval)
+            }
+        )
+    )
+
+
+def partition_speaker_turns(
+    turns: tuple[SpeakerTurnCandidate, ...],
+    part_label: str,
+    voice_activity_intervals: tuple[VoiceActivityInterval, ...],
+    minimum_confidence: float,
+) -> SpeakerTurnPartition:
+    """Apply the ADR 0030 / 0031 gate to one Part's anonymous diarization turns.
+
+    A turn overlapping any non-``speech_likely`` VAD interval is retained as a
+    :class:`DiarizationVadConflict` (never a formal turn); an unconflicted turn
+    meeting the calibrated ``minimum_confidence`` is published; a low-confidence
+    unconflicted turn is dropped. Overlapping turns from different clusters stay
+    independent -- concurrent speakers are never merged into one. This is the one
+    gate both the controlled offline adapter and the real engine flow through, so
+    diarization-VAD conflict evidence keeps a single meaning.
+    """
+
+    labels_by_cluster = assign_part_local_speaker_labels(
+        (turn.cluster_id for turn in turns), part_label
+    )
+    published: list[PublishedSpeakerTurn] = []
+    conflicts: list[DiarizationVadConflict] = []
+    for turn in turns:
+        label = labels_by_cluster[turn.cluster_id]
+        conflict_states = speaker_turn_vad_conflict_states(turn.interval, voice_activity_intervals)
+        if conflict_states:
+            conflicts.append(
+                DiarizationVadConflict(label, turn.interval, turn.confidence, conflict_states)
+            )
+        elif turn.confidence >= minimum_confidence:
+            published.append(PublishedSpeakerTurn(label, turn.interval, turn.confidence))
+    return SpeakerTurnPartition(labels_by_cluster, tuple(published), tuple(conflicts))
+
+
+def published_speaker_turn_as_json(turn: PublishedSpeakerTurn) -> dict[str, object]:
+    """Serialize a formal SpeakerTurn to its retained-evidence JSON shape."""
+
+    return {
+        "speaker_label": turn.speaker_label,
+        "raw_pts_interval": _interval_as_json(turn.interval),
+        "confidence": turn.confidence,
+    }
+
+
+def diarization_vad_conflict_as_json(conflict: DiarizationVadConflict) -> dict[str, object]:
+    """Serialize a retained diarization-VAD conflict to its evidence JSON shape."""
+
+    return {
+        "candidate_speaker_label": conflict.candidate_speaker_label,
+        "raw_pts_interval": _interval_as_json(conflict.interval),
+        "confidence": conflict.confidence,
+        "reason": "diarization_vad_conflict",
+        "vad_states": list(conflict.vad_states),
+    }
 
 
 @dataclass(frozen=True)
@@ -2654,14 +2779,6 @@ def _speaker_turn_part_evidence_as_json(
     user_role_metadata: tuple[UserRoleMetadata, ...],
     metadata_evidence: InputEvidence | None,
 ) -> dict[str, object]:
-    published: list[SpeakerTurnCandidate] = []
-    conflicts: list[dict[str, object]] = []
-    labels_by_cluster = {
-        cluster_id: f"{part_label}:speaker-{ordinal:02d}"
-        for ordinal, cluster_id in enumerate(
-            sorted({turn.cluster_id for turn in projected_part.turns}), start=1
-        )
-    }
     for turn in projected_part.turns:
         if not any(
             usable.start <= turn.interval.start and turn.interval.end <= usable.end
@@ -2670,26 +2787,10 @@ def _speaker_turn_part_evidence_as_json(
             raise AudioAnalysisError(
                 "model_output_invalid", "Diarization turn falls outside usable audio coverage."
             )
-        conflict_states = sorted(
-            {
-                activity.state.value
-                for activity in voice_activity_intervals
-                if activity.state is not VoiceActivityState.SPEECH_LIKELY
-                and _intervals_overlap(turn.interval, activity.interval)
-            }
-        )
-        if conflict_states:
-            conflicts.append(
-                {
-                    "candidate_speaker_label": labels_by_cluster[turn.cluster_id],
-                    "raw_pts_interval": _interval_as_json(turn.interval),
-                    "confidence": turn.confidence,
-                    "reason": "diarization_vad_conflict",
-                    "vad_states": conflict_states,
-                }
-            )
-        elif turn.confidence >= minimum_confidence:
-            published.append(turn)
+    partition = partition_speaker_turns(
+        projected_part.turns, part_label, voice_activity_intervals, minimum_confidence
+    )
+    labels_by_cluster = partition.labels_by_cluster
     role_candidates: list[dict[str, object]] = []
     for proposal in projected_part.role_candidates:
         speaker_label = labels_by_cluster.get(proposal.cluster_id)
@@ -2740,15 +2841,10 @@ def _speaker_turn_part_evidence_as_json(
     return {
         "source_id": source_id,
         "audio_stream_index": stream_index,
-        "speaker_turns": [
-            {
-                "speaker_label": labels_by_cluster[turn.cluster_id],
-                "raw_pts_interval": _interval_as_json(turn.interval),
-                "confidence": turn.confidence,
-            }
-            for turn in published
+        "speaker_turns": [published_speaker_turn_as_json(turn) for turn in partition.published],
+        "diarization_vad_conflicts": [
+            diarization_vad_conflict_as_json(conflict) for conflict in partition.conflicts
         ],
-        "diarization_vad_conflicts": conflicts,
         "role_candidates": role_candidates,
     }
 
