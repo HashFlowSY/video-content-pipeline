@@ -135,6 +135,17 @@ class RunChoice:
             "provenance": self.provenance.value,
         }
 
+    def config_identity(self) -> tuple[str, str, str, str]:
+        """Return the run-affecting identity of this choice, excluding provenance.
+
+        Provenance records *how* a choice was fixed (user-chosen versus
+        recommended-and-confirmed), which never changes what a stage does, so it
+        is deliberately omitted: a Stage invalidation key must not re-key just
+        because the same selection was reached a different way.
+        """
+
+        return (self.stage, self.key, self.scope, self.value)
+
     @classmethod
     def from_json(cls, value: object) -> RunChoice:
         if not isinstance(value, dict):
