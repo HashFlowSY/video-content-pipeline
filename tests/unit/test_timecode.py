@@ -88,3 +88,18 @@ def test_repeated_exact_translation_matches_the_direct_raw_source_coordinate() -
 
     assert relative_time.time + coverage_start.time == raw_time.time
     assert (raw_time.time - coverage_start.time) + coverage_start.time == raw_time.time
+
+
+def test_extreme_time_base_keeps_a_large_raw_pts_exact() -> None:
+    # A 48 kHz-style base against a large signed sample index stays an exact
+    # rational — no float would represent 999_999_999 / 48_000 losslessly.
+    raw_time = RawPtsTime(raw_pts=-999_999_999, time_base=ExactTime(1, 48_000))
+
+    assert raw_time.time == ExactTime(-999_999_999, 48_000)
+    assert raw_time.time.denominator == 16_000
+
+
+def test_exact_time_normalizes_sign_and_common_factors_toward_a_canonical_form() -> None:
+    assert ExactTime(-2, -4) == ExactTime(1, 2)
+    assert ExactTime(6, -3) == ExactTime(-2, 1)
+    assert ExactTime(6, -3).denominator == 1
