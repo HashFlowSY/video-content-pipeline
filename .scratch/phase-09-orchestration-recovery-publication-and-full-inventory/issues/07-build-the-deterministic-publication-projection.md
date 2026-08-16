@@ -10,20 +10,28 @@ change, `unavailable` recorded instead of fabricated files.
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Same verified inputs and projection version always produce
+- [x] Same verified inputs and projection version always produce
   byte-identical outputs.
-- [ ] Timing-view selection and its basis are recorded per exported artifact;
+- [x] Timing-view selection and its basis are recorded per exported artifact;
   adopted-alignment timing is used only where its gates passed, original
   timing otherwise.
-- [ ] Mode mapping follows plan §7: subtitle-first produces `source`/
+- [x] Mode mapping follows plan §7: subtitle-first produces `source`/
   `readable`, enhancement produces `enhanced` with per-cue provenance, full
   ASR produces `verbatim`/`readable`; no mode ever fabricates another mode's
   artifacts.
-- [ ] Part artifacts land under `parts/<part-id>/` with PartRelativeTime;
+- [x] Part artifacts land under `parts/<part-id>/` with PartRelativeTime;
   collection artifacts use CollectionVirtualTime; Part boundaries stay hard.
-- [ ] The projection has its own Stage version participating in invalidation.
-- [ ] Missing upstream evidence yields `unavailable` manifest entries, never
+- [x] The projection has its own Stage version participating in invalidation.
+- [x] Missing upstream evidence yields `unavailable` manifest entries, never
   placeholder files.
+
+## Comments
+
+Implemented in commit bcaac88 feat: build the deterministic publication
+projection (Phase 9 ticket 07). Acceptance criteria were checked at phase
+closure on the maintainer's instruction, anchored to the current-head
+verification (pytest 1034 passed; ruff and mypy clean; 21 confirmed exit-gate
+booleans in docs/PHASE_09_INVENTORY.json).

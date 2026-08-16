@@ -9,17 +9,25 @@ re-analysis contracts, then projecting and publishing as a normal run.
 
 **Blocked by:** 02, 09, 10
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Improve reads only from the named published bundle — never from
+- [x] Improve reads only from the named published bundle — never from
   workspaces — and revalidates the bundle's hashes before use.
-- [ ] A new plan and run id are created; the prior bundle and its
+- [x] A new plan and run id are created; the prior bundle and its
   `latest.json` remain byte-identical throughout.
-- [ ] Carried-forward artifacts are recorded in the new run's manifest and
+- [x] Carried-forward artifacts are recorded in the new run's manifest and
   reports with source run id and artifact hashes.
-- [ ] The scope grammar (`part`, `range`, `all`) maps to the retained
+- [x] The scope grammar (`part`, `range`, `all`) maps to the retained
   enhancement scoping semantics; enhanced artifacts keep
   `audio_completeness=not_verified` and per-cue provenance.
-- [ ] The new run publishes through the standard staging/atomic-publish path
+- [x] The new run publishes through the standard staging/atomic-publish path
   and may advance `latest.json` only under the standard eligibility rule.
+
+## Comments
+
+Implemented in commit 56c55bf feat: implement improvement runs (Phase 9 ticket
+11). Acceptance criteria were checked at phase closure on the maintainer's
+instruction, anchored to the current-head verification (pytest 1034 passed;
+ruff and mypy clean; 21 confirmed exit-gate booleans in
+docs/PHASE_09_INVENTORY.json).

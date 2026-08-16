@@ -10,17 +10,25 @@ publication of the six-piece floor.
 
 **Blocked by:** 08
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Every ordinary failure path — including failure before any stage unit
+- [x] Every ordinary failure path — including failure before any stage unit
   completes — publishes the Minimal RunBundle (manifest, processing report,
   run inventory, both quality reports, diagnostics with events snapshot).
-- [ ] `run-inventory.json` covers every used, created, modified, downloaded,
+- [x] `run-inventory.json` covers every used, created, modified, downloaded,
   and published path with `deletion_class` and `deletion_consequence`;
   models, caches, workspaces, staging, and published files all appear.
-- [ ] `processing-report.md` contains all §18.1 sections; readable prose
+- [x] `processing-report.md` contains all §18.1 sections; readable prose
   defaults to Chinese; the project-stage line is present.
-- [ ] `quality-report.*` aggregates recorded gate outcomes and the
+- [x] `quality-report.*` aggregates recorded gate outcomes and the
   projection's timing-view selections without re-executing gates.
-- [ ] No cleanup command exists; no code path deletes user-visible files.
+- [x] No cleanup command exists; no code path deletes user-visible files.
+
+## Comments
+
+Implemented in commit 7238177 feat: produce run reports, inventory, and cleanup
+plan (Phase 9 ticket 09). Acceptance criteria were checked at phase closure on
+the maintainer's instruction, anchored to the current-head verification (pytest
+1034 passed; ruff and mypy clean; 21 confirmed exit-gate booleans in
+docs/PHASE_09_INVENTORY.json).

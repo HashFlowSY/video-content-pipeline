@@ -17,13 +17,15 @@ mode; their vocabulary remains a full dependency of this contract.
 
 ## Status
 
-`approved_for_implementation_planning` (grilling consensus approved
-2026-08-16). Verification will be offline only: no model is downloaded,
-installed, or invoked, no user media or network is accessed, and publication
-is exercised only inside synthetic test project roots — the repository's own
-`outputs/` remains untouched. The phase claims no domain quality,
-`model_audited`, `human_verified`, real-world testing, or production
-validation.
+`completed_and_verified_offline`. Implementation and the Phase 9 CLI
+contract are complete; see the
+[completion report](PHASE_09_COMPLETION_REPORT.md) and
+[inventory](PHASE_09_INVENTORY.json). Verification was offline only: no
+model is downloaded, installed, or invoked, no user media or network is
+accessed, and publication was exercised only inside synthetic test project
+roots — the repository's own `outputs/` remains untouched. The phase claims
+no domain quality, `model_audited`, `human_verified`, real-world testing, or
+production validation.
 
 ## Objective
 

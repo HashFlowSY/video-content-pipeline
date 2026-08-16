@@ -10,20 +10,28 @@ eligibility rule.
 
 **Blocked by:** 01, 07
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] The manifest lists every expected artifact with status
+- [x] The manifest lists every expected artifact with status
   `valid | partial | invalid | unavailable` and hash; manifest ↔ disk match
   is bidirectional (nothing extra, nothing missing).
-- [ ] Publication is a single atomic rename; a failure before the rename
+- [x] Publication is a single atomic rename; a failure before the rename
   leaves `outputs/` without any trace of the run; a failure after is
   detected by the post-publish re-hash.
-- [ ] The `st_dev` precheck runs before staging assembly completes its
+- [x] The `st_dev` precheck runs before staging assembly completes its
   contract; cross-device conditions error without degradation.
-- [ ] An existing `outputs/<source-id>/<run-id>/` is never overwritten.
-- [ ] `latest.json` advances only for `complete`, `complete_with_warnings`,
+- [x] An existing `outputs/<source-id>/<run-id>/` is never overwritten.
+- [x] `latest.json` advances only for `complete`, `complete_with_warnings`,
   or published-partial runs; purely failed runs never advance it; it stores
   a pointer, never copies.
-- [ ] Post-publish verification failures are journaled and reported, and the
+- [x] Post-publish verification failures are journaled and reported, and the
   bundle is marked accordingly — never silently accepted.
+
+## Comments
+
+Implemented in commit d4191d0 feat: implement staging, atomic publish,
+manifest, and latest pointer (Phase 9 ticket 08). Acceptance criteria were
+checked at phase closure on the maintainer's instruction, anchored to the
+current-head verification (pytest 1034 passed; ruff and mypy clean; 21
+confirmed exit-gate booleans in docs/PHASE_09_INVENTORY.json).

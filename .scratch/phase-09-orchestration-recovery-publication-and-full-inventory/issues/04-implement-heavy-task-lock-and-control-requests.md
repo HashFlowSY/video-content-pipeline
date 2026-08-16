@@ -10,16 +10,24 @@ ADR 0032).
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] A second heavy run while the lock is held fails fast with a clear
+- [x] A second heavy run while the lock is held fails fast with a clear
   reason; `queued` exists only as the transient lock-wait state.
-- [ ] A lock whose holder process is dead (pid + start-time check) is
+- [x] A lock whose holder process is dead (pid + start-time check) is
   detected as stale and reported as such.
-- [ ] Pause takes effect exactly at the next stage-unit boundary; the run
+- [x] Pause takes effect exactly at the next stage-unit boundary; the run
   process exits cleanly in `paused` with state and journal flushed.
-- [ ] Cancel stops subsequent stages and hands off to publication of
+- [x] Cancel stops subsequent stages and hands off to publication of
   already-completed results.
-- [ ] Control request files, their observation, and their outcomes are all
+- [x] Control request files, their observation, and their outcomes are all
   journaled events; an unobserved stale request cannot corrupt state.
+
+## Comments
+
+Implemented in commit dabd69c feat: implement heavy-task lock and control
+requests (Phase 9 ticket 04). Acceptance criteria were checked at phase closure
+on the maintainer's instruction, anchored to the current-head verification
+(pytest 1034 passed; ruff and mypy clean; 21 confirmed exit-gate booleans in
+docs/PHASE_09_INVENTORY.json).

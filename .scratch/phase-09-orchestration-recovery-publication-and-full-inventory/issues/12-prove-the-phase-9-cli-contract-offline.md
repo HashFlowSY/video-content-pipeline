@@ -13,20 +13,28 @@ maintainer instruction — `docs/PHASE_09_COMPLETION_REPORT.md` plus the
 
 **Blocked by:** 10, 11
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Every spec Offline Test Contract property has at least one named
+- [x] Every spec Offline Test Contract property has at least one named
   proving test; the coverage map in the inventory cites real test functions.
-- [ ] The five plan 退出门禁 and the derived gates are all `confirmed: true`
+- [x] The five plan 退出门禁 and the derived gates are all `confirmed: true`
   with proving tests; the acceptance test re-derives plan gates by regex from
   the phase plan.
-- [ ] `guarantees_asserted_at_cli` records `model_execution`,
+- [x] `guarantees_asserted_at_cli` records `model_execution`,
   `model_acquisition`, `network_access`, `frame_extraction` as
   `not_attempted` and `outputs_publication` as `synthetic_roots_only`, each
   backed by named tests including the repository-`outputs/`-untouched
   assertion.
-- [ ] `pytest -q`, `ruff check .`, `ruff format --check .`, and `mypy src`
+- [x] `pytest -q`, `ruff check .`, `ruff format --check .`, and `mypy src`
   all pass at completion.
-- [ ] The completion report and `project-state.json` flip happen only on
+- [x] The completion report and `project-state.json` flip happen only on
   explicit maintainer instruction, following the Phase 8 closure pattern.
+
+## Comments
+
+Implemented in commit b99d306 feat: prove the Phase 9 CLI contract offline
+(Phase 9 ticket 12). Acceptance criteria were checked at phase closure on the
+maintainer's instruction, anchored to the current-head verification (pytest
+1034 passed; ruff and mypy clean; 21 confirmed exit-gate booleans in
+docs/PHASE_09_INVENTORY.json).

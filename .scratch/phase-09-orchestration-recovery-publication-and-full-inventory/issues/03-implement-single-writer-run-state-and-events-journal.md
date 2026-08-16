@@ -8,18 +8,26 @@ decisions are always consistent on disk and every transition is audited.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] `run-state.json` updates are atomic (temp-then-rename in the run
+- [x] `run-state.json` updates are atomic (temp-then-rename in the run
   directory); a reader never observes a torn document.
-- [ ] `events.jsonl` is append-only; every state transition, control-request
+- [x] `events.jsonl` is append-only; every state transition, control-request
   observation, decision pause, and recovery writes an event.
-- [ ] The state machine implements exactly
+- [x] The state machine implements exactly
   `planned -> queued -> running -> complete | complete_with_warnings |
   incomplete | failed | cancelled` and `running -> pausing -> paused ->
   running`; no other transition is representable.
-- [ ] Only the run process writes either file; command-side code paths have
+- [x] Only the run process writes either file; command-side code paths have
   no write API against them.
-- [ ] Schema versioning and deterministic serialization follow the existing
+- [x] Schema versioning and deterministic serialization follow the existing
   report conventions (`sort_keys`, explicit `schema_version`).
+
+## Comments
+
+Implemented in commit 2663e70 feat: implement single-writer run state and
+events journal (Phase 9 ticket 03). Acceptance criteria were checked at phase
+closure on the maintainer's instruction, anchored to the current-head
+verification (pytest 1034 passed; ruff and mypy clean; 21 confirmed exit-gate
+booleans in docs/PHASE_09_INVENTORY.json).
