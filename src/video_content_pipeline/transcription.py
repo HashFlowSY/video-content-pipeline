@@ -461,7 +461,7 @@ def transcribe(
     precondition (a retained ``subtitle_unavailable_requires_asr_plan`` handoff or
     an explicit ``upgrade_all`` demand) or it is rejected; a subtitle-priority run
     never triggers ASR automatically. Before any execution the attempt records its
-    pauses: a conservative resource estimate over the 24 GiB envelope retains a
+    pauses: a conservative resource estimate over the 12 GiB envelope retains a
     resumable ``resource_envelope_exceeded`` report, a subtitle-unavailable source
     retains a resumable ``awaiting_full_asr_resource_confirmation`` report, and
     otherwise -- no acquired offline ASR model existing yet -- the attempt retains
@@ -569,7 +569,7 @@ def transcribe(
             diagnostics = (
                 PlanningDiagnostic(
                     "resource_envelope_exceeded",
-                    "A conservative ASR resource estimate exceeds the 24 GiB envelope; "
+                    "A conservative ASR resource estimate exceeds the 12 GiB envelope; "
                     "reconfigure rather than silently change model, quantization, or batch.",
                 ),
             )
@@ -735,7 +735,7 @@ def transcription_resource_envelope_pause(
 ) -> dict[str, object] | None:
     """Return the Transcription resource-envelope pause detail, if any candidate exceeds it.
 
-    A candidate graded ``resource_envelope_exceeded`` by the shared 24 GiB
+    A candidate graded ``resource_envelope_exceeded`` by the shared 12 GiB
     eligibility gate means the conservative estimate exceeds the envelope; the
     attempt pauses rather than silently choosing a smaller model or quantization.
     """

@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from video_content_pipeline import cli, evidence
+from video_content_pipeline.capabilities import MAX_MODEL_RESOURCE_BYTES
 from video_content_pipeline.enhancement import (
     PartEnhancementScope,
     SelectedEnhancementTrack,
@@ -231,7 +232,7 @@ def _bind_fixture(
 
 
 def _over_envelope_registry(project_root: Path) -> None:
-    """Register an ASR candidate whose conservative estimate exceeds the 24 GiB envelope."""
+    """Register an ASR candidate whose conservative estimate exceeds the 12 GiB envelope."""
 
     dependency_plan = "models/plans/qwen3-asr-1-7b.md"
     plan_path = project_root / dependency_plan
@@ -248,7 +249,7 @@ def _over_envelope_registry(project_root: Path) -> None:
         "credential_required": False,
         "telemetry": False,
         "dependency_plan": dependency_plan,
-        "resource_estimate": {"high_bytes": 24 * 1024**3 + 1},
+        "resource_estimate": {"high_bytes": MAX_MODEL_RESOURCE_BYTES + 1},
     }
     registry_path = project_root / "models" / "registry.json"
     registry_path.parent.mkdir(parents=True, exist_ok=True)

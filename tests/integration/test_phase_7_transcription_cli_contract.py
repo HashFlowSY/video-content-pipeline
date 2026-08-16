@@ -10,7 +10,7 @@ the attempt as ``failed``. The full-ASR start precondition is either a retained
 whole-selection upgrade -- a subtitle-priority run never triggers ASR
 automatically. A subtitle-unavailable source pauses at the Full-ASR resource
 confirmation before any execution, and a conservative resource estimate over the
-24 GiB envelope pauses instead of silently changing model or quantization. No
+12 GiB envelope pauses instead of silently changing model or quantization. No
 model is downloaded or executed; the terminal happy-path outcome is
 ``model_acquisition_required``.
 
@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from video_content_pipeline import cli, evidence
+from video_content_pipeline.capabilities import MAX_MODEL_RESOURCE_BYTES
 from video_content_pipeline.inspection import PlanInspectionEvidence
 from video_content_pipeline.planning import (
     PlanningDiagnostic,
@@ -220,7 +221,7 @@ def _over_envelope_primary(project_root: Path) -> dict[str, object]:
         "credential_required": False,
         "telemetry": False,
         "dependency_plan": dependency_plan,
-        "resource_estimate": {"high_bytes": 24 * 1024**3 + 1},
+        "resource_estimate": {"high_bytes": MAX_MODEL_RESOURCE_BYTES + 1},
     }
 
 

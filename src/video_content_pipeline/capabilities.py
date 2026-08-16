@@ -5,7 +5,7 @@ audio-analysis owns ``vad``/``forced_alignment``/``diarization`` and
 transcription owns ``asr_primary``/``asr_review``. The eligibility gate is a
 single, security-sensitive policy (approved HTTPS source, approved license,
 pinned revision and asset hash, offline runtime, no credentials, no telemetry,
-a project-local dependency plan, and a resource envelope within the 24 GiB
+a project-local dependency plan, and a resource envelope within the 12 GiB
 ceiling), so it lives in exactly one place and every Context reads it the same
 way.
 
@@ -29,7 +29,7 @@ from video_content_pipeline.evidence import input_evidence
 
 CANDIDATE_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
-MAX_MODEL_RESOURCE_BYTES = 24 * 1024**3
+MAX_MODEL_RESOURCE_BYTES = 12 * 1024**3
 
 
 def load_registry_document(

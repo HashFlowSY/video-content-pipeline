@@ -10,9 +10,15 @@ invalidate another Context's read of the same registry.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from video_content_pipeline.capabilities import parse_candidate_matrix
+from video_content_pipeline.capabilities import (
+    MAX_MODEL_RESOURCE_BYTES,
+    candidate_eligibility,
+    parse_candidate_matrix,
+)
 
 
 class _MatrixError(ValueError):
@@ -66,3 +72,18 @@ def test_parse_rejects_a_malformed_candidate_shape() -> None:
 def test_parse_requires_a_candidates_list() -> None:
     with pytest.raises(_MatrixError):
         parse_candidate_matrix({"candidates": {}}, ("asr_primary",), invalid_error=_invalid)
+
+
+def test_resource_envelope_is_twelve_gib() -> None:
+    assert MAX_MODEL_RESOURCE_BYTES == 12 * 1024**3
+
+
+def test_estimate_between_twelve_and_twenty_four_gib_pauses(tmp_path: Path) -> None:
+    # A conservative estimate that fit under the former 24 GiB envelope but
+    # exceeds the tightened 12 GiB ceiling now grades as an over-envelope pause.
+    candidate = {"resource_estimate": {"high_bytes": 18 * 1024**3}}
+
+    state, reason = candidate_eligibility(candidate, tmp_path)
+
+    assert state == "blocked"
+    assert reason == "resource_envelope_exceeded"

@@ -448,7 +448,7 @@ def analyze_audio(
                 partial_analysis = _partial_analysis("vad", "resource_envelope_exceeded")
                 raise AudioAnalysisError(
                     "resource_envelope_exceeded",
-                    "VAD resource estimate exceeds the 24 GiB envelope.",
+                    "VAD resource estimate exceeds the 12 GiB envelope.",
                 )
         if vad_candidate is not None:
             _revalidate_analysis_inputs(plan, subtitle_report, project_root)
@@ -494,7 +494,7 @@ def analyze_audio(
                     )
                     raise AudioAnalysisError(
                         "resource_envelope_exceeded",
-                        "Forced-alignment resource estimate exceeds the 24 GiB envelope.",
+                        "Forced-alignment resource estimate exceeds the 12 GiB envelope.",
                     )
             if alignment_candidate is not None:
                 resumed_alignment = resumed_by_capability.get("forced_alignment")
@@ -535,7 +535,7 @@ def analyze_audio(
                 partial_analysis = _partial_analysis("diarization", "resource_envelope_exceeded")
                 raise AudioAnalysisError(
                     "resource_envelope_exceeded",
-                    "Diarization resource estimate exceeds the 24 GiB envelope.",
+                    "Diarization resource estimate exceeds the 12 GiB envelope.",
                 )
             diarization_candidate = _qualified_diarization_candidate(
                 capabilities, requested_diarization_candidate

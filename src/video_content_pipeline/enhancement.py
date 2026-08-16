@@ -956,7 +956,7 @@ def _execute(
         builder.diagnostics = (
             PlanningDiagnostic(
                 "resource_envelope_exceeded",
-                "A conservative ASR resource estimate exceeds the 24 GiB envelope; reconfigure "
+                "A conservative ASR resource estimate exceeds the 12 GiB envelope; reconfigure "
                 "rather than silently change model, quantization, or batch.",
             ),
         )

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from video_content_pipeline.capabilities import MAX_MODEL_RESOURCE_BYTES
 from video_content_pipeline.transcription import (
     TranscriptionError,
     evaluate_asr_capabilities,
@@ -209,7 +210,7 @@ def test_resource_envelope_exceeded_primary_is_ineligible(tmp_path: Path) -> Non
         capability="asr_primary",
         asset_sha256="a" * 64,
     )
-    over_envelope["resource_estimate"] = {"high_bytes": 24 * 1024**3 + 1}
+    over_envelope["resource_estimate"] = {"high_bytes": MAX_MODEL_RESOURCE_BYTES + 1}
     _write_registry(tmp_path, [over_envelope])
 
     document = evaluate_asr_capabilities(tmp_path).as_json()

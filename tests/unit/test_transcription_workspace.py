@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from video_content_pipeline.capabilities import MAX_MODEL_RESOURCE_BYTES
 from video_content_pipeline.planning import PlanningDiagnostic
 from video_content_pipeline.subtitle_pipeline import (
     CandidateReportState,
@@ -92,7 +93,7 @@ def test_resource_envelope_pause_detects_over_envelope_candidate(tmp_path: Path)
         "credential_required": False,
         "telemetry": False,
         "dependency_plan": "models/plans/qwen3-asr-1-7b.md",
-        "resource_estimate": {"high_bytes": 24 * 1024**3 + 1},
+        "resource_estimate": {"high_bytes": MAX_MODEL_RESOURCE_BYTES + 1},
     }
     registry_path.write_text(
         json.dumps({"schema_version": 2, "candidates": [candidate]}, sort_keys=True) + "\n",
@@ -104,7 +105,7 @@ def test_resource_envelope_pause_detects_over_envelope_candidate(tmp_path: Path)
     assert pause is not None
     assert pause["capability"] == "asr_primary"
     assert pause["candidate_id"] == "qwen3-asr-1-7b"
-    assert pause["resource_high_bytes"] == 24 * 1024**3 + 1
+    assert pause["resource_high_bytes"] == MAX_MODEL_RESOURCE_BYTES + 1
 
 
 def test_resource_envelope_pause_absent_within_envelope(tmp_path: Path) -> None:

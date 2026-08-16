@@ -21,7 +21,7 @@ revalidated attempt records an ``attempt_provenance`` binding its prompt and
 deterministically rendered prompt, its input-cue manifest, the adapter identity,
 sampling, output-schema and evidence-rule hashes, the raw-output and projection
 state, and an execution-resource measurement. It also evaluates the
-future-real-model 24 GiB resource envelope, retaining a resumable
+future-real-model 12 GiB resource envelope, retaining a resumable
 ``resource_envelope_exceeded`` report when a conservative estimate exceeds it.
 ``resume_text_analysis`` continues only such a retained
 pause, from an explicit decision, as a fresh non-overwriting attempt — there is
@@ -51,6 +51,7 @@ from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
 
+from video_content_pipeline.capabilities import MAX_MODEL_RESOURCE_BYTES
 from video_content_pipeline.evidence import (
     InputEvidence,
     validated_report_id,
@@ -108,8 +109,9 @@ from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 # above this envelope pauses for an explicit resource decision instead of
 # silently altering the model, quantization, context, or sampling. The Controlled
 # offline text adapter loads no model asset, so its resource measurement is
-# ``not_applicable`` and never exceeds this envelope.
-TEXT_MODEL_RESOURCE_ENVELOPE_BYTES = 24 * 1024**3
+# ``not_applicable`` and never exceeds this envelope. The envelope is the shared
+# machine ceiling defined once in :mod:`video_content_pipeline.capabilities`.
+TEXT_MODEL_RESOURCE_ENVELOPE_BYTES = MAX_MODEL_RESOURCE_BYTES
 
 # The explicit decision that continues a retained resource-envelope pause. The
 # name matches the Phase 5 audio-analysis resume convention.
@@ -129,7 +131,7 @@ class TextAnalysisReportStatus(StrEnum):
     recorded when no eligible offline text adapter exists, and
     ``resource_envelope_exceeded`` is the resumable decision-pause outcome
     recorded when a conservative future-real-model resource estimate exceeds the
-    24 GiB envelope; both retain no SemanticSegments. (A future real-model path
+    12 GiB envelope; both retain no SemanticSegments. (A future real-model path
     would add its own ``model_acquisition_required`` outcome when that capability
     is built.)
     """
@@ -499,7 +501,7 @@ def analyze_text(
 
     Every bound input identity is revalidated before an attempt proceeds; any
     drift retains a ``failed`` report. A fully revalidated attempt records its
-    generation-attempt provenance and then evaluates the future-real-model 24 GiB
+    generation-attempt provenance and then evaluates the future-real-model 12 GiB
     resource envelope: a conservative estimate above the envelope retains a
     resumable ``resource_envelope_exceeded`` report, and otherwise the attempt —
     which has no Controlled offline text adapter that generates yet — retains a
@@ -602,7 +604,7 @@ def analyze_text(
             diagnostics = (
                 PlanningDiagnostic(
                     "resource_envelope_exceeded",
-                    "A conservative text-model resource estimate exceeds the 24 GiB envelope.",
+                    "A conservative text-model resource estimate exceeds the 12 GiB envelope.",
                 ),
             )
         else:

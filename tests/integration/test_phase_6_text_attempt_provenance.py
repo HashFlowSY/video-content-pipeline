@@ -5,7 +5,7 @@ synthetic human-review records immutable and auditable. Every attempt records
 its bound generation identities (prompt and rendered prompt, input-cue manifest,
 adapter identity, sampling, output-schema and evidence-rule hashes, raw-output
 and projection state, and an execution-resource measurement). The only resumable
-decision pause is the future-real-model 24 GiB resource envelope, and no attempt
+decision pause is the future-real-model 12 GiB resource envelope, and no attempt
 ever retries automatically: a resume is an explicit, fresh, non-overwriting
 attempt. These tests drive ``analyze_text``/``resume_text_analysis`` and assert
 deterministic contract properties and no-side-effect guarantees.
@@ -40,7 +40,7 @@ from video_content_pipeline.subtitle_pipeline import (
     subtitle_rules_fingerprint,
 )
 
-_ENVELOPE = 24 * 1024**3
+_ENVELOPE = text_analysis.TEXT_MODEL_RESOURCE_ENVELOPE_BYTES
 
 
 def _write_text_analysis_contracts(project_root: Path) -> None:
@@ -299,7 +299,7 @@ def test_resource_plan_over_envelope_pauses_for_a_decision(tmp_path: Path) -> No
     assert report["diagnostics"] == [
         {
             "reason": "resource_envelope_exceeded",
-            "message": ("A conservative text-model resource estimate exceeds the 24 GiB envelope."),
+            "message": ("A conservative text-model resource estimate exceeds the 12 GiB envelope."),
         }
     ]
     resource = report["attempt_provenance"]["resource_measurement"]
