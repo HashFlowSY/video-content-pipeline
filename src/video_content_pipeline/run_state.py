@@ -29,16 +29,20 @@ import json
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
+from video_content_pipeline.durable_io import (
+    atomic_replace,
+    durable_write,
+    to_utc_isoformat,
+    utc_now,
+)
 from video_content_pipeline.orchestration import RunLayout
 
 STATE_SCHEMA_VERSION = 1
 EVENT_SCHEMA_VERSION = 1
-
-_STATE_TMP_SUFFIX = ".tmp"
 
 
 class RunStateError(ValueError):
@@ -115,35 +119,15 @@ _ALLOWED_TRANSITIONS: Mapping[RunStatus, frozenset[RunStatus]] = {
 }
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 def _canonical_line(payload: Mapping[str, object]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def _durable_write(path: Path, text: str, *, flags: int) -> None:
-    """Write ``text`` to ``path`` under ``flags`` and fsync before returning.
-
-    Shared by the atomic state replace (into a temp file the caller renames) and
-    the append-only journal, so both the state document and every journal line
-    are flushed to stable storage before the write is considered done — the
-    durability the crash-recovery path (ADR 0053) relies on.
-    """
-
-    descriptor = os.open(path, flags, 0o644)
-    try:
-        os.write(descriptor, text.encode("utf-8"))
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
 def _instant(value: datetime, *, reason: str) -> str:
-    if value.tzinfo is None:
-        raise RunStateError(reason, "A run-state timestamp must be timezone-aware.")
-    return value.astimezone(UTC).isoformat()
+    return to_utc_isoformat(
+        value,
+        on_naive=lambda: RunStateError(reason, "A run-state timestamp must be timezone-aware."),
+    )
 
 
 @dataclass(frozen=True)
@@ -338,7 +322,7 @@ class RunStateWriter:
         journal_path: Path,
         state: RunState,
         next_sequence: int,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._state_path = state_path
         self._journal_path = journal_path
@@ -358,7 +342,7 @@ class RunStateWriter:
         layout: RunLayout,
         *,
         plan_id: str,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> RunStateWriter:
         """Begin a fresh run at ``planned``, writing the first state and event.
 
@@ -404,7 +388,7 @@ class RunStateWriter:
         cls,
         layout: RunLayout,
         *,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> RunStateWriter:
         """Reattach a new run process to an existing run's state and journal.
 
@@ -562,9 +546,7 @@ class RunStateWriter:
 
     def _write_state(self, state: RunState) -> None:
         payload = json.dumps(state.to_document(), sort_keys=True, indent=2) + "\n"
-        tmp_path = self._state_path.with_name(self._state_path.name + _STATE_TMP_SUFFIX)
-        _durable_write(tmp_path, payload, flags=os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-        os.replace(tmp_path, self._state_path)
+        atomic_replace(self._state_path, payload)
 
     def _append_event(self, kind: EventKind, data: Mapping[str, object]) -> None:
         record = {
@@ -575,5 +557,5 @@ class RunStateWriter:
             "data": dict(data),
         }
         line = _canonical_line(record) + "\n"
-        _durable_write(self._journal_path, line, flags=os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        durable_write(self._journal_path, line, flags=os.O_WRONLY | os.O_CREAT | os.O_APPEND)
         self._next_sequence += 1
