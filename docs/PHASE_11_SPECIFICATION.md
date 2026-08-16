@@ -213,7 +213,8 @@ part of the pytest gate).
 - The five formal real-video branches, pause/resume on real runs, user
   acceptance review (Phase 12).
 - CER/WER of any kind (Phase 12, and only with human reference text).
-- Any VLM (no code consumer; Qwen3-VL research stays archived).
+- Any VLM (no code consumer; the Qwen3-VL research document was removed
+  by the maintainer 2026-08-16).
 - Outlines/constrained decoding (recorded upgrade path only).
 - yt-dlp upgrades without a real observed failure.
 - Speaker true-name inference, paid APIs, telemetry of any kind.
