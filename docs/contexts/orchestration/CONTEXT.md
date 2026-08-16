@@ -197,3 +197,16 @@ _Avoid_: generic error
 The exhaustive replay of a scenario across every Fault point and Fault
 class, asserting the same recovery invariants in every cell.
 _Avoid_: chaos testing
+
+**Model runtime subprocess**:
+The transport seam that runs each MLX-scale model engine in its own
+subprocess with a JSON request/response contract: the parent serializes an
+engine request (model path, task, sampling/limits) to the child's stdin with
+the hub-offline guards forced on, and the child loads the model, runs the
+stage, reports its output plus required peak-memory evidence, and exits —
+returning unified memory to the OS. A crash, garbage stdout, nonzero exit, or
+timeout each isolate into a distinct typed failure that retains the child's
+exit and stderr; there is no automatic retry and the parent writes nothing.
+ONNX-scale models (vad, diarization, ocr) run in-process; the size boundary
+and memory-return rationale live in ADR 0055.
+_Avoid_: in-process model unloading

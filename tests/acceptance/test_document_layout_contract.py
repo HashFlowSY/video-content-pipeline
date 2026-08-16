@@ -172,6 +172,8 @@ POST_MIGRATION_TERMS = {
     "Fault point",
     "Fault class",
     "Fault matrix",
+    # Phase 11 (orchestration addition)
+    "Model runtime subprocess",
 }
 
 RUNTIME_TERMS = {

@@ -108,7 +108,7 @@ governed separately in [Runtime Governance](docs/RUNTIME_GOVERNANCE.md).
 * Transitive dependencies: `media-foundation`
 * Context file: [contexts/orchestration/CONTEXT.md](docs/contexts/orchestration/CONTEXT.md)
 * Owned vocabulary: see the owner index below.
-* Relevant global ADRs: ADRs 0026, 0032, 0034, 0041–0042, 0046, 0050–0053.
+* Relevant global ADRs: ADRs 0026, 0032, 0034, 0041–0042, 0046, 0050–0053, 0055.
 
 ## Dependency routing
 
@@ -432,6 +432,7 @@ definition may be changed.
 - `Fault point` → `orchestration`
 - `Fault class` → `orchestration`
 - `Fault matrix` → `orchestration`
+- `Model runtime subprocess` → `orchestration`
 
 ## Reading and writing protocol
 
@@ -507,3 +508,4 @@ future ADR can be routed without creating a context-local tree.
 - [ADR 0052](docs/adr/0052-adopt-stage-outputs-run-scoped-with-stage-versioned-invalidation-keys.md)
 - [ADR 0053](docs/adr/0053-use-single-writer-run-state-with-file-based-control-requests.md)
 - [ADR 0054](docs/adr/0054-verify-engineering-with-synthetic-media-and-a-deterministic-fault-matrix.md)
+- [ADR 0055](docs/adr/0055-run-mlx-model-engines-in-per-stage-subprocesses.md)
