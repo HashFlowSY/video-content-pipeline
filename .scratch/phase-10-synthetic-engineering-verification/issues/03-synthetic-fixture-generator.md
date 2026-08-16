@@ -17,15 +17,46 @@ tests (marked `integration`) execute the real ffprobe against each fixture
 and verify the probed structure matches the recipe's expectations.
 
 **Blocked by:** 01
-**Status:** open
+**Status:** done (`90aadc5`)
 **Labels:** ready-for-agent
 
-- [ ] Five recipes generate successfully via the pinned host toolchain
-- [ ] Identity mismatch/absence produces a test error (proven with a fake
-      tools.json), not a skip
-- [ ] Real ffprobe executes in-test and structure assertions pass per branch
-- [ ] Generation is session-cached (second use in one session regenerates
-      nothing) and writes only under the session temp root
-- [ ] No media binary enters the repository; suite green within budget
+- [x] Five recipes generate successfully via the pinned host toolchain —
+      `FIXTURE_RECIPES` (subtitle-first / full-asr / anomalous-subtitles /
+      multi-part / visual-text) built through `resolve_fixture_toolchain` →
+      `generate_fixture` (`test_branch_generates_and_probes_as_declared`)
+- [x] Identity mismatch/absence produces a test error (proven with a fake
+      tools.json), not a skip — four fake-registry tests assert
+      `FixtureToolchainError` (`tool_absent`, `tool_identity_mismatch`,
+      `tool_entry_missing`, `tool_evidence_incomplete`); the verifier never
+      calls `pytest.skip`
+- [x] Real ffprobe executes in-test and structure assertions pass per branch —
+      `probe_stream_types` runs the pinned ffprobe; each branch is checked
+      against its declared `expected_streams`
+- [x] Generation is session-cached (second use in one session regenerates
+      nothing) and writes only under the session temp root — `.complete` marker
+      drives `regenerated=False` (`test_second_generation_reuses_the_cache`);
+      `is_relative_to(fixture_cache)` + `test_cache_is_versioned` confine output
+- [x] No media binary enters the repository; suite green within budget — output
+      is tmp-only and untracked; full suite 1067 passed in ~5s
 
 ## Comments
+
+- Delivered as `90aadc5`. The generator is plain importable support code (no
+  pytest, no conftest); the session-scoped caching lives in the consuming test,
+  matching [[phase-8-grilled-and-specced]]'s zero-conftest convention. It reuses
+  `external_tools.identify_external_tool` so the fixture toolchain check and
+  production tool-pinning capture identity byte for byte.
+- **Toolchain gap surfaced:** the pinned host ffmpeg 9.0.1 is built without
+  libfreetype/libass, so the `drawtext` filter the ticket names for the
+  visual-text branch (and the `subtitles` burn-in filter) are unavailable. The
+  branch instead uses `testsrc`, whose built-in vector font burns a frame
+  counter (genuine rendered digit glyphs) into every frame — a real
+  text-bearing render from the pinned toolchain. OCR-level verification of the
+  text *content* is the downstream visual-text flow's job (E2E tickets), not the
+  fixture generator's; the structural assertion plus ffmpeg's fail-on-filter-error
+  behaviour is the guard here.
+- Two-axis code review (Standards + Spec) ran clean of correctness/standard
+  issues; applied fixes were quality-only: a shared `probe_document` argv (was
+  duplicated in the test), named unpacking in `resolve_fixture_toolchain`,
+  dropped an unused `generate_all_fixtures` (YAGNI), and an added visual-text
+  render assertion.
