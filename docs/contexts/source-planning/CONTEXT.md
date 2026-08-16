@@ -131,3 +131,11 @@ _Avoid_: incremental download
 A collection entry whose acquired SourceArtifact duplicates another Part by
 content identity.
 _Avoid_: duplicate URL only
+
+**Front-loaded plan choices**:
+The rule that plan confirmation captures every run-affecting choice —
+subtitle track selection, analysis audio stream, diarization candidate, ASR
+mode, and visual-text scope — so a confirmed RunPlan supports non-interactive
+orchestration; a missing required choice surfaces later only as an explicit
+decision, never a prompt.
+_Avoid_: mid-run configuration

@@ -1,8 +1,10 @@
 # Media Foundation Context
 
 This Context owns deterministic media evidence, exact source-time coordinates,
-coverage, cue layers, and the future publication boundary. It is the base
-vocabulary consumed by every later processing Context.
+coverage, cue layers, and the offline verification boundaries. It is the base
+vocabulary consumed by every later processing Context. Publication vocabulary
+(`RunBundle`, `Publication boundary`) is owned by the
+[Orchestration Context](../orchestration/CONTEXT.md).
 Operational mechanics and exact thresholds remain in the linked specifications
 and ADRs.
 
@@ -133,17 +135,8 @@ The synthetic boundary that proves visual-text contracts without a real OCR
 model, frame extraction from user media, or network.
 _Avoid_: OCR quality benchmark
 
-**RunBundle**:
-The immutable bundle that a future authorized publication stage may promote
-from verified evidence and reports.
-_Avoid_: analysis workspace
-
-**Publication boundary**:
-The separately authorized boundary that promotes verified artifacts into a
-RunBundle; upstream Contexts retain evidence without publishing it.
-_Avoid_: implicit output write
-
-**Future publication stage**:
-A later, separately authorized stage responsible for publication; the former
-Phase 9 shorthand does not define a current processing contract.
-_Avoid_: defined Phase 9 pipeline
+**Phase 9 offline orchestration-verification boundary**:
+The synthetic boundary that proves orchestration, recovery, and publication
+contracts without real models, user media, or network; publication is
+exercised only inside synthetic test project roots.
+_Avoid_: production publication

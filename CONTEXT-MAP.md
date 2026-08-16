@@ -97,6 +97,19 @@ governed separately in [Runtime Governance](docs/RUNTIME_GOVERNANCE.md).
 * Owned vocabulary: see the owner index below.
 * Relevant global ADRs: ADRs 0001, 0036–0037, 0042, 0047–0049.
 
+### orchestration
+
+* Purpose: composes the evidence Contexts into recoverable, auditable runs —
+  run identity and state, stage units with invalidation keys, process control
+  and crash recovery, candidate staging, atomic publication, and the published
+  RunBundle with manifest, reports, inventory, and latest pointer.
+* Dependencies: `media-foundation`, `source-planning`, `subtitles`, `audio-analysis`, `text-analysis`, `transcription`, `visual-text`
+* Direct dependencies: `source-planning`, `subtitles`, `audio-analysis`, `text-analysis`, `transcription`, `visual-text`
+* Transitive dependencies: `media-foundation`
+* Context file: [contexts/orchestration/CONTEXT.md](docs/contexts/orchestration/CONTEXT.md)
+* Owned vocabulary: see the owner index below.
+* Relevant global ADRs: ADRs 0026, 0032, 0034, 0041–0042, 0046, 0050–0053.
+
 ## Dependency routing
 
 The conceptual dependency route is `media-foundation → source-planning →
@@ -117,6 +130,15 @@ Visual-text is explicitly enabled, optionally consumes audio-analysis evidence
 text-analysis consumes retained visual-text reports as an optional evidence
 input through affected-Part re-analysis (ADR 0046) and owns the host-read
 comment upgrade (ADR 0049).
+
+The orchestration route consumes every other Context: `source-planning →
+orchestration` for plan revalidation, the evidence routes above for stage
+composition, and `media-foundation` timing views for publication projection
+(ADR 0026). Orchestration invokes the per-phase functions in-process, adopts
+only its own run's recorded stage outputs (ADR 0052), and is the only Context
+that writes `outputs/` (ADR 0050, ADR 0051). Transcription and visual-text
+stages execute conditionally by run mode, but their vocabulary is a full
+dependency of the orchestration contract.
 
 When a change crosses contexts, name every affected owner and read each owner's
 relevant ADR index. Add a new global ADR to `docs/adr/` and this map's index when
@@ -156,9 +178,7 @@ definition may be changed.
 - `Phase 6 offline text-verification boundary` → `media-foundation`
 - `Phase 7 offline transcription-verification boundary` → `media-foundation`
 - `Phase 8 offline visual-verification boundary` → `media-foundation`
-- `RunBundle` → `media-foundation`
-- `Publication boundary` → `media-foundation`
-- `Future publication stage` → `media-foundation`
+- `Phase 9 offline orchestration-verification boundary` → `media-foundation`
 
 ### source-planning
 
@@ -188,6 +208,7 @@ definition may be changed.
 - `Manual collection session` → `source-planning`
 - `Collection closure` → `source-planning`
 - `Duplicate Part` → `source-planning`
+- `Front-loaded plan choices` → `source-planning`
 
 ### subtitles
 
@@ -377,6 +398,35 @@ definition may be changed.
 - `Serialized OCR execution` → `visual-text`
 - `OCR-not-requested record` → `visual-text`
 
+### orchestration
+
+- `Run` → `orchestration`
+- `Run identity` → `orchestration`
+- `Run state document` → `orchestration`
+- `Run events journal` → `orchestration`
+- `Single-writer run state` → `orchestration`
+- `Stage unit` → `orchestration`
+- `Stage invalidation key` → `orchestration`
+- `Stage version` → `orchestration`
+- `Run-scoped adoption` → `orchestration`
+- `Heavy-task lock` → `orchestration`
+- `Control request` → `orchestration`
+- `Run decision pause` → `orchestration`
+- `Crash recovery` → `orchestration`
+- `Non-interactive run execution` → `orchestration`
+- `Publication projection` → `orchestration`
+- `Staging area` → `orchestration`
+- `Atomic publish` → `orchestration`
+- `RunBundle` → `orchestration`
+- `Publication boundary` → `orchestration`
+- `RunBundle manifest` → `orchestration`
+- `Minimal RunBundle` → `orchestration`
+- `Latest pointer` → `orchestration`
+- `Run inventory` → `orchestration`
+- `Cleanup plan` → `orchestration`
+- `Improvement run` → `orchestration`
+- `Explicit orchestration command boundary` → `orchestration`
+
 ## Reading and writing protocol
 
 1. Read this map before exploration or domain work.
@@ -446,3 +496,7 @@ future ADR can be routed without creating a context-local tree.
 - [ADR 0047](docs/adr/0047-introduce-a-visual-text-context-with-deterministic-detection-and-ocr-only-model-capability.md)
 - [ADR 0048](docs/adr/0048-keep-visual-page-identity-part-local.md)
 - [ADR 0049](docs/adr/0049-separate-visual-evidence-classification-from-fact-upgrade.md)
+- [ADR 0050](docs/adr/0050-introduce-an-orchestration-context-that-owns-runs-and-publication.md)
+- [ADR 0051](docs/adr/0051-publish-runbundles-by-whole-directory-atomic-rename.md)
+- [ADR 0052](docs/adr/0052-adopt-stage-outputs-run-scoped-with-stage-versioned-invalidation-keys.md)
+- [ADR 0053](docs/adr/0053-use-single-writer-run-state-with-file-based-control-requests.md)

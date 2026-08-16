@@ -22,6 +22,7 @@ REQUIRED_CONTEXTS = {
     "text-analysis": "text-analysis/CONTEXT.md",
     "transcription": "transcription/CONTEXT.md",
     "visual-text": "visual-text/CONTEXT.md",
+    "orchestration": "orchestration/CONTEXT.md",
 }
 
 REQUIRED_DOMAIN_TERMS = {
@@ -45,6 +46,18 @@ EXPECTED_DEPENDENCIES = {
     # audio-analysis is an optional informing context and does not count as a
     # hard dependency, and there is no subtitles dependency (ADR 0047).
     "visual-text": {"media-foundation", "source-planning"},
+    # orchestration composes every evidence context; transcription and
+    # visual-text stages execute conditionally by run mode but their
+    # vocabulary is a full dependency of the orchestration contract (ADR 0050).
+    "orchestration": {
+        "media-foundation",
+        "source-planning",
+        "subtitles",
+        "audio-analysis",
+        "text-analysis",
+        "transcription",
+        "visual-text",
+    },
 }
 
 EXPECTED_DIRECT_DEPENDENCIES = {
@@ -55,6 +68,14 @@ EXPECTED_DIRECT_DEPENDENCIES = {
     "text-analysis": {"subtitles"},
     "transcription": {"subtitles", "audio-analysis"},
     "visual-text": {"source-planning"},
+    "orchestration": {
+        "source-planning",
+        "subtitles",
+        "audio-analysis",
+        "text-analysis",
+        "transcription",
+        "visual-text",
+    },
 }
 
 # Terms introduced by domain work after the Context-layout migration; they are
@@ -114,6 +135,35 @@ POST_MIGRATION_TERMS = {
     "Host-read comment upgrade",
     # Phase 8 (media-foundation addition)
     "Phase 8 offline visual-verification boundary",
+    # Phase 9 (orchestration)
+    "Run",
+    "Run identity",
+    "Run state document",
+    "Run events journal",
+    "Single-writer run state",
+    "Stage unit",
+    "Stage invalidation key",
+    "Stage version",
+    "Run-scoped adoption",
+    "Heavy-task lock",
+    "Control request",
+    "Run decision pause",
+    "Crash recovery",
+    "Non-interactive run execution",
+    "Publication projection",
+    "Staging area",
+    "Atomic publish",
+    "RunBundle manifest",
+    "Minimal RunBundle",
+    "Latest pointer",
+    "Run inventory",
+    "Cleanup plan",
+    "Improvement run",
+    "Explicit orchestration command boundary",
+    # Phase 9 (source-planning addition)
+    "Front-loaded plan choices",
+    # Phase 9 (media-foundation addition)
+    "Phase 9 offline orchestration-verification boundary",
 }
 
 RUNTIME_TERMS = {
