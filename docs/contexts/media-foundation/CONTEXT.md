@@ -24,6 +24,12 @@ A versioned declarative description of one synthetic fixture and its expected
 probe evidence.
 _Avoid_: ad hoc test file
 
+**Real media**:
+Media supplied by the user or obtained from an explicitly authorized external
+source for processing, as opposed to a Synthetic media fixture. Processing
+constraints about media refer to Real media only.
+_Avoid_: production video, actual media
+
 **Dependency-free Phase 2 core**:
 The media-foundation scope that stands on its own before later processing
 capabilities are introduced.
@@ -140,3 +146,9 @@ The synthetic boundary that proves orchestration, recovery, and publication
 contracts without real models, user media, or network; publication is
 exercised only inside synthetic test project roots.
 _Avoid_: production publication
+
+**Phase 10 offline engineering-verification boundary**:
+The synthetic boundary that proves whole-pipeline engineering correctness
+with Synthetic media fixtures, real local tools, and deterministic substitute
+model adapters, without Real media or model acquisition.
+_Avoid_: production readiness proof

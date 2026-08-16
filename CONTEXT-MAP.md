@@ -154,6 +154,7 @@ definition may be changed.
 
 - `Synthetic media fixture` → `media-foundation`
 - `Fixture recipe` → `media-foundation`
+- `Real media` → `media-foundation`
 - `Dependency-free Phase 2 core` → `media-foundation`
 - `Phase 2 library boundary` → `media-foundation`
 - `Fixture toolchain` → `media-foundation`
@@ -179,6 +180,7 @@ definition may be changed.
 - `Phase 7 offline transcription-verification boundary` → `media-foundation`
 - `Phase 8 offline visual-verification boundary` → `media-foundation`
 - `Phase 9 offline orchestration-verification boundary` → `media-foundation`
+- `Phase 10 offline engineering-verification boundary` → `media-foundation`
 
 ### source-planning
 
@@ -426,6 +428,10 @@ definition may be changed.
 - `Cleanup plan` → `orchestration`
 - `Improvement run` → `orchestration`
 - `Explicit orchestration command boundary` → `orchestration`
+- `Golden run` → `orchestration`
+- `Fault point` → `orchestration`
+- `Fault class` → `orchestration`
+- `Fault matrix` → `orchestration`
 
 ## Reading and writing protocol
 
@@ -500,3 +506,4 @@ future ADR can be routed without creating a context-local tree.
 - [ADR 0051](docs/adr/0051-publish-runbundles-by-whole-directory-atomic-rename.md)
 - [ADR 0052](docs/adr/0052-adopt-stage-outputs-run-scoped-with-stage-versioned-invalidation-keys.md)
 - [ADR 0053](docs/adr/0053-use-single-writer-run-state-with-file-based-control-requests.md)
+- [ADR 0054](docs/adr/0054-verify-engineering-with-synthetic-media-and-a-deterministic-fault-matrix.md)

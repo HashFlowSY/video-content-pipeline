@@ -177,3 +177,23 @@ The orchestration surface `vcp run/status/pause/resume/cancel/verify/
 inventory/improve`; the per-phase commands remain the retained expert surface
 and orchestration invokes their functions in-process.
 _Avoid_: hidden orchestration entry point
+
+**Golden run**:
+The fault-free reference execution whose observed durable writes enumerate
+Fault points and fix the expected outcome of a scenario.
+_Avoid_: happy path sample
+
+**Fault point**:
+One durable write call enumerated by a Golden run; the unit over which the
+Fault matrix iterates.
+_Avoid_: random crash site
+
+**Fault class**:
+One kind of injected failure at a Fault point: process death, exhausted
+disk, or a torn write.
+_Avoid_: generic error
+
+**Fault matrix**:
+The exhaustive replay of a scenario across every Fault point and Fault
+class, asserting the same recovery invariants in every cell.
+_Avoid_: chaos testing

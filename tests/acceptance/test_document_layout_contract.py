@@ -164,6 +164,14 @@ POST_MIGRATION_TERMS = {
     "Front-loaded plan choices",
     # Phase 9 (media-foundation addition)
     "Phase 9 offline orchestration-verification boundary",
+    # Phase 10 (media-foundation additions)
+    "Real media",
+    "Phase 10 offline engineering-verification boundary",
+    # Phase 10 (orchestration additions)
+    "Golden run",
+    "Fault point",
+    "Fault class",
+    "Fault matrix",
 }
 
 RUNTIME_TERMS = {
