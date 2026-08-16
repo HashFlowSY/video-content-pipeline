@@ -181,16 +181,24 @@ def test_project_state_reflects_the_closure_flip() -> None:
 
 
 def test_project_state_constraints_remain_untouched() -> None:
-    """Synthetic verification never touched the media/model constraints.
+    """Phase 10 synthetic verification touched no media/model constraint; the
+    later, legitimate flips stay bounded.
 
-    Backs the ``media_processed still false`` / ``models_downloaded still false``
-    derived gates: the closure flip changes the stage fields only.
+    The name is frozen by the Phase 10 inventory's citation of this test. Phase
+    10 closed with both ``media_processed`` and ``models_downloaded`` false;
+    Phase 11 ticket 04 then acquired the real model assets, so
+    ``models_downloaded`` is now true -- that flip is expected here and was
+    never done by Phase 10. The media boundary is what this gate still guards:
+    ``media_processed`` stays false until the first real-media processing in
+    Phase 12.
     """
 
     state = json.loads(PROJECT_STATE_PATH.read_text(encoding="utf-8"))
     constraints = state["constraints"]
     assert constraints["media_processed"] is False
-    assert constraints["models_downloaded"] is False
+    # Flipped by Phase 11 ticket 04 (model acquisition), never by Phase 10.
+    assert constraints["models_downloaded"] is True
+    assert constraints["paid_apis_used"] is False
 
 
 def test_known_limitations_match_the_plan_verbatim() -> None:

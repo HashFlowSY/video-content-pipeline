@@ -7,7 +7,7 @@
   "next_phase": 11,
   "real_world_testing": true,
   "production_validated": false,
-  "updated_at": "2026-08-16T10:33:40Z",
+  "updated_at": "2026-08-16T11:00:00Z",
   "phase_history": [
     {
       "phase": 0,
@@ -98,11 +98,11 @@
     }
   ],
   "constraints": {
-    "models_downloaded": false,
+    "models_downloaded": true,
     "media_processed": false,
     "paid_apis_used": false,
     "runtime_auto_downloads_allowed": false,
     "dependency_auto_upgrades_allowed": false,
-    "models_registry_entries": 0
+    "models_registry_entries": 8
   }
 }

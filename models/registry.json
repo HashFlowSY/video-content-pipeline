@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "phase": 5,
+  "phase": 11,
   "automatic_downloads": false,
   "runtime_network_access": false,
-  "acquisition_note": "Metadata only. Every candidate is completed to the plan §13.2 field set, but no asset is downloaded, hashed, executed, or network-accessed. Each entry stays ineligible until a separately authorized per-model download plan pins its revision and asset_sha256 (Phase 11 ticket 04); model downloads never reuse media-download authorization and vice versa.",
+  "acquisition_note": "Schema-2 candidate matrix. Every candidate is acquired: pinned by exact revision and by asset_sha256 (the SHA-256 of its canonical file manifest, re-verifiable from disk). Downloads used the pinned hf CLI (--revision) or pinned release URLs, staged via cache/model-downloads/ and hashed into models/<provider>/<model>/<revision>/; RapidOCR's models are recorded from the pinned wheel. Each acquisition was individually confirmed by the maintainer (Phase 11 ticket 04); model-download authorization is never reused as media-download authorization. automatic_downloads and runtime_network_access stay false: production runs are offline and a missing asset is a typed failure, never a download.",
   "candidates": [
     {
       "candidate_id": "qwen3-asr-1-7b",
@@ -17,22 +17,85 @@
       "license": "Apache-2.0",
       "license_approved": true,
       "usage_restrictions": "None beyond Apache-2.0; credential-free. Upstream weights: Qwen/Qwen3-ASR-1.7B (Apache-2.0).",
-      "revision": "pending-download-plan-pin",
+      "revision": "a8379a2e2f9e313c9292cdf1af4055ab56d50d55",
       "quantization": "8bit",
       "runtime_library": "mlx-audio",
       "runtime_library_version": "0.4.8",
       "offline_runtime": true,
       "credential_required": false,
       "telemetry": false,
-      "planned_local_path": "models/mlx-community/Qwen3-ASR-1.7B-8bit/",
-      "planned_download_size": "2.46 GB",
-      "file_manifest": null,
-      "asset_sha256": null,
-      "dependency_plan": null,
-      "first_download_authorization": null,
-      "verification_status": "unacquired",
+      "file_manifest": [
+        {
+          "path": ".gitattributes",
+          "size": 1519,
+          "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+        },
+        {
+          "path": "README.md",
+          "size": 1008,
+          "sha256": "b356d4bdfbe7287b06b9b5ad084d9557a24ca98ca277a839beb2e682037b08f6"
+        },
+        {
+          "path": "chat_template.json",
+          "size": 1161,
+          "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
+        },
+        {
+          "path": "config.json",
+          "size": 7188,
+          "sha256": "1b76b3b6c655fc54595da025f7a96474ad9fa86363303fbdd61a7d8483ccfaf7"
+        },
+        {
+          "path": "generation_config.json",
+          "size": 142,
+          "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"
+        },
+        {
+          "path": "merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "path": "model.safetensors",
+          "size": 2463307541,
+          "sha256": "bf304b009cc7eca79283056f787b44c952d24ac22cec787b39732bba3c23c13c"
+        },
+        {
+          "path": "model.safetensors.index.json",
+          "size": 78968,
+          "sha256": "0a5d0ec11188602242ff81a9969883d0fdeb98cd5d85cd1413089d897c201af5"
+        },
+        {
+          "path": "preprocessor_config.json",
+          "size": 330,
+          "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 12487,
+          "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"
+        },
+        {
+          "path": "vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ],
+      "asset_sha256": "aa010c938dbd1722034a0d0bb315f92202488bfbfe6ef4b48f3f5207b8e299ee",
+      "dependency_plan": "docs/phase-11-download-plans/qwen3-asr-1-7b.md",
+      "first_download_authorization": {
+        "authorized_by": "maintainer",
+        "authorized_at": "2026-08-16",
+        "scope": "model_download",
+        "separate_from_media_authorization": true,
+        "confirmation": "Each of the seven written download plans was presented to the maintainer individually (per-asset repo, revision, file manifest, size, license, target path), with a per-plan subset/decline option offered; the maintainer authorized all seven before any bytes moved."
+      },
+      "verification_status": "acquired",
       "acquisition_ticket": "phase-11/04-model-download-plans-and-acquisition",
-      "notes": "8-bit first per plan §2.2; 4-bit is the recorded over-envelope fallback. A missing 8-bit variant resolves in this model's download-plan confirmation, never silently."
+      "notes": "8-bit first per plan \u00a72.2; 4-bit is the recorded over-envelope fallback. A missing 8-bit variant resolves in this model's download-plan confirmation, never silently.",
+      "total_size_bytes": 2467859030,
+      "local_path": "models/mlx-community/Qwen3-ASR-1.7B-8bit/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/",
+      "acquisition_method": "hf download --revision"
     },
     {
       "candidate_id": "whisper-large-v3",
@@ -46,22 +109,50 @@
       "license": "MIT",
       "license_approved": true,
       "usage_restrictions": "MLX conversion is MIT; upstream openai/whisper-large-v3 weights are Apache-2.0. Credential-free.",
-      "revision": "pending-download-plan-pin",
+      "revision": "49e6aa286ad60c14352c404340ded53710378a11",
       "quantization": "fp16",
       "runtime_library": "mlx-whisper",
       "runtime_library_version": "0.4.3",
       "offline_runtime": true,
       "credential_required": false,
       "telemetry": false,
-      "planned_local_path": "models/mlx-community/whisper-large-v3-mlx/",
-      "planned_download_size": "3.0 GB",
-      "file_manifest": null,
-      "asset_sha256": null,
-      "dependency_plan": null,
-      "first_download_authorization": null,
-      "verification_status": "unacquired",
+      "file_manifest": [
+        {
+          "path": ".gitattributes",
+          "size": 1519,
+          "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+        },
+        {
+          "path": "README.md",
+          "size": 283,
+          "sha256": "1194c9a3805b7c80adf0017e92c72db0bbb14ab64462eb64d548c1c532b7aa56"
+        },
+        {
+          "path": "config.json",
+          "size": 269,
+          "sha256": "34982ce6ae286095000f82ae9583b3431639e8b092bf60c961f203745e6500e3"
+        },
+        {
+          "path": "weights.npz",
+          "size": 3083520416,
+          "sha256": "05ff791ce3630fae47e7c51004e9666204d786246ec07cac6110af768099b40d"
+        }
+      ],
+      "asset_sha256": "89198670bba2b71b9ddc8563e1fc4a4d3a6698e8ea525950ed1724a474f07784",
+      "dependency_plan": "docs/phase-11-download-plans/whisper-large-v3.md",
+      "first_download_authorization": {
+        "authorized_by": "maintainer",
+        "authorized_at": "2026-08-16",
+        "scope": "model_download",
+        "separate_from_media_authorization": true,
+        "confirmation": "Each of the seven written download plans was presented to the maintainer individually (per-asset repo, revision, file manifest, size, license, target path), with a per-plan subset/decline option offered; the maintainer authorized all seven before any bytes moved."
+      },
+      "verification_status": "acquired",
       "acquisition_ticket": "phase-11/04-model-download-plans-and-acquisition",
-      "notes": "mlx-whisper needs ffmpeg (already identity-pinned in config/tools.json) and supports word timestamps."
+      "notes": "mlx-whisper needs ffmpeg (already identity-pinned in config/tools.json) and supports word timestamps.",
+      "total_size_bytes": 3083522487,
+      "local_path": "models/mlx-community/whisper-large-v3-mlx/49e6aa286ad60c14352c404340ded53710378a11/",
+      "acquisition_method": "hf download --revision"
     },
     {
       "candidate_id": "qwen3-forced-aligner-0-6b",
@@ -75,22 +166,85 @@
       "license": "Apache-2.0",
       "license_approved": true,
       "usage_restrictions": "None beyond Apache-2.0; credential-free. Upstream: Qwen/Qwen3-ForcedAligner-0.6B (Apache-2.0).",
-      "revision": "pending-download-plan-pin",
+      "revision": "0e1a68e91d815300c7c9754b2a7639378b23db15",
       "quantization": "8bit",
       "runtime_library": "mlx-audio",
       "runtime_library_version": "0.4.8",
       "offline_runtime": true,
       "credential_required": false,
       "telemetry": false,
-      "planned_local_path": "models/mlx-community/Qwen3-ForcedAligner-0.6B-8bit/",
-      "planned_download_size": "1.27 GB",
-      "file_manifest": null,
-      "asset_sha256": null,
-      "dependency_plan": null,
-      "first_download_authorization": null,
-      "verification_status": "unacquired",
+      "file_manifest": [
+        {
+          "path": ".gitattributes",
+          "size": 1519,
+          "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+        },
+        {
+          "path": "README.md",
+          "size": 1068,
+          "sha256": "28c8a32f6bb223a4082f6bc38062890abbc1c702b13957388e52465dfdc06a56"
+        },
+        {
+          "path": "chat_template.json",
+          "size": 1161,
+          "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
+        },
+        {
+          "path": "config.json",
+          "size": 6940,
+          "sha256": "8dc126e1a4ac001acb02f3a9ca6277c8a20a25485fde293bc99eeab3aedc604d"
+        },
+        {
+          "path": "generation_config.json",
+          "size": 115,
+          "sha256": "948d089b23bca1d214e768d59c4438365665f52ec6d33678f4062206b3fbbb8c"
+        },
+        {
+          "path": "merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "path": "model.safetensors",
+          "size": 1271924386,
+          "sha256": "be19ef8ac4326d032e7673342930b14c2df30bd68c1632493b0f563e30829f91"
+        },
+        {
+          "path": "model.safetensors.index.json",
+          "size": 79108,
+          "sha256": "766eb50873855eeb4d95ab92def358cfd173bfc8c7aabd8635ababa1edf6db79"
+        },
+        {
+          "path": "preprocessor_config.json",
+          "size": 330,
+          "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 12666,
+          "sha256": "3ab80063f8511deb9566e6ad438d17b7a6277fcffd52d92854112f19d36bd81c"
+        },
+        {
+          "path": "vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ],
+      "asset_sha256": "f567e26b47881fd6603826964517afd35f1a404fd8202eceb1d27169d7f50c36",
+      "dependency_plan": "docs/phase-11-download-plans/qwen3-forced-aligner-0-6b.md",
+      "first_download_authorization": {
+        "authorized_by": "maintainer",
+        "authorized_at": "2026-08-16",
+        "scope": "model_download",
+        "separate_from_media_authorization": true,
+        "confirmation": "Each of the seven written download plans was presented to the maintainer individually (per-asset repo, revision, file manifest, size, license, target path), with a per-plan subset/decline option offered; the maintainer authorized all seven before any bytes moved."
+      },
+      "verification_status": "acquired",
       "acquisition_ticket": "phase-11/04-model-download-plans-and-acquisition",
-      "notes": "Shares the mlx-audio runtime with asr_primary. Aligner has a hard input window; VAD-derived <=5-minute chunking (ticket 06) is the shared upstream."
+      "notes": "Shares the mlx-audio runtime with asr_primary. Aligner has a hard input window; VAD-derived <=5-minute chunking (ticket 06) is the shared upstream.",
+      "total_size_bytes": 1276475979,
+      "local_path": "models/mlx-community/Qwen3-ForcedAligner-0.6B-8bit/0e1a68e91d815300c7c9754b2a7639378b23db15/",
+      "acquisition_method": "hf download --revision"
     },
     {
       "candidate_id": "silero-vad",
@@ -112,17 +266,28 @@
       "credential_required": false,
       "telemetry": false,
       "vendored": true,
-      "planned_local_path": "models/snakers4/silero-vad/v6.2.1/",
-      "planned_download_size": "~2 MB",
       "file_manifest": [
-        "src/silero_vad/data/silero_vad.onnx"
+        {
+          "path": "silero_vad.onnx",
+          "size": 2327524,
+          "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+        }
       ],
-      "asset_sha256": null,
-      "dependency_plan": null,
-      "first_download_authorization": null,
-      "verification_status": "unacquired",
+      "asset_sha256": "0898f9226ecd53bbc80e54b9511c9047ae66c9e5ec13c7dc822195e7fc1dc1d6",
+      "dependency_plan": "docs/phase-11-download-plans/silero-vad.md",
+      "first_download_authorization": {
+        "authorized_by": "maintainer",
+        "authorized_at": "2026-08-16",
+        "scope": "model_download",
+        "separate_from_media_authorization": true,
+        "confirmation": "Each of the seven written download plans was presented to the maintainer individually (per-asset repo, revision, file manifest, size, license, target path), with a per-plan subset/decline option offered; the maintainer authorized all seven before any bytes moved."
+      },
+      "verification_status": "acquired",
       "acquisition_ticket": "phase-11/04-model-download-plans-and-acquisition",
-      "notes": "Vendored .onnx carried directly (pinned by v6.2.1 git tag + file sha256), inferred through onnxruntime; the silero-vad pip package is NOT installed, keeping the whole torch stack out. onnxruntime is shared with diarization and ocr_primary."
+      "notes": "Vendored .onnx carried directly (pinned by v6.2.1 git tag + file sha256), inferred through onnxruntime; the silero-vad pip package is NOT installed, keeping the whole torch stack out. onnxruntime is shared with diarization and ocr_primary.",
+      "total_size_bytes": 2327524,
+      "local_path": "models/snakers4/silero-vad/v6.2.1/",
+      "acquisition_method": "pinned raw.githubusercontent.com URL (git tag v6.2.1)"
     },
     {
       "candidate_id": "sherpa-onnx-pyannote-segmentation-3-0",
@@ -136,22 +301,85 @@
       "license": "MIT",
       "license_approved": true,
       "usage_restrictions": "pyannote/segmentation-3.0 model card is MIT ('will always remain open-source'); the ONNX conversion is distributed as a credential-free sherpa-onnx release asset. No credentials, no paid service.",
-      "revision": "pending-download-plan-pin",
+      "revision": "speaker-segmentation-models",
       "quantization": "not_applicable",
       "runtime_library": "sherpa-onnx",
       "runtime_library_version": "1.13.5",
       "offline_runtime": true,
       "credential_required": false,
       "telemetry": false,
-      "planned_local_path": "models/k2-fsa/sherpa-onnx-pyannote-segmentation-3-0/",
-      "planned_download_size": "~7 MB",
-      "file_manifest": null,
-      "asset_sha256": null,
-      "dependency_plan": null,
-      "first_download_authorization": null,
-      "verification_status": "unacquired",
+      "file_manifest": [
+        {
+          "path": "LICENSE",
+          "size": 1061,
+          "sha256": "14d7016ad68e7394d6e6b78d96cc2ae431c905287b89674cfdf021e79e62b8ba"
+        },
+        {
+          "path": "README.md",
+          "size": 115,
+          "sha256": "0380ed76a50efcc421dc62f251ed06e8349688466beac3177bee6e00dc336bfc"
+        },
+        {
+          "path": "export-onnx.py",
+          "size": 3953,
+          "sha256": "21df426fc6ca2ad54b5c9e114729990e0a669d602ea4e052f38287f99d32c0b0"
+        },
+        {
+          "path": "model.int8.onnx",
+          "size": 1540506,
+          "sha256": "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d"
+        },
+        {
+          "path": "model.onnx",
+          "size": 5992913,
+          "sha256": "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079"
+        },
+        {
+          "path": "run.sh",
+          "size": 1985,
+          "sha256": "5844c56ec90b29d0f01056f81e3f66f84ed4ef598bfc8705f86cd290d73138b3"
+        },
+        {
+          "path": "show-onnx.py",
+          "size": 857,
+          "sha256": "ace74dd3749e345cfac03a2d869830a99e7425ebc100545d7e8b2b95568ee575"
+        },
+        {
+          "path": "speaker-diarization-onnx.py",
+          "size": 15204,
+          "sha256": "51e301c2d02c87351a22582e51e883d4f18e4755d193587e69e1fd7f357132e7"
+        },
+        {
+          "path": "speaker-diarization-torch.py",
+          "size": 2306,
+          "sha256": "72f9fa5dd9f4966869acf79ef3b1328398434c70373f462d373895757aa0fae7"
+        },
+        {
+          "path": "vad-onnx.py",
+          "size": 6883,
+          "sha256": "4fbd5d74faf7bb34133f3268d1f184f9a43bfa3e3220acf1dbec7e9bef41e848"
+        },
+        {
+          "path": "vad-torch.py",
+          "size": 1029,
+          "sha256": "ecd6d40be0229624b7a312a1e2a3cffddeaf432706395df26c76fe588bf8dc66"
+        }
+      ],
+      "asset_sha256": "6f071d8c3ca7a66185e751a95efc0fde645b73d0844b36e686552e0280ddecc0",
+      "dependency_plan": "docs/phase-11-download-plans/sherpa-onnx-pyannote-segmentation-3-0.md",
+      "first_download_authorization": {
+        "authorized_by": "maintainer",
+        "authorized_at": "2026-08-16",
+        "scope": "model_download",
+        "separate_from_media_authorization": true,
+        "confirmation": "Each of the seven written download plans was presented to the maintainer individually (per-asset repo, revision, file manifest, size, license, target path), with a per-plan subset/decline option offered; the maintainer authorized all seven before any bytes moved."
+      },
+      "verification_status": "acquired",
       "acquisition_ticket": "phase-11/04-model-download-plans-and-acquisition",
-      "notes": "First of two diarization assets that fill the recorded Diarization capability vacancy. Speaker labels stay anonymous and Part-local (no true names). Pairs with 3dspeaker-campplus-zh-en-advanced. Excludes credential-gated pyannote hub access; runs via onnxruntime under sherpa-onnx."
+      "notes": "First of two diarization assets that fill the recorded Diarization capability vacancy. Speaker labels stay anonymous and Part-local (no true names). Pairs with 3dspeaker-campplus-zh-en-advanced. Excludes credential-gated pyannote hub access; runs via onnxruntime under sherpa-onnx.",
+      "total_size_bytes": 7566812,
+      "local_path": "models/k2-fsa/sherpa-onnx-pyannote-segmentation-3-0/speaker-segmentation-models/",
+      "acquisition_method": "pinned GitHub release asset URL"
     },
     {
       "candidate_id": "3dspeaker-campplus-zh-en-advanced",
@@ -165,22 +393,35 @@
       "license": "Apache-2.0",
       "license_approved": true,
       "usage_restrictions": "Apache-2.0 confirmed via the ModelScope API; distributed as a credential-free sherpa-onnx release asset. No credentials, no paid service.",
-      "revision": "pending-download-plan-pin",
+      "revision": "speaker-recongition-models",
       "quantization": "not_applicable",
       "runtime_library": "sherpa-onnx",
       "runtime_library_version": "1.13.5",
       "offline_runtime": true,
       "credential_required": false,
       "telemetry": false,
-      "planned_local_path": "models/k2-fsa/3dspeaker-campplus-zh-en-advanced/",
-      "planned_download_size": "~28 MB",
-      "file_manifest": null,
-      "asset_sha256": null,
-      "dependency_plan": null,
-      "first_download_authorization": null,
-      "verification_status": "unacquired",
+      "file_manifest": [
+        {
+          "path": "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+          "size": 28281164,
+          "sha256": "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2"
+        }
+      ],
+      "asset_sha256": "6149b3fa977ff2befe157ce009a03b2b37fb2258fe5032b3e2ccdc37d0067db8",
+      "dependency_plan": "docs/phase-11-download-plans/3dspeaker-campplus-zh-en-advanced.md",
+      "first_download_authorization": {
+        "authorized_by": "maintainer",
+        "authorized_at": "2026-08-16",
+        "scope": "model_download",
+        "separate_from_media_authorization": true,
+        "confirmation": "Each of the seven written download plans was presented to the maintainer individually (per-asset repo, revision, file manifest, size, license, target path), with a per-plan subset/decline option offered; the maintainer authorized all seven before any bytes moved."
+      },
+      "verification_status": "acquired",
       "acquisition_ticket": "phase-11/04-model-download-plans-and-acquisition",
-      "notes": "Second of two diarization assets. zh+en embedding chosen for the mixed-language corpus; paired with sherpa-onnx-pyannote-segmentation-3-0 and clustering."
+      "notes": "Second of two diarization assets. zh+en embedding chosen for the mixed-language corpus; paired with sherpa-onnx-pyannote-segmentation-3-0 and clustering.",
+      "total_size_bytes": 28281164,
+      "local_path": "models/k2-fsa/3dspeaker-campplus-zh-en-advanced/speaker-recongition-models/",
+      "acquisition_method": "pinned GitHub release asset URL"
     },
     {
       "candidate_id": "rapidocr",
@@ -202,15 +443,49 @@
       "offline_runtime": true,
       "credential_required": false,
       "telemetry": false,
-      "planned_local_path": "bundled-in-wheel",
-      "planned_download_size": "27.3 MB (wheel)",
-      "file_manifest": null,
-      "asset_sha256": null,
-      "dependency_plan": null,
-      "first_download_authorization": null,
-      "verification_status": "unacquired",
+      "file_manifest": [
+        {
+          "path": ".gitkeep",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "PP-OCRv6_det_small.onnx",
+          "size": 9929594,
+          "sha256": "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f"
+        },
+        {
+          "path": "PP-OCRv6_rec_small.onnx",
+          "size": 21234383,
+          "sha256": "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884"
+        },
+        {
+          "path": "ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+          "size": 585532,
+          "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c"
+        }
+      ],
+      "asset_sha256": "b074b483b736e064d9d09805e395e64da3abde87a27d7deb3fc127f1b5026ce3",
+      "dependency_plan": "docs/phase-11-download-plans/rapidocr.md",
+      "first_download_authorization": {
+        "authorized_by": "maintainer",
+        "authorized_at": "2026-08-16",
+        "scope": "model_download",
+        "separate_from_media_authorization": true,
+        "confirmation": "Recorded from the pinned rapidocr==3.9.2 wheel (no separate download): the three default det/cls/rec models ship inside the wheel, confirmed against the wheel's dist-info RECORD (hashes and sizes match this manifest). License and official source approved by the maintainer 2026-08-16."
+      },
+      "verification_status": "acquired",
       "acquisition_ticket": "phase-11/04-model-download-plans-and-acquisition",
-      "notes": "Model ships inside the pinned rapidocr==3.9.2 wheel (no separate model download); the registry entry records the wheel version and the bundled model files are hashed at acquisition (ticket 11). onnxruntime CPU EP is sufficient. Supersedes the pre-Phase-11 metadata-only research-candidate state now that license and source are approved."
+      "notes": "Model ships inside the pinned rapidocr==3.9.2 wheel (no separate model download); the registry entry records the wheel version and the bundled model files are hashed at acquisition (ticket 11). onnxruntime CPU EP is sufficient. Supersedes the pre-Phase-11 metadata-only research-candidate state now that license and source are approved.",
+      "total_size_bytes": 31749509,
+      "local_path": "bundled-in-wheel",
+      "acquisition_method": "bundled in pinned rapidocr==3.9.2 wheel (no separate download)",
+      "default_models": {
+        "det": "PP-OCRv6_det_small.onnx",
+        "cls": "ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+        "rec": "PP-OCRv6_rec_small.onnx"
+      },
+      "wheel_record_verified": true
     },
     {
       "candidate_id": "qwen3-4b-instruct-2507-8bit",
@@ -224,22 +499,96 @@
       "license": "Apache-2.0",
       "license_approved": true,
       "usage_restrictions": "None beyond Apache-2.0; credential-free. Upstream: Qwen/Qwen3-4B-Instruct-2507 (Apache-2.0).",
-      "revision": "pending-download-plan-pin",
+      "revision": "0e42af58449718de7931ee04f28191fbe6c43a56",
       "quantization": "8bit",
       "runtime_library": "mlx-lm",
       "runtime_library_version": "0.31.3",
       "offline_runtime": true,
       "credential_required": false,
       "telemetry": false,
-      "planned_local_path": "models/mlx-community/Qwen3-4B-Instruct-2507-8bit/",
-      "planned_download_size": "resolved at download plan",
-      "file_manifest": null,
-      "asset_sha256": null,
-      "dependency_plan": null,
-      "first_download_authorization": null,
-      "verification_status": "unacquired",
+      "file_manifest": [
+        {
+          "path": ".gitattributes",
+          "size": 1570,
+          "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"
+        },
+        {
+          "path": "README.md",
+          "size": 969,
+          "sha256": "b17c27fd7d46102671a3c2bda435b4c1073b080cb13572aeea5f477a8082b731"
+        },
+        {
+          "path": "added_tokens.json",
+          "size": 707,
+          "sha256": "c0284b582e14987fbd3d5a2cb2bd139084371ed9acbae488829a1c900833c680"
+        },
+        {
+          "path": "chat_template.jinja",
+          "size": 4040,
+          "sha256": "40c21f34cf67d8c760ef72f8ad3ae5afad514299d4b06e91dd9a8d705af7b541"
+        },
+        {
+          "path": "config.json",
+          "size": 938,
+          "sha256": "68ce9c3e88935e44b3d9388317f021b90c52cb799b868a361d12857bd1b3b80b"
+        },
+        {
+          "path": "generation_config.json",
+          "size": 238,
+          "sha256": "835fffe355c9438e7a25be099b3fccaa98350b83451f9fd2d99512e74f1ade48"
+        },
+        {
+          "path": "merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "path": "model.safetensors",
+          "size": 4274158989,
+          "sha256": "a6d98b6b22bd3928f0a9e38aea84c085e678bba1e03d028f21cbf6e0f6ed9f2c"
+        },
+        {
+          "path": "model.safetensors.index.json",
+          "size": 63964,
+          "sha256": "4280602bc990ad062cb84fc5027f22567b5f3c7f22c10bf5860482c420c4b5ae"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "size": 613,
+          "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd"
+        },
+        {
+          "path": "tokenizer.json",
+          "size": 11422654,
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 5404,
+          "sha256": "355f2b4e5bad7b01f11ef6cb68ebc176f61b95c3276092ea225b1bea0e01e95c"
+        },
+        {
+          "path": "vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ],
+      "asset_sha256": "2a1b7ba81037c15882e233f7a1e40dd41251d51fb4afac48a164a3cc61e479e2",
+      "dependency_plan": "docs/phase-11-download-plans/qwen3-4b-instruct-2507-8bit.md",
+      "first_download_authorization": {
+        "authorized_by": "maintainer",
+        "authorized_at": "2026-08-16",
+        "scope": "model_download",
+        "separate_from_media_authorization": true,
+        "confirmation": "Each of the seven written download plans was presented to the maintainer individually (per-asset repo, revision, file manifest, size, license, target path), with a per-plan subset/decline option offered; the maintainer authorized all seven before any bytes moved."
+      },
+      "verification_status": "acquired",
       "acquisition_ticket": "phase-11/04-model-download-plans-and-acquisition",
-      "notes": "8-bit first per plan §2.2; the research-recommended 4-bit (2.26 GB) is the recorded fallback. A missing 8-bit variant resolves in this model's download-plan confirmation, never silently. Runs with deterministic sampling (mlx-lm --temp/--seed) and bounded KV memory (ticket 10)."
+      "notes": "8-bit first per plan \u00a72.2; the research-recommended 4-bit (2.26 GB) is the recorded fallback. A missing 8-bit variant resolves in this model's download-plan confirmation, never silently. Runs with deterministic sampling (mlx-lm --temp/--seed) and bounded KV memory (ticket 10).",
+      "total_size_bytes": 4290108772,
+      "local_path": "models/mlx-community/Qwen3-4B-Instruct-2507-8bit/0e42af58449718de7931ee04f28191fbe6c43a56/",
+      "acquisition_method": "hf download --revision"
     }
-  ]
+  ],
+  "acquired_count": 8
 }
