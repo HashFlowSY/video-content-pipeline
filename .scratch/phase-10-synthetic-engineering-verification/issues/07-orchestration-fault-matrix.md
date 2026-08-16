@@ -21,14 +21,56 @@ torn-latest-pointer cells explicitly. Genuine bugs the matrix exposes are
 fixed in this ticket.
 
 **Blocked by:** 02
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Golden run enumerates N; matrix executes all N × 3 cells + control-file cells
-- [ ] Recorded-N assertion present (new write sites fail loudly)
-- [ ] All five invariants asserted in every cell
-- [ ] Corrupt/truncated control file halts safely (production fix if needed)
-- [ ] Matrix wall time fits the ≤ 5-minute full-suite budget
-- [ ] Suite green; ruff/mypy clean
+- [x] Golden run enumerates N; matrix executes all N × 3 cells + control-file cells
+- [x] Recorded-N assertion present (new write sites fail loudly)
+- [x] All five invariants asserted in every cell
+- [x] Corrupt/truncated control file halts safely (production fix if needed)
+- [x] Matrix wall time fits the ≤ 5-minute full-suite budget
+- [x] Suite green; ruff/mypy clean
 
 ## Comments
+
+Done in `26e2f06` (2026-08-16). New `tests/integration/test_phase_10_fault_matrix.py`
+(74 tests, marked `faultmatrix/integration/slow`). One micro run scenario
+(single Part, subtitle-first, completing fake executor) drives the real
+`execute_confirmed_run`/`resume_and_finalize`; the ticket-02
+`DurableIoInterceptor` redirects the four `durable_io` primitives on the five
+orchestration modules that import them. A golden run counts every durable write
+in order (N = 23) and asserts it against `RECORDED_DURABLE_WRITE_COUNT`, so a
+new persistence call site changes N and fails the golden-run test loudly
+(updating the constant is the review act).
+
+Matrix = every write position `k` in 1..N × {process death, exhausted disk,
+torn write} = 69 cells, plus golden + 2 control-file + ENOSPC-during-publish +
+torn-latest-pointer = 74. Every cell asserts: (a) `diagnose_run` classifies the
+wreck read-only (returns a diagnosis, or raises the one controlled
+`heavy_task_lock_unreadable` reason for a crash mid lock-claim) with state /
+journal / lock bytes untouched; (b) the run ends in exactly one safe shape —
+already terminal, resumed to a published terminal bundle, or failed in-loop
+into a Minimal RunBundle — never a wedged third outcome (a survivable ENOSPC
+becomes a published `failed` bundle; process death, a torn write, or a full
+disk on the run's own state/journal is a genuine crash resume recovers); (c)
+`outputs/` and `latest.json` are only ever absent or fully valid (atomic rename
+/ atomic replace); (d) resume never re-executes a checkpointed unit; (e) a
+resumed crash leaves no `run-state.json.tmp`, reads its journal back strictly,
+and journals the recovery. Invariants (d)/(e) are resume-properties, so they are
+vacuous and skipped on the terminal / not-resumable branch (noted in the helper).
+
+Two genuine gaps the matrix exposed were fixed in the same commit, both keeping
+the "every failure carries a machine-readable reason the CLI catches" contract:
+`run_control._read_request` now also catches `UnicodeDecodeError` (a garbage
+non-UTF-8 control request had leaked a bare decode error instead of
+`control_request_unreadable`); and `publication` now wraps ENOSPC on the staging
+writes, the post-rename directory fsync, and the latest-pointer replace into a
+`PublicationError` (`staging_write_failed` / `publish_fsync_failed` /
+`latest_pointer_write_failed`) instead of a bare `OSError` the CLI does not
+catch. Outputs stay atomically safe either way.
+
+Full suite 1285 green (~9s, within the ≤5-min budget); ruff + ruff format +
+mypy(src) clean. Two-axis code review clean — standards: no documented-standard
+violations (one judgement-call on three similar publish wrappers, kept for their
+distinct reasons/rationale); spec: satisfies the ticket, the only note being the
+(d)/(e) resume-scoping now made explicit in the helper.
