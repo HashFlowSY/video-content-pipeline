@@ -17,11 +17,13 @@ from video_content_pipeline.planning import (
     ThreePointEstimate,
     build_full_decode_command,
     confirm_run_plan,
+    confirmed_plan_matches,
     create_plan_report,
     estimate_full_decode,
     load_decode_measurements,
     load_decode_throughput_profile,
     load_plan_report,
+    load_run_plan,
     perform_full_decode_validation,
     persist_plan_report,
     planning_configuration_fingerprint,
@@ -29,6 +31,19 @@ from video_content_pipeline.planning import (
     revalidate_report,
 )
 from video_content_pipeline.probe import ProbeDocument
+from video_content_pipeline.run_choices import (
+    COLLECTION_SCOPE,
+    KEY_ASR_MODE,
+    KEY_ENHANCEMENT_CUE,
+    KEY_VISUAL_TEXT_ENABLED,
+    STAGE_ENHANCEMENT,
+    STAGE_RUN,
+    AsrMode,
+    ChoiceProvenance,
+    RunChoice,
+    RunPlanChoices,
+    missing_required_choices,
+)
 from video_content_pipeline.source import SourceArtifact, sha256_file
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 
@@ -412,3 +427,108 @@ def test_full_decode_start_failure_is_reported_as_a_planning_diagnostic(
         perform_full_decode_validation(ffmpeg, artifact)
 
     assert error.value.reason == "full_decode_failed"
+
+
+def _ready_report_with_choices(
+    tmp_path: Path, choices: RunPlanChoices
+) -> tuple[SourceArtifact, planning.PlanReport]:
+    artifact = _artifact(tmp_path)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=_write_planning_configuration(tmp_path),
+        inspection_evidence=(_inspection(artifact),),
+        run_choices=choices,
+    )
+    return artifact, report
+
+
+def _mode_choices(mode: AsrMode, *, visual: bool = False) -> tuple[RunChoice, ...]:
+    return (
+        RunChoice(
+            STAGE_RUN, KEY_ASR_MODE, COLLECTION_SCOPE, mode.value, ChoiceProvenance.USER_CHOSEN
+        ),
+        RunChoice(
+            STAGE_RUN,
+            KEY_VISUAL_TEXT_ENABLED,
+            COLLECTION_SCOPE,
+            "true" if visual else "false",
+            ChoiceProvenance.RECOMMENDED_AND_CONFIRMED,
+        ),
+    )
+
+
+def test_confirmed_plan_carries_and_persists_front_loaded_choices(tmp_path: Path) -> None:
+    choices = RunPlanChoices.build(_mode_choices(AsrMode.FULL_ASR))
+    _, report = _ready_report_with_choices(tmp_path, choices)
+
+    plan = confirm_run_plan(report, tmp_path, tmp_path / "plans")
+    reloaded = load_run_plan(tmp_path / "plans" / plan.plan_id / "run-plan.json")
+
+    assert plan.run_choices == choices
+    assert reloaded.run_choices == choices
+    assert confirmed_plan_matches(report, plan)
+
+
+def test_changing_a_choice_requires_a_new_plan(tmp_path: Path) -> None:
+    first_report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(_artifact(tmp_path),),
+        tools=(),
+        planned_increment_bytes=5,
+        configuration_fingerprint=_write_planning_configuration(tmp_path),
+        inspection_evidence=(_inspection(_artifact_reuse(tmp_path)),),
+        run_choices=RunPlanChoices.build(_mode_choices(AsrMode.FULL_ASR)),
+    )
+    second_report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(_artifact_reuse(tmp_path),),
+        tools=(),
+        planned_increment_bytes=5,
+        configuration_fingerprint=planning_configuration_fingerprint(tmp_path),
+        inspection_evidence=(_inspection(_artifact_reuse(tmp_path)),),
+        run_choices=RunPlanChoices.build(_mode_choices(AsrMode.SUBTITLE_FIRST)),
+    )
+
+    first_plan = confirm_run_plan(first_report, tmp_path, tmp_path / "plans")
+    second_plan = confirm_run_plan(second_report, tmp_path, tmp_path / "plans")
+
+    assert first_plan.plan_id != second_plan.plan_id
+    assert not confirmed_plan_matches(first_report, second_plan)
+
+
+def test_plan_missing_a_required_choice_is_still_confirmable(tmp_path: Path) -> None:
+    # ASR mode is enhancement but no enhancement scope is front-loaded: still
+    # confirmable, and the gap is machine-detectable for a Run decision pause.
+    choices = RunPlanChoices.build(_mode_choices(AsrMode.ENHANCEMENT))
+    _, report = _ready_report_with_choices(tmp_path, choices)
+
+    plan = confirm_run_plan(report, tmp_path, tmp_path / "plans")
+
+    gaps = missing_required_choices(plan.run_choices)
+    assert (tmp_path / "plans" / plan.plan_id / "run-plan.json").is_file()
+    assert any(gap.stage == STAGE_ENHANCEMENT for gap in gaps)
+
+
+def test_front_loaded_enhancement_scope_closes_the_gap(tmp_path: Path) -> None:
+    choices = RunPlanChoices.build(
+        (
+            *_mode_choices(AsrMode.ENHANCEMENT),
+            RunChoice(
+                STAGE_ENHANCEMENT, KEY_ENHANCEMENT_CUE, "part-a", "3", ChoiceProvenance.USER_CHOSEN
+            ),
+        )
+    )
+    _, report = _ready_report_with_choices(tmp_path, choices)
+
+    plan = confirm_run_plan(report, tmp_path, tmp_path / "plans")
+
+    assert missing_required_choices(plan.run_choices) == ()
+
+
+def _artifact_reuse(tmp_path: Path) -> SourceArtifact:
+    media = tmp_path / "input" / "hash" / "media"
+    digest, byte_count = sha256_file(media)
+    return SourceArtifact(digest, digest, byte_count, media)

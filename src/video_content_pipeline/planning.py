@@ -21,6 +21,7 @@ from video_content_pipeline.external_tools import (
     run_tool,
 )
 from video_content_pipeline.inspection import PlanInspectionEvidence
+from video_content_pipeline.run_choices import RunPlanChoices
 from video_content_pipeline.source import (
     DiskHeadroom,
     SourceArtifact,
@@ -122,6 +123,7 @@ class PlanReport:
     url_authorizations: tuple[URLAuthorizationEvidence, ...] = ()
     inspection_evidence: tuple[PlanInspectionEvidence, ...] = ()
     parent_report_id: str | None = None
+    run_choices: RunPlanChoices = RunPlanChoices(())
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -142,6 +144,7 @@ class PlanReport:
             "decode_estimate": self.decode_estimate.as_json() if self.decode_estimate else None,
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
             "inspection_evidence": [evidence.as_json() for evidence in self.inspection_evidence],
+            "run_choices": self.run_choices.as_json(),
             "future_stages": {"status": "unavailable/not_estimated"},
         }
 
@@ -158,6 +161,7 @@ class RunPlan:
     configuration_fingerprint: str
     url_authorizations: tuple[URLAuthorizationEvidence, ...] = ()
     inspection_evidence_fingerprints: tuple[tuple[str, str], ...] = ()
+    run_choices: RunPlanChoices = RunPlanChoices(())
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -178,6 +182,7 @@ class RunPlan:
                 {"source_id": source_id, "sha256": sha256}
                 for source_id, sha256 in self.inspection_evidence_fingerprints
             ],
+            "run_choices": self.run_choices.as_json(),
         }
 
 
@@ -325,6 +330,7 @@ def create_plan_report(
     url_authorizations: tuple[URLAuthorizationEvidence, ...] = (),
     inspection_evidence: tuple[PlanInspectionEvidence, ...] = (),
     parent_report_id: str | None = None,
+    run_choices: RunPlanChoices = RunPlanChoices(()),
 ) -> PlanReport:
     """Build one new immutable report without embedding raw URL inputs."""
 
@@ -341,6 +347,7 @@ def create_plan_report(
         url_authorizations=url_authorizations,
         inspection_evidence=inspection_evidence,
         parent_report_id=parent_report_id,
+        run_choices=run_choices,
     )
 
 
@@ -466,6 +473,7 @@ def load_plan_report(path: Path) -> PlanReport:
             parent_report_id=decoded.get("parent_report_id")
             if isinstance(decoded.get("parent_report_id"), str)
             else None,
+            run_choices=RunPlanChoices.from_json(decoded.get("run_choices", {})),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise PlanningError("plan_report_invalid", "PlanReport has an invalid schema.") from error
@@ -527,6 +535,7 @@ def load_run_plan(path: Path) -> RunPlan:
             inspection_evidence_fingerprints=_inspection_evidence_fingerprints_from_json(
                 decoded.get("inspection_evidence_fingerprints", [])
             ),
+            run_choices=RunPlanChoices.from_json(decoded.get("run_choices", {})),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise PlanningError("run_plan_not_confirmed", "RunPlan has an invalid schema.") from error
@@ -662,6 +671,7 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
         inspection_evidence_fingerprints=inspection_evidence_fingerprints(
             report.inspection_evidence
         ),
+        run_choices=report.run_choices,
     )
     _write_json_once(plans_root / plan.plan_id / "run-plan.json", plan.as_json())
     return plan
@@ -716,6 +726,7 @@ def confirmed_plan_matches(confirmed_report: PlanReport, plan: RunPlan) -> bool:
         and confirmed_report.disk_headroom == plan.disk_headroom
         and confirmed_report.configuration_fingerprint == plan.configuration_fingerprint
         and confirmed_report.url_authorizations == plan.url_authorizations
+        and confirmed_report.run_choices == plan.run_choices
     )
 
 
