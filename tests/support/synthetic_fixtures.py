@@ -1,7 +1,7 @@
 """Synthetic media fixture generator for the Phase 10 engineering twin.
 
 Phase 10 verifies the pipeline against *synthetic* media that mirrors, one for
-one, the mandatory real-video branches Phase 11 will exercise against real
+one, the mandatory real-video branches Phase 12 will exercise against real
 media. This module turns versioned :class:`FixtureRecipe` records into tiny media
 files (seconds long, ~160x120) using the host ffmpeg identity-pinned in
 ``config/tools.json``. The files are generated once per test session into a
@@ -123,7 +123,7 @@ class MediaBuild:
 
 @dataclass(frozen=True)
 class FixtureRecipe:
-    """A versioned recipe for one Phase 11 branch's synthetic twin."""
+    """A versioned recipe for one Phase 12 branch's synthetic twin."""
 
     fixture_id: str
     description: str
@@ -165,7 +165,7 @@ _ORDINARY_SUBTITLES = (
 )
 
 #: Rolling repeats (a growing prefix, then an exact duplicate) and drifting,
-#: overlapping timestamps — the anomalous subtitle shape Phase 11's anomalous
+#: overlapping timestamps — the anomalous subtitle shape Phase 12's anomalous
 #: real-video branch must survive.
 _ANOMALOUS_SUBTITLES = (
     "1\n"
@@ -286,7 +286,7 @@ def _visual_text_argv(duration: int) -> tuple[str, ...]:
     )
 
 
-#: The five branches, mirroring Phase 11's mandatory real-video branches one for
+#: The five branches, mirroring Phase 12's mandatory real-video branches one for
 #: one. Streams are recorded sorted so probe assertions are order-independent.
 FIXTURE_RECIPES: tuple[FixtureRecipe, ...] = (
     FixtureRecipe(

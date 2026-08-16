@@ -1,7 +1,7 @@
 """Ticket 03: real-tool integration proof for the synthetic fixture generator.
 
 These tests execute the pinned host ffmpeg/ffprobe for real: they build the five
-Phase 11 branch twins once per session and probe each with real ffprobe, so the
+Phase 12 branch twins once per session and probe each with real ffprobe, so the
 probed structure is checked against every recipe's declared expectation. They
 also pin the two non-negotiable boundary behaviours — the toolchain identity
 check *errors* (never skips) on a fake ``tools.json``, and generation is

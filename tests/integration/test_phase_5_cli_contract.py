@@ -392,6 +392,66 @@ def test_analyze_audio_ignores_registered_transcription_capabilities(
     assert registered_ids == {"silero-vad"}
 
 
+def test_analyze_audio_reports_registered_diarization_candidates_still_requiring_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _confirmed_plan(tmp_path)
+    subtitle_report = _retained_subtitle_report(tmp_path, plan)
+    registry_path = tmp_path / "models" / "registry.json"
+    registry_path.parent.mkdir()
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "candidates": [
+                    {
+                        "candidate_id": "sherpa-onnx-pyannote-segmentation-3-0",
+                        "capability": "diarization",
+                        "official_source": {
+                            "url": "https://github.com/k2-fsa/sherpa-onnx",
+                            "approved": True,
+                        },
+                        "license": "MIT",
+                        "license_approved": True,
+                        "revision": "pending-download-plan-pin",
+                    },
+                    {
+                        "candidate_id": "3dspeaker-campplus-zh-en-advanced",
+                        "capability": "diarization",
+                        "official_source": {
+                            "url": "https://github.com/k2-fsa/sherpa-onnx",
+                            "approved": True,
+                        },
+                        "license": "Apache-2.0",
+                        "license_approved": True,
+                        "revision": "pending-download-plan-pin",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _configure_cli(tmp_path, monkeypatch)
+
+    assert cli.main(["analyze-audio", plan.plan_id, subtitle_report.report_id, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+
+    # Diarization is optional: a non-empty candidate set of not-yet-acquired
+    # candidates keeps it at model_acquisition_required rather than surfacing the
+    # model_ineligible detail the shared aggregation would otherwise report.
+    diarization = next(
+        capability
+        for capability in report["capabilities"]
+        if capability["capability"] == "diarization"
+    )
+    assert diarization["state"] == "model_acquisition_required"
+    assert [candidate["candidate_id"] for candidate in diarization["candidates"]] == [
+        "sherpa-onnx-pyannote-segmentation-3-0",
+        "3dspeaker-campplus-zh-en-advanced",
+    ]
+    assert all(candidate["state"] != "eligible" for candidate in diarization["candidates"])
+
+
 def test_analyze_audio_retains_controlled_adapter_and_calibration_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

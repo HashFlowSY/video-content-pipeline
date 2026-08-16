@@ -15,19 +15,20 @@ call the five real-video branches "Phase 11" to "Phase 12" (historical
 inventories/reports untouched by policy).
 
 **Blocked by:** —
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Plan amendment committed; only the four amended spots differ from
-      the pre-amendment plan text
-- [ ] Every registry candidate carries capability, source, license,
+- [x] Plan amendment committed; only the four amended spots differ from
+      the pre-amendment plan text (landed with the spec commit `6099f9d`:
+      §2.2/§15.1 envelope 24→12 GiB, new 阶段 11 inserted, 阶段 12 renumber)
+- [x] Every registry candidate carries capability, source, license,
       license approval state, and (for unacquired assets) the fields that
       keep it ineligible until acquisition
-- [ ] Registry schema/eligibility tests updated for the new candidates;
+- [x] Registry schema/eligibility tests updated for the new candidates;
       diarization capability no longer reports an empty candidate set
       (still `model_acquisition_required`)
-- [ ] yt-dlp entry in `config/tools.json` carries binary_sha256,
+- [x] yt-dlp entry in `config/tools.json` carries binary_sha256,
       resolved_path, version_identity, probed_at for this machine
-- [ ] No living code/comment refers to real-video testing as Phase 11;
+- [x] No living code/comment refers to real-video testing as Phase 11;
       historical docs unchanged
-- [ ] Full suite green; no download of any kind occurred
+- [x] Full suite green (1340 passed); no download of any kind occurred

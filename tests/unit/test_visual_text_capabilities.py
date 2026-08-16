@@ -97,9 +97,10 @@ def test_missing_registry_requires_acquisition(tmp_path: Path) -> None:
     assert document["guarantees"] == _OFFLINE_GUARANTEES
 
 
-def test_repo_registry_registers_rapidocr_as_metadata_only_research_candidate() -> None:
-    # Criterion 2: RapidOCR is registered in the real repository registry as a
-    # research candidate -- metadata only, so it is not eligible for execution
+def test_repo_registry_records_rapidocr_license_and_source_approval() -> None:
+    # Phase 11 ticket 01: RapidOCR's 2026-08-16 license/source approval is now
+    # recorded in the real repository registry, but the wheel-bundled model bytes
+    # are not yet pinned -- so it stays metadata only, not eligible for execution,
     # and the result stays model_acquisition_required (no download, no run).
     document = evaluate_ocr_capabilities(REPO_ROOT).as_json()
 
@@ -107,6 +108,8 @@ def test_repo_registry_registers_rapidocr_as_metadata_only_research_candidate() 
     candidate_ids = [candidate["candidate_id"] for candidate in ocr_primary["candidates"]]
     assert "rapidocr" in candidate_ids
     rapidocr = next(c for c in ocr_primary["candidates"] if c["candidate_id"] == "rapidocr")
+    assert rapidocr["eligibility_evidence"]["license_approved"] is True
+    assert rapidocr["eligibility_evidence"]["official_source"]["approved"] is True
     assert rapidocr["state"] != "eligible"
     assert rapidocr["model_identity"] is None
     assert document["result"] == "model_acquisition_required"

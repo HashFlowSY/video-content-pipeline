@@ -43,8 +43,14 @@
       "id": "yt-dlp",
       "path": "/opt/homebrew/bin/yt-dlp",
       "version": "2026.07.04",
-      "status": "available_not_used",
-      "used_in_phase_1": false
+      "status": "identity_pinned_for_phase_12_url_intake",
+      "used_in_phase_1": false,
+      "purpose": "URL intake for Phase 12 real-video testing; re-probed and identity-pinned on this machine. Upgrades are gated on a real observed failure with separate confirmation, not speculative churn.",
+      "binary_sha256": "a5949749b24577667c2e08052cc0c7207449739eda8d2352b4bcbf47178fed8d",
+      "resolved_path": "/opt/homebrew/Cellar/yt-dlp/2026.7.4/libexec/bin/yt-dlp",
+      "version_identity": "2026.07.04",
+      "probed_at": "2026-08-16",
+      "probe_note": "Phase 11 re-probe (ffmpeg/ffprobe re-probe precedent). yt-dlp --version emits only the version string, so version_identity is that string; the resolved path is the Homebrew Cellar target of /opt/homebrew/bin/yt-dlp and binary_sha256 hashes that resolved python-script executable."
     },
     {
       "id": "node",
