@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "phase": 10,
+  "status": "engineering_verification_complete",
+  "ticket_11_verification": "passed_offline",
+  "phase_exit_gates": "engineering_confirmed_governance_deferred",
+  "phase_completion_note": "Ticket 11 closes Phase 10's engineering-verification work offline: the three 阶段 10 退出门禁 from docs/PHASED_EXECUTION_PLAN.md plus the nine derived gates named in docs/PHASE_10_SPECIFICATION.md :: Exit gates are each mapped to named proving tests and cross-linked to a summary boolean, the five 本阶段不能验证 known limitations are recorded verbatim, and the measured full-suite wall time is recorded against the ≤ 5-minute budget. Two of the three plan gates (工程自动化测试通过 and 已知限制全部写入报告) are confirmed here. The third plan gate — flipping project-state.json's overall_stage to real_world_testing — is a maintainer governance action deferred to explicit maintainer instruction (see governance and implementation_audit.open_requirements), following the Phase 8 and Phase 9 closure pattern; project-state.json is intentionally left untouched by this ticket.",
+  "recorded_at": "2026-08-16T22:30:00+0800",
+  "project_root": "/Users/apple/Desktop/wp/video-content-pipeline",
+  "summary": {
+    "engineering_automation_tests_pass_confirmed": true,
+    "known_limitations_all_recorded_confirmed": true,
+    "overall_stage_flips_to_real_world_testing_confirmed": false,
+    "property_layer_exists_and_is_deterministic_confirmed": true,
+    "five_fixture_branches_generate_and_probe_verify_confirmed": true,
+    "vcp_run_completes_end_to_end_and_publishes_valid_bundle_confirmed": true,
+    "fault_matrix_exhaustive_with_post_fault_invariants_confirmed": true,
+    "control_file_corruption_halts_safely_confirmed": true,
+    "cli_acceptance_covers_five_branches_plus_improve_confirmed": true,
+    "full_suite_wall_time_within_budget_confirmed": true,
+    "media_processed_still_false_confirmed": true,
+    "models_downloaded_still_false_confirmed": true
+  },
+  "summary_note": "The `summary` block is the conventional exit-gate declaration mirroring prior phase inventories. Every boolean is cross-linked to an `exit_gates` entry via `summary_key`. The only boolean that is `false` is `overall_stage_flips_to_real_world_testing_confirmed`: that plan gate is a maintainer governance action deliberately deferred (see `governance`), and the deferral itself is machine-checked (project-state.json is still `engineering_development`). The machine-checkable backing for every other gate lives in `exit_gates` (named proving tests), `guarantees_asserted_at_cli`, and `full_suite`, all asserted by tests/acceptance/test_phase_10_inventory.py.",
+  "exit_gates": [
+    {
+      "id": "engineering_automation_tests_pass",
+      "requirement": "工程自动化测试通过。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "engineering_automation_tests_pass_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_10_synthetic_e2e.py::test_subtitle_first_runs_end_to_end_and_verifies",
+        "tests/integration/test_phase_10_fault_matrix.py::test_golden_run_enumerates_the_recorded_write_count",
+        "tests/acceptance/test_phase_10_cli_acceptance.py::test_branch_runs_through_cli_to_a_published_bundle",
+        "tests/property/test_time_interval_properties.py::test_overlaps_matches_the_half_open_set_definition_and_is_symmetric"
+      ],
+      "note": "The gate is the full suite passing; these are representative anchors across the unit, property, integration, fault-injection, and CLI-acceptance layers. The measured pass count and wall time are recorded in `full_suite`."
+    },
+    {
+      "id": "known_limitations_all_recorded",
+      "requirement": "已知限制全部写入报告。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "known_limitations_all_recorded_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_10_inventory.py::test_known_limitations_match_the_plan_verbatim"
+      ],
+      "note": "The five 本阶段不能验证 items are recorded verbatim in `known_limitations` and re-derived from the plan by the cited test."
+    },
+    {
+      "id": "overall_stage_flips_to_real_world_testing",
+      "requirement": "项目整体状态切换为： `real_world_testing / 当前阶段：真实测试，尚未完成生产验收`。",
+      "source": "plan",
+      "confirmed": false,
+      "governance_status": "deferred_to_maintainer",
+      "summary_key": "overall_stage_flips_to_real_world_testing_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_10_inventory.py::test_project_state_constraints_remain_untouched"
+      ],
+      "note": "This is a maintainer closure action that uniquely flips project-state.json's overall_stage to real_world_testing (plus the usual phase fields). Per the Phase 8/9 precedent, the flip and the completion report are deferred to explicit maintainer instruction and are NOT performed by this ticket; the cited test confirms project-state.json is still `engineering_development` with constraints untouched, so the deferral is honestly reflected. See `governance`."
+    },
+    {
+      "id": "property_layer_exists_and_is_deterministic",
+      "requirement": "property layer exists and is deterministic",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "property_layer_exists_and_is_deterministic_confirmed",
+      "proving_tests": [
+        "tests/property/test_time_interval_properties.py::test_coverage_is_independent_of_decoded_interval_order",
+        "tests/property/test_serialization_roundtrip_properties.py::test_round_trip_equality",
+        "tests/unit/test_phase_10_hypothesis_gate.py::test_gate_profile_draws_identical_examples_across_runs",
+        "tests/unit/test_phase_10_hypothesis_gate.py::test_gate_profile_is_the_active_deterministic_profile"
+      ]
+    },
+    {
+      "id": "five_fixture_branches_generate_and_probe_verify",
+      "requirement": "five fixture branches generate and probe-verify via the pinned toolchain",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "five_fixture_branches_generate_and_probe_verify_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_10_synthetic_fixtures.py::test_branch_generates_and_probes_as_declared",
+        "tests/integration/test_phase_10_synthetic_fixtures.py::test_real_toolchain_resolves_against_pinned_registry",
+        "tests/integration/test_phase_10_synthetic_fixtures.py::test_identity_mismatch_is_an_error_not_a_skip",
+        "tests/integration/test_phase_10_synthetic_fixtures.py::test_multi_part_collection_has_three_distinct_parts"
+      ]
+    },
+    {
+      "id": "vcp_run_completes_end_to_end_and_publishes_valid_bundle",
+      "requirement": "`vcp run` completes end to end and publishes a hash-verified bundle with VALID core artifacts",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "vcp_run_completes_end_to_end_and_publishes_valid_bundle_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_10_synthetic_e2e.py::test_subtitle_first_runs_end_to_end_and_verifies",
+        "tests/integration/test_phase_10_synthetic_e2e.py::test_adapters_are_deterministic_double_run"
+      ]
+    },
+    {
+      "id": "fault_matrix_exhaustive_with_post_fault_invariants",
+      "requirement": "the fault matrix is exhaustive over enumerated fault points × classes with all post-fault invariants",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "fault_matrix_exhaustive_with_post_fault_invariants_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_10_fault_matrix.py::test_golden_run_enumerates_the_recorded_write_count",
+        "tests/integration/test_phase_10_fault_matrix.py::test_fault_matrix_cell",
+        "tests/integration/test_phase_10_fault_matrix.py::test_enospc_during_publish_staging_leaves_no_partial_bundle",
+        "tests/integration/test_phase_10_fault_matrix.py::test_torn_latest_pointer_never_publishes_a_corrupt_pointer"
+      ]
+    },
+    {
+      "id": "control_file_corruption_halts_safely",
+      "requirement": "control-file corruption halts safely",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "control_file_corruption_halts_safely_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_10_fault_matrix.py::test_corrupt_control_file_halts_safely"
+      ]
+    },
+    {
+      "id": "cli_acceptance_covers_five_branches_plus_improve",
+      "requirement": "CLI acceptance covers all five branches plus `improve`",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "cli_acceptance_covers_five_branches_plus_improve_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_10_cli_acceptance.py::test_branch_runs_through_cli_to_a_published_bundle",
+        "tests/acceptance/test_phase_10_cli_acceptance.py::test_improve_carries_an_unaffected_part_forward_from_a_published_bundle",
+        "tests/acceptance/test_phase_10_cli_acceptance.py::test_pause_and_resume_at_a_unit_boundary",
+        "tests/acceptance/test_phase_10_cli_acceptance.py::test_cancel_at_a_unit_boundary_publishes"
+      ]
+    },
+    {
+      "id": "full_suite_wall_time_within_budget",
+      "requirement": "full-suite wall time within budget",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "full_suite_wall_time_within_budget_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_10_inventory.py::test_recorded_suite_wall_time_is_within_budget"
+      ],
+      "note": "The measured wall time and the ≤ 5-minute budget are recorded in `full_suite`; the cited test asserts the recorded value is within budget."
+    },
+    {
+      "id": "media_processed_still_false",
+      "requirement": "`media_processed` still `false`",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "media_processed_still_false_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_10_inventory.py::test_project_state_constraints_remain_untouched"
+      ],
+      "note": "`media_processed` refers to Real media only (glossary). Synthetic fixtures never flip it; it stays false until Phase 11. The cited test asserts project-state.json's constraints.media_processed is still false."
+    },
+    {
+      "id": "models_downloaded_still_false",
+      "requirement": "`models_downloaded` still `false`",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "models_downloaded_still_false_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_10_inventory.py::test_project_state_constraints_remain_untouched"
+      ],
+      "note": "The end-to-end run uses hash-seeded offline model adapters (tests/support/model_adapters.py); no model is acquired or executed. The cited test asserts project-state.json's constraints.models_downloaded is still false."
+    }
+  ],
+  "exit_gates_source": "docs/PHASED_EXECUTION_PLAN.md :: ### 阶段 10：合成工程验证 :: 退出门禁 (plan gates) + docs/PHASE_10_SPECIFICATION.md :: Exit gates :: Derived gates (derived gates)",
+  "derived_gate_ids": [
+    "property_layer_exists_and_is_deterministic",
+    "five_fixture_branches_generate_and_probe_verify",
+    "vcp_run_completes_end_to_end_and_publishes_valid_bundle",
+    "fault_matrix_exhaustive_with_post_fault_invariants",
+    "control_file_corruption_halts_safely",
+    "cli_acceptance_covers_five_branches_plus_improve",
+    "full_suite_wall_time_within_budget",
+    "media_processed_still_false",
+    "models_downloaded_still_false"
+  ],
+  "known_limitations": [
+    "真实中英 ASR 准确率。",
+    "真实直播重叠说话质量。",
+    "真实字幕强制对齐成功率。",
+    "真实 OCR 召回和数字准确率。",
+    "真实长视频摘要忠实度。"
+  ],
+  "known_limitations_source": "docs/PHASED_EXECUTION_PLAN.md :: ### 阶段 10：合成工程验证 :: 本阶段不能验证 (identical to docs/PHASE_10_SPECIFICATION.md :: Known limitations)",
+  "guarantees_asserted_at_cli": {
+    "model_execution": "not_attempted",
+    "model_acquisition": "not_attempted",
+    "network_access": "not_attempted",
+    "media_processing": "synthetic_fixtures_only",
+    "frame_extraction": "synthetic_fixtures_only",
+    "outputs_publication": "synthetic_roots_only",
+    "asserted_by": [
+      "tests/integration/test_phase_10_synthetic_e2e.py::test_subtitle_first_runs_end_to_end_and_verifies",
+      "tests/integration/test_phase_10_synthetic_e2e.py::test_adapters_are_deterministic_double_run",
+      "tests/integration/test_phase_10_synthetic_fixtures.py::test_branch_generates_and_probes_as_declared",
+      "tests/integration/test_phase_10_synthetic_fixtures.py::test_visual_text_branch_is_a_genuine_video_render",
+      "tests/acceptance/test_phase_10_cli_acceptance.py::test_control_and_status_commands_never_write_outputs"
+    ],
+    "note": "Phase 10 runs the real per-phase functions with real ffmpeg/ffprobe over synthetic fixtures; the only fakes are hash-seeded offline model adapters injected at the existing composition seam. So `media_processing` and `frame_extraction` change from Phase 9's `not_attempted` to `synthetic_fixtures_only` (real ffmpeg extraction and a genuine visual-text video render exercised on generated fixtures, never Real media), while `model_execution` / `model_acquisition` / `network_access` stay `not_attempted` (no model is downloaded or run, no network is touched) and `outputs_publication` stays `synthetic_roots_only` (publication exercised only inside synthetic test project roots). project-state.json's constraints (`media_processed: false`, `models_downloaded: false`) are untouched because those refer to Real media and real model acquisition per the glossary."
+  },
+  "full_suite": {
+    "command": "pytest -q",
+    "test_count": 1332,
+    "wall_time_seconds": 16,
+    "wall_time_budget_seconds": 300,
+    "within_budget": true,
+    "measured_at": "2026-08-16T22:30:00+0800",
+    "note": "Final gate run including this inventory's acceptance test: 1332 passed in 15.47s wall (real 16.45s), far inside the 5-minute budget. The gate is ALWAYS the full suite; markers integration/slow/faultmatrix select subsets but never replace it."
+  },
+  "created_or_modified": [
+    ".scratch/phase-10-synthetic-engineering-verification/spec.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/01-governance-and-dependency-baseline.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/02-fault-injection-support-kit.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/03-synthetic-fixture-generator.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/04-time-interval-property-tests.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/05-serialization-round-trip-property-tests.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/06-subtitle-pipeline-unit-tests.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/07-orchestration-fault-matrix.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/08-deterministic-adapters-and-real-composition-e2e.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/09-stage-faults-and-sigkill-spot-checks.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/10-five-branch-cli-acceptance.md",
+    ".scratch/phase-10-synthetic-engineering-verification/issues/11-closing-exit-gate-inventory.md",
+    "CONTEXT-MAP.md",
+    "config/tools.json",
+    "docs/PHASE_10_INVENTORY.json",
+    "docs/PHASE_10_SPECIFICATION.md",
+    "docs/adr/0054-verify-engineering-with-synthetic-media-and-a-deterministic-fault-matrix.md",
+    "docs/contexts/media-foundation/CONTEXT.md",
+    "docs/contexts/orchestration/CONTEXT.md",
+    "pyproject.toml",
+    "uv.lock",
+    "src/video_content_pipeline/audio_derivation.py",
+    "src/video_content_pipeline/publication.py",
+    "src/video_content_pipeline/run_composition.py",
+    "src/video_content_pipeline/run_control.py",
+    "tests/acceptance/test_document_layout_contract.py",
+    "tests/acceptance/test_phase_10_cli_acceptance.py",
+    "tests/acceptance/test_phase_10_inventory.py",
+    "tests/integration/test_phase_10_fault_matrix.py",
+    "tests/integration/test_phase_10_sigkill_spot_checks.py",
+    "tests/integration/test_phase_10_stage_faults.py",
+    "tests/integration/test_phase_10_synthetic_e2e.py",
+    "tests/integration/test_phase_10_synthetic_fixtures.py",
+    "tests/integration/test_phase_9_recovery.py",
+    "tests/property/test_serialization_roundtrip_properties.py",
+    "tests/property/test_time_interval_properties.py",
+    "tests/support/__init__.py",
+    "tests/support/executors.py",
+    "tests/support/fault_injection.py",
+    "tests/support/hypothesis_profiles.py",
+    "tests/support/kill_harness.py",
+    "tests/support/model_adapters.py",
+    "tests/support/synthetic_fixtures.py",
+    "tests/unit/test_audio_derivation.py",
+    "tests/unit/test_collection_timeline.py",
+    "tests/unit/test_coverage.py",
+    "tests/unit/test_phase_10_fault_kit.py",
+    "tests/unit/test_phase_10_hypothesis_gate.py",
+    "tests/unit/test_phase_9_run_composition.py",
+    "tests/unit/test_subtitle_pipeline.py",
+    "tests/unit/test_timecode.py"
+  ],
+  "external_reads": [
+    "config/tools.json (pinned ffmpeg/ffprobe identities; the host ffmpeg/ffprobe binaries are read and identity-verified by the synthetic fixture toolchain, never modified)."
+  ],
+  "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted.",
+  "governance": {
+    "deferred_to_maintainer": [
+      "Flip project-state.json overall_stage to `real_world_testing` (plus the usual phase fields: current_phase 10, phase_status completed, next_phase 11, real_world_testing true) — the third 阶段 10 退出门禁.",
+      "Write docs/PHASE_10_COMPLETION_REPORT.md with the five known limitations."
+    ],
+    "note": "Per the Phase 8 and Phase 9 closure precedent, the project-state.json flip and the completion report are maintainer governance decisions performed only on explicit maintainer instruction, not by this closing ticket. project-state.json is intentionally left untouched; this inventory and its acceptance test verify it is still `engineering_development` so the deferral is honest and machine-checked."
+  },
+  "implementation_audit": {
+    "head": "49956bd",
+    "ticket_status": {
+      "01": "resolved",
+      "02": "resolved",
+      "03": "resolved",
+      "04": "resolved",
+      "05": "resolved",
+      "06": "resolved",
+      "07": "resolved",
+      "08": "resolved",
+      "09": "resolved",
+      "10": "resolved",
+      "11": "resolved"
+    },
+    "completed_work": [
+      "The governance and dependency baseline: hypothesis pinned as a dev dependency with a deterministic gate profile in the importable tests/support/ package (no conftest), the integration/slow/faultmatrix markers with --strict-markers, and the config/tools.json ffmpeg/ffprobe re-probe.",
+      "The shared fault-injection kit (DurableIoInterceptor over the four durable_io primitives with golden-run write counting, process-death/ENOSPC/torn-write injection, and control-file corruption helpers) and the extracted KillingExecutor; the synthetic fixture generator with five branches that mirror Phase 11's real-video branches 1:1, probe-verified against the pinned toolchain.",
+      "The property layer (time-base and half-open-interval invariants; serialization round-trips across sixteen serialize/deserialize contracts) and the dedicated subtitle_pipeline.py unit file.",
+      "The exhaustive orchestration fault matrix (enumerated durable writes × {process death, ENOSPC, torn write} with a recorded-N golden assertion, control-file corruption, and publish/latest-pointer faults) and the two production fixes it surfaced; the first offline end-to-end `vcp run` over the subtitle-first fixture with hash-seeded offline adapters and the three production gaps it surfaced.",
+      "The stage-fault tier and real SIGKILL subprocess spot checks recovering via the real CLI; the five-branch CLI acceptance layer (plan/run/status/pause/resume/cancel/verify/inventory plus improve) driving the real composition to published, hash-verified terminals; and this closing exit-gate inventory with tests/acceptance/test_phase_10_inventory.py."
+    ],
+    "open_requirements": [
+      "The five 本阶段不能验证 domain-quality questions (real zh/en ASR accuracy, real overlapping-speech quality, real subtitle forced-alignment success, real OCR recall and digit accuracy, real long-video summary faithfulness) are out of reach offline by design and are the subject of Phase 11 real-video testing.",
+      "Flipping project-state.json's overall_stage to `real_world_testing` and writing docs/PHASE_10_COMPLETION_REPORT.md are maintainer governance decisions, intentionally not performed by ticket 11 (see governance)."
+    ],
+    "current_head_verification": {
+      "pytest": "1332 passed",
+      "production_validated": false
+    }
+  }
+}

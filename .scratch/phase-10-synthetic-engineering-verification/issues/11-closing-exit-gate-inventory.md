@@ -21,14 +21,40 @@ explicit maintainer instruction, per precedent — note it in the closing
 comment.
 
 **Blocked by:** 01, 02, 03, 04, 05, 06, 07, 08, 09, 10
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Inventory JSON complete: 3 plan gates + derived gates + proving tests
-- [ ] Five known limitations recorded verbatim
-- [ ] Guarantees block reflects synthetic-fixture semantics as specified
-- [ ] Measured suite wall time recorded and within budget
-- [ ] Acceptance test green: regex gates, exact sets, AST-verified citations
-- [ ] Full suite green; ruff check/format and mypy clean
+- [x] Inventory JSON complete: 3 plan gates + derived gates + proving tests
+- [x] Five known limitations recorded verbatim
+- [x] Guarantees block reflects synthetic-fixture semantics as specified
+- [x] Measured suite wall time recorded and within budget
+- [x] Acceptance test green: regex gates, exact sets, AST-verified citations
+- [x] Full suite green; ruff check/format and mypy clean
 
 ## Comments
+
+Done. `docs/PHASE_10_INVENTORY.json` records the three 阶段 10 退出门禁 (plan
+gates) plus the nine derived gates from the spec's Exit gates section, each
+mapped to named proving tests and cross-linked to a summary boolean; the five
+本阶段不能验证 known limitations verbatim; a `guarantees_asserted_at_cli` block
+(`media_processing` / `frame_extraction` → `synthetic_fixtures_only`;
+`model_execution` / `model_acquisition` / `network_access` → `not_attempted`;
+`outputs_publication` → `synthetic_roots_only`); and the measured full-suite
+wall time (1332 passed in 15.47s wall) against the ≤ 5-minute budget.
+
+`tests/acceptance/test_phase_10_inventory.py` (12 tests) re-derives the plan
+gates and known limitations by regex from `docs/PHASED_EXECUTION_PLAN.md`
+(`### 阶段 10` → `### 阶段 11`, joining the wrapped state-flip bullet),
+asserts the derived-gate set is exactly the specified nine, AST-verifies every
+cited proving test exists, checks the guarantees block and the wall-time
+budget, and confirms `project-state.json` is still `engineering_development`
+with `media_processed`/`models_downloaded` untouched.
+
+Governance deferred per the Phase 8/9 precedent: the third plan gate — flipping
+`project-state.json`'s `overall_stage` to `real_world_testing` — and writing
+`docs/PHASE_10_COMPLETION_REPORT.md` are maintainer actions performed only on
+explicit maintainer instruction, so this ticket leaves `project-state.json`
+untouched. That gate is recorded `confirmed: false` with
+`governance_status: deferred_to_maintainer`, and the deferral is itself
+machine-checked (the state is verified un-flipped). Full suite green;
+ruff check/format and mypy(src) clean.
