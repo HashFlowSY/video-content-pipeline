@@ -169,7 +169,10 @@ with zh+en sample outputs eyeballed by the maintainer.
   sample review, mirroring how heavy analysis is already serialized and
   paused for decisions.
 - A lockfile gate test asserts torch/torchvision/torchaudio/nvidia-*/
-  modelscope never appear in `uv.lock`.
+  modelscope are never *installable* in `uv.lock` (no resolved node carries a
+  wheel or sdist). mlx-whisper hard-depends on torch, so torch is excluded via
+  a `[tool.uv]` always-false-marker override and survives only as a sanctioned
+  artifact-free phantom node — recorded in ticket 03, not silently absorbed.
 - Registry entries hash-verify on disk in an integration test; a missing
   asset produces the typed acquisition failure, never a network call.
 - Prior art: Phase 10's identity-pinned toolchain tests (error, never

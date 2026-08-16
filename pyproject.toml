@@ -21,9 +21,45 @@ dev = [
   "pytest==8.3.5",
   "ruff==0.11.5",
 ]
+# Phase 11 one-shot authorized inference stack (spec Workstream B). Real model
+# engines only; the deterministic offline adapters need none of these, so the
+# base project keeps `dependencies = []`. Exact-pinned, with two spec-declared
+# exceptions: opencv-python is a declared floor pinned by the lock, and
+# huggingface-hub tracks latest-stable (unpinned, pinned by the lock). See
+# docs/PHASE_11_SPECIFICATION.md.
+inference = [
+  "mlx-audio==0.4.8",
+  "mlx-whisper==0.4.3",
+  "mlx-lm==0.31.3",
+  "sherpa-onnx==1.13.5",
+  # sherpa-onnx ships its native runtime in this companion package, but its
+  # wheel marks `requires-dist` as Dynamic, so uv's registry-metadata resolver
+  # drops the edge (pip would recover it post-install). Pin it explicitly so
+  # the native libs (libonnxruntime.dylib) are actually installed. Same version.
+  "sherpa-onnx-core==1.13.5",
+  "onnxruntime==1.28.0",
+  "rapidocr==3.9.2",
+  "opencv-python>=4.5.1.48",
+  "huggingface-hub",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/video_content_pipeline"]
+
+[tool.uv]
+# RECORDED DEVIATION (Phase 11 ticket 03): mlx-whisper==0.4.3 declares `torch`
+# as an unconditional runtime dependency in every published version, which
+# would drag torch + the entire nvidia-*/triton/cuda-* CUDA stack into the
+# lock and violate the phase's torch-free invariant (spec Workstream B; user
+# story 3). The dependency is a phantom for our path: torch is referenced only
+# by `mlx_whisper/torch_whisper.py` (the OpenAI-checkpoint -> MLX conversion
+# reference), which nothing in the package imports; transcription
+# (`mlx_whisper.transcribe`) runs on pre-converted `whisper-large-v3-mlx`
+# weights and never touches torch. This override drops torch (and its whole
+# subtree) from resolution via an always-false marker, keeping the installed
+# stack genuinely torch-free. The lockfile gate (tests/unit/test_lockfile_gate.py)
+# enforces that no banned distribution is ever *resolved* into uv.lock.
+override-dependencies = ["torch; sys_platform == 'never'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

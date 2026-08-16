@@ -126,9 +126,12 @@ Added via `tools/uv/uv` to `pyproject.toml` + `uv.lock`, exact-pinned:
 | huggingface_hub | latest stable at lock | Apache-2.0 | pinned model downloads |
 
 `mlx` core arrives transitively. A lockfile gate test asserts torch,
-torchvision, torchaudio, nvidia-*, and modelscope never appear in
-`uv.lock` — the torch-free claim stays machine-checked. Exact final
-versions are whatever the locked resolution pins; deviations from the
+torchvision, torchaudio, nvidia-*, and modelscope are never *installable* in
+`uv.lock` (no resolved node carrying a wheel or sdist) — the torch-free claim
+stays machine-checked. mlx-whisper hard-declares torch, so it is excluded via a
+`[tool.uv]` always-false-marker override; torch survives only as a sanctioned
+artifact-free phantom node, and no `nvidia-*`/CUDA package appears at all. Exact
+final versions are whatever the locked resolution pins; deviations from the
 baselines above are recorded, not silently absorbed.
 
 ## Workstream C — Real engines behind existing contracts
