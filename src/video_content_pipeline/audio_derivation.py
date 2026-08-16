@@ -334,7 +334,36 @@ def _sha256_json(value: object) -> str:
     return sha256(payload).hexdigest()
 
 
-def _exact_timestamp(value: ExactTime) -> str:
-    """Serialize a rational FFmpeg timestamp without floating-point rounding."""
+#: Cap on the fractional digits emitted for a non-terminating timestamp. FFmpeg
+#: seeks at microsecond resolution (AV_TIME_BASE), so nine places (nanoseconds)
+#: is already finer than it can act on.
+_MAX_TIMESTAMP_DECIMALS = 9
 
-    return f"{value.numerator}/{value.denominator}"
+
+def _exact_timestamp(value: ExactTime) -> str:
+    """Serialize an ExactTime as an FFmpeg ``-ss``/``-t`` timestamp in seconds.
+
+    FFmpeg's duration syntax takes seconds as a decimal (``S[.mmm]``), not the
+    ``numerator/denominator`` rational ExactTime carries — passing the rational
+    makes FFmpeg reject the option outright. Whole seconds are emitted directly
+    and a fractional part as its exact decimal expansion. Every coverage boundary
+    this derivation sees comes from a millisecond or sample-rate time base, so the
+    expansion terminates; a value that somehow does not is emitted at FFmpeg's own
+    microsecond resolution rather than losing the seek entirely.
+    """
+
+    numerator, denominator = value.numerator, value.denominator
+    if denominator == 1:
+        return str(numerator)
+    sign = "-" if numerator < 0 else ""
+    numerator = abs(numerator)
+    whole, remainder = divmod(numerator, denominator)
+    digits: list[str] = []
+    for _ in range(_MAX_TIMESTAMP_DECIMALS):
+        if remainder == 0:
+            break
+        remainder *= 10
+        digit, remainder = divmod(remainder, denominator)
+        digits.append(str(digit))
+    fraction = "".join(digits).rstrip("0") or "0"
+    return f"{sign}{whole}.{fraction}"

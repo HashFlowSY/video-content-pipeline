@@ -10,6 +10,7 @@ from video_content_pipeline.audio_derivation import (
     AnalysisAudioDerivationError,
     DerivativeTimeMapping,
     PreprocessingProfile,
+    _exact_timestamp,
     prepare_analysis_audio,
 )
 from video_content_pipeline.coverage import StreamCoverage
@@ -101,11 +102,23 @@ def test_prepare_analysis_audio_revalidates_ffmpeg_and_retains_mapping(
     assert derivative.source_artifact_sha256 == source_hash
     assert derivative.path == destination
     assert derivative.mapping.sample_count == 96_000
-    assert captured_arguments[captured_arguments.index("-ss") + 1] == "-1/2"
-    assert captured_arguments[captured_arguments.index("-t") + 1] == "2/1"
+    # FFmpeg's -ss/-t take seconds as a decimal, not a "num/den" rational.
+    assert captured_arguments[captured_arguments.index("-ss") + 1] == "-0.5"
+    assert captured_arguments[captured_arguments.index("-t") + 1] == "2"
     assert derivative.as_json()["ffmpeg"]["sha256"] == "c" * 64
     assert derivative.as_json()["preprocessing_profile"]["id"] == _profile().profile_id
     assert destination.with_suffix(".mapping.json").exists()
+
+
+def test_exact_timestamp_serializes_ffmpeg_decimal_seconds() -> None:
+    # FFmpeg's -ss/-t reject a "num/den" rational; they take seconds as a decimal.
+    assert _exact_timestamp(ExactTime(0, 1)) == "0"
+    assert _exact_timestamp(ExactTime(3, 1)) == "3"
+    assert _exact_timestamp(ExactTime(-1, 2)) == "-0.5"
+    assert _exact_timestamp(ExactTime(3, 1000)) == "0.003"  # millisecond time base
+    # A non-terminating expansion is capped at FFmpeg's own resolution, never lost.
+    capped = _exact_timestamp(ExactTime(1, 3))
+    assert capped.startswith("0.3333333") and len(capped) <= len("0.") + 9
 
 
 def test_prepare_analysis_audio_rejects_coverage_gaps_before_ffmpeg(

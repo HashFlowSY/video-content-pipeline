@@ -53,7 +53,9 @@ from video_content_pipeline.external_tools import (
 
 #: Bump when a recipe's bytes-affecting definition changes; the cache is keyed on
 #: it so a stale build from an earlier version never masquerades as current.
-RECIPES_VERSION = 1
+#: v2: audio moved to a 32 kHz sample rate so decoded packet coverage is gap-free
+#: (see :data:`_AUDIO_SAMPLE_RATE`).
+RECIPES_VERSION = 2
 
 #: Placeholders substituted into a recipe's argv at generation time. Keeping the
 #: argv otherwise fully literal means no shell and no path interpolation.
@@ -179,11 +181,34 @@ _ANOMALOUS_SUBTITLES = (
 )
 
 
+#: Audio is FLAC at 32 kHz for every fixture with an audio stream. Both choices
+#: keep the decoded packet coverage a single gap-free interval that starts at
+#: zero — the shape the analysis-audio derivation requires. At 32 kHz a whole
+#: FLAC frame lands on an exact millisecond, so it tiles Matroska's millisecond
+#: timebase without the rounding that scatters ~1 ms coverage gaps at 48 kHz; and
+#: FLAC, unlike AAC, adds no encoder priming, so coverage starts at 0 rather than
+#: a negative pre-roll the extractor's ``-ss`` cannot express. Both defects made
+#: the audio unprocessable end to end and were invisible to a structural probe;
+#: the first synthetic ``vcp run`` exposed them.
+_AUDIO_SAMPLE_RATE = 32000
+
+
+#: Input-side flags that drop every non-deterministic muxing element (the
+#: container's ``Date``/``writing app`` tags and encoder version stamps) so a
+#: recipe's bytes are reproducible: the same recipe always builds the same file,
+#: which is what lets the end-to-end bundle be byte-identical across runs.
+_BITEXACT_INPUT: tuple[str, ...] = ("-fflags", "+bitexact")
+
+#: The matching output-side flag; placed just before the output path.
+_BITEXACT_OUTPUT = "-bitexact"
+
+
 def _video_audio_argv(duration: int) -> tuple[str, ...]:
     return (
         "-hide_banner",
         "-nostdin",
         "-y",
+        *_BITEXACT_INPUT,
         "-f",
         "lavfi",
         "-i",
@@ -191,7 +216,7 @@ def _video_audio_argv(duration: int) -> tuple[str, ...]:
         "-f",
         "lavfi",
         "-i",
-        f"sine=frequency=440:sample_rate=48000:duration={duration}",
+        f"sine=frequency=440:sample_rate={_AUDIO_SAMPLE_RATE}:duration={duration}",
     )
 
 
@@ -211,11 +236,10 @@ def _subtitle_muxed_argv(duration: int) -> tuple[str, ...]:
         "-c:v",
         "ffv1",
         "-c:a",
-        "aac",
-        "-b:a",
-        "64k",
+        "flac",
         "-c:s",
         "srt",
+        _BITEXACT_OUTPUT,
         _OUTPUT_TOKEN,
     )
 
@@ -230,9 +254,8 @@ def _video_audio_only_argv(duration: int) -> tuple[str, ...]:
         "-c:v",
         "ffv1",
         "-c:a",
-        "aac",
-        "-b:a",
-        "64k",
+        "flac",
+        _BITEXACT_OUTPUT,
         _OUTPUT_TOKEN,
     )
 
@@ -244,6 +267,7 @@ def _visual_text_argv(duration: int) -> tuple[str, ...]:
         "-hide_banner",
         "-nostdin",
         "-y",
+        *_BITEXACT_INPUT,
         "-f",
         "lavfi",
         "-i",
@@ -252,6 +276,7 @@ def _visual_text_argv(duration: int) -> tuple[str, ...]:
         "0:v",
         "-c:v",
         "ffv1",
+        _BITEXACT_OUTPUT,
         _OUTPUT_TOKEN,
     )
 
