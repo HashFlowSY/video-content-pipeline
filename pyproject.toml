@@ -16,6 +16,7 @@ vcp = "video_content_pipeline.cli:main"
 [dependency-groups]
 dev = [
   "hatchling==1.27.0",
+  "hypothesis==6.165.9",
   "mypy==1.15.0",
   "pytest==8.3.5",
   "ruff==0.11.5",
@@ -26,7 +27,13 @@ packages = ["src/video_content_pipeline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-ra"]
+pythonpath = ["."]
+addopts = ["-ra", "--strict-markers"]
+markers = [
+  "integration: exercises real external tools or the real filesystem end to end",
+  "slow: takes appreciable wall-clock time relative to the unit layer",
+  "faultmatrix: enumerates orchestration fault points (developer convenience)",
+]
 
 [tool.ruff]
 line-length = 100

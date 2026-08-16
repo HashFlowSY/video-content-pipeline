@@ -12,20 +12,32 @@
     {
       "id": "ffmpeg",
       "path": "/opt/homebrew/bin/ffmpeg",
-      "version": "8.1.2",
-      "status": "used_for_phase_2_synthetic_fixtures",
+      "version": "9.0.1",
+      "status": "used_for_phase_10_synthetic_fixtures_and_integration",
       "used_in_phase_1": false,
       "used_in_phase_2": true,
-      "purpose": "Generate only the retained project-owned synthetic media fixtures."
+      "used_in_phase_10": true,
+      "purpose": "Generate synthetic media fixtures and drive real-tool integration/end-to-end tests; tests error (never skip) on absence or identity mismatch.",
+      "binary_sha256": "cebe04356214a938aec846e4fc423de3fc18eda07f64e34e56d55f9963473a20",
+      "resolved_path": "/opt/homebrew/Cellar/ffmpeg/9.0.1/bin/ffmpeg",
+      "version_identity": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "probed_at": "2026-08-16",
+      "probe_note": "Phase 10 re-probe after the machine migration; supersedes the 8.1.2 registry evidence."
     },
     {
       "id": "ffprobe",
       "path": "/opt/homebrew/bin/ffprobe",
-      "version": "8.1.2",
-      "status": "used_for_phase_2_synthetic_fixture_evidence",
+      "version": "9.0.1",
+      "status": "used_for_phase_10_synthetic_fixture_evidence_and_integration",
       "used_in_phase_1": false,
       "used_in_phase_2": true,
-      "purpose": "Retain raw JSON evidence for the project-owned synthetic media fixtures."
+      "used_in_phase_10": true,
+      "purpose": "Probe synthetic media fixture structure and retain raw JSON evidence; tests error (never skip) on absence or identity mismatch.",
+      "binary_sha256": "81e6262cec5b1f06517c1853041394016ec0503f580aed702e62ac488c4520de",
+      "resolved_path": "/opt/homebrew/Cellar/ffmpeg/9.0.1/bin/ffprobe",
+      "version_identity": "ffprobe version 9.0.1 Copyright (c) 2007-2026 the FFmpeg developers",
+      "probed_at": "2026-08-16",
+      "probe_note": "Phase 10 re-probe after the machine migration; supersedes the 8.1.2 registry evidence."
     },
     {
       "id": "yt-dlp",
