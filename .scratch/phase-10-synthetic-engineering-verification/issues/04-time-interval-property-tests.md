@@ -16,14 +16,23 @@ properties expose is fixed in this ticket with stage/schema version
 discipline observed.
 
 **Blocked by:** 01
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Strategies cover signed PTS (incl. negative), varied time bases,
+- [x] Strategies cover signed PTS (incl. negative), varied time bases,
       degenerate intervals
-- [ ] Round-trip exactness properties pass under the deterministic profile
-- [ ] Coverage merge idempotence/order-independence properties pass
-- [ ] Conventional unit additions land in the three thin files
-- [ ] Suite green; deterministic across two consecutive full runs
+- [x] Round-trip exactness properties pass under the deterministic profile
+- [x] Coverage merge idempotence/order-independence properties pass
+- [x] Conventional unit additions land in the three thin files
+- [x] Suite green; deterministic across two consecutive full runs
 
 ## Comments
+
+Done in `4fd5fa0` (2026-08-16). New `tests/property/` layer
+(`test_time_interval_properties.py`, 12 properties under the deterministic gate
+profile) plus concrete regression anchors added to the three thin unit files.
+No production bug surfaced — the exact-rational core (ExactTime/Fraction,
+half-open coverage merge, `_cue_order_key` totality) held under all properties,
+so the change is test-only. Suite 1090 green; ruff + mypy(src) clean; two-axis
+code review clean (standards: dead `assume` + `rng: object` typing tidied; spec:
+explicit zero-length unit anchor added to coverage and timeline contexts).
