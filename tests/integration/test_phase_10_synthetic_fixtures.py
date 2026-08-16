@@ -1,0 +1,211 @@
+"""Ticket 03: real-tool integration proof for the synthetic fixture generator.
+
+These tests execute the pinned host ffmpeg/ffprobe for real: they build the five
+Phase 11 branch twins once per session and probe each with real ffprobe, so the
+probed structure is checked against every recipe's declared expectation. They
+also pin the two non-negotiable boundary behaviours — the toolchain identity
+check *errors* (never skips) on a fake ``tools.json``, and generation is
+session-cached and confined to the session temp root.
+
+The generator itself is pytest-free; the session-scoped caching lives here, in
+the consumer, exactly as the fault-injection kit keeps its pytest coupling in the
+tests that drive it.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from tests.support.synthetic_fixtures import (
+    FIXTURE_RECIPES,
+    RECIPES_VERSION,
+    FixtureRecipe,
+    FixtureToolchain,
+    FixtureToolchainError,
+    generate_fixture,
+    probe_document,
+    probe_stream_types,
+    resolve_fixture_toolchain,
+)
+from video_content_pipeline.probe import ProbeDocument, project_probe_document
+
+pytestmark = pytest.mark.integration
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(scope="session")
+def toolchain() -> FixtureToolchain:
+    """The real ffmpeg/ffprobe pair, identity-verified against ``tools.json``."""
+
+    return resolve_fixture_toolchain(PROJECT_ROOT)
+
+
+@pytest.fixture(scope="session")
+def fixture_cache(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """One session-scoped cache root so branches generate at most once."""
+
+    return tmp_path_factory.mktemp("phase-10-synthetic-fixtures")
+
+
+# -- identity is verified before use, as an error not a skip -----------------
+
+
+def test_real_toolchain_resolves_against_pinned_registry(toolchain: FixtureToolchain) -> None:
+    assert toolchain.ffmpeg.is_file()
+    assert toolchain.ffprobe.is_file()
+    assert toolchain.ffmpeg_version.startswith("ffmpeg version")
+    assert toolchain.ffprobe_version.startswith("ffprobe version")
+
+
+def _write_registry(root: Path, tools: list[dict[str, object]]) -> Path:
+    config_dir = root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "tools.json").write_text(
+        json.dumps({"schema_version": 1, "tools": tools}), encoding="utf-8"
+    )
+    return root
+
+
+def _pinned_entry(tool_id: str) -> dict[str, object]:
+    registry = json.loads((PROJECT_ROOT / "config" / "tools.json").read_text(encoding="utf-8"))
+    for tool in registry["tools"]:
+        if tool.get("id") == tool_id:
+            return dict(tool)
+    raise AssertionError(f"{tool_id} missing from the real registry")
+
+
+def test_absent_binary_is_an_error_not_a_skip(tmp_path: Path) -> None:
+    root = _write_registry(
+        tmp_path,
+        [
+            {
+                "id": "ffmpeg",
+                "path": str(tmp_path / "nonexistent-ffmpeg"),
+                "binary_sha256": "0" * 64,
+                "version_identity": "ffmpeg version 9.0.1",
+            }
+        ],
+    )
+    with pytest.raises(FixtureToolchainError) as caught:
+        resolve_fixture_toolchain(root)
+    assert caught.value.reason == "tool_absent"
+
+
+def test_identity_mismatch_is_an_error_not_a_skip(tmp_path: Path) -> None:
+    entry = _pinned_entry("ffmpeg")
+    entry["binary_sha256"] = "f" * 64
+    ffprobe = _pinned_entry("ffprobe")
+    root = _write_registry(tmp_path, [entry, ffprobe])
+    with pytest.raises(FixtureToolchainError) as caught:
+        resolve_fixture_toolchain(root)
+    assert caught.value.reason == "tool_identity_mismatch"
+
+
+def test_missing_entry_is_an_error_not_a_skip(tmp_path: Path) -> None:
+    root = _write_registry(tmp_path, [_pinned_entry("ffmpeg")])
+    with pytest.raises(FixtureToolchainError) as caught:
+        resolve_fixture_toolchain(root)
+    assert caught.value.reason == "tool_entry_missing"
+
+
+def test_incomplete_evidence_is_an_error_not_a_skip(tmp_path: Path) -> None:
+    root = _write_registry(
+        tmp_path,
+        [{"id": "ffmpeg", "path": "/opt/homebrew/bin/ffmpeg"}, _pinned_entry("ffprobe")],
+    )
+    with pytest.raises(FixtureToolchainError) as caught:
+        resolve_fixture_toolchain(root)
+    assert caught.value.reason == "tool_evidence_incomplete"
+
+
+# -- five branches generate and probe as their recipes declare ---------------
+
+
+@pytest.mark.parametrize("recipe", FIXTURE_RECIPES, ids=lambda recipe: recipe.fixture_id)
+def test_branch_generates_and_probes_as_declared(
+    recipe: FixtureRecipe, toolchain: FixtureToolchain, fixture_cache: Path
+) -> None:
+    generated = generate_fixture(recipe, toolchain, fixture_cache)
+
+    assert len(generated.parts) == len(recipe.builds)
+    for build, part in zip(recipe.builds, generated.parts, strict=True):
+        assert part.is_file(), f"missing part {build.output}"
+        assert part.stat().st_size > 0
+        # Every generated byte stays under the session cache root.
+        assert part.resolve().is_relative_to(fixture_cache.resolve())
+
+        probed = probe_stream_types(part, toolchain)
+        assert probed == build.expected_streams, (
+            f"{recipe.fixture_id}/{build.output}: expected {build.expected_streams}, got {probed}"
+        )
+
+
+def test_multi_part_collection_has_three_distinct_parts(
+    toolchain: FixtureToolchain, fixture_cache: Path
+) -> None:
+    recipe = next(r for r in FIXTURE_RECIPES if r.fixture_id == "multi-part")
+    generated = generate_fixture(recipe, toolchain, fixture_cache)
+    names = {part.name for part in generated.parts}
+    assert len(names) == 3, "a multi-Part collection must be several separate files"
+
+
+def test_probe_projection_accepts_the_muxed_subtitle_branch(
+    toolchain: FixtureToolchain, fixture_cache: Path
+) -> None:
+    """The production probe projector accepts a synthetic subtitle-first twin."""
+
+    recipe = next(r for r in FIXTURE_RECIPES if r.fixture_id == "subtitle-first")
+    generated = generate_fixture(recipe, toolchain, fixture_cache)
+    raw = probe_document(generated.parts[0], toolchain)
+    result = project_probe_document(ProbeDocument(raw_json=raw))
+    assert result.projection is not None, result.diagnostics
+    codec_types = {stream.codec_type for stream in result.projection.streams}
+    assert {"video", "audio", "subtitle"} <= codec_types
+
+
+def test_visual_text_branch_is_a_genuine_video_render(
+    toolchain: FixtureToolchain, fixture_cache: Path
+) -> None:
+    """The visual-text twin is a real video-only render at the recipe geometry.
+
+    The pinned ffmpeg has no libfreetype, so the burned-in text comes from
+    ``testsrc``'s built-in counter font rather than ``drawtext``. ffmpeg errors
+    out on any filter failure (it cannot silently emit a blank stream), so a
+    passing render here is a genuine text-bearing one. Verifying the *glyph
+    content* itself is OCR — the job of the downstream visual-text flow exercised
+    by the end-to-end tickets, not of the fixture generator.
+    """
+
+    recipe = next(r for r in FIXTURE_RECIPES if r.fixture_id == "visual-text")
+    generated = generate_fixture(recipe, toolchain, fixture_cache)
+    document = json.loads(probe_document(generated.parts[0], toolchain))
+    streams = document["streams"]
+    assert [stream["codec_type"] for stream in streams] == ["video"]
+    assert (streams[0]["width"], streams[0]["height"]) == (160, 120)
+
+
+# -- generation is session-cached and confined to the temp root --------------
+
+
+def test_second_generation_reuses_the_cache(toolchain: FixtureToolchain, tmp_path: Path) -> None:
+    recipe = FIXTURE_RECIPES[0]
+    first = generate_fixture(recipe, toolchain, tmp_path)
+    assert first.regenerated is True
+    first_mtimes = [part.stat().st_mtime_ns for part in first.parts]
+
+    second = generate_fixture(recipe, toolchain, tmp_path)
+    assert second.regenerated is False
+    assert second.parts == first.parts
+    # Nothing was rewritten: the byte-for-byte files are the originals.
+    assert [part.stat().st_mtime_ns for part in second.parts] == first_mtimes
+
+
+def test_cache_is_versioned(toolchain: FixtureToolchain, tmp_path: Path) -> None:
+    recipe = FIXTURE_RECIPES[0]
+    generated = generate_fixture(recipe, toolchain, tmp_path)
+    for part in generated.parts:
+        assert f"v{RECIPES_VERSION}" in part.parts
