@@ -27,26 +27,19 @@ confirm``) is driven end to end once in
   ``complete`` and publish VALID core content (per-Part subtitles, transcript,
   content report, segments); the latest pointer advances.
 * ``full-asr``, ``multi-part`` and ``visual-text`` carry no usable subtitle track,
-  and the heavy full-ASR / OCR work needs a model and the network that the offline
-  boundary forbids. Their subtitle stage produces a well-formed
-  ``subtitle_unavailable_requires_asr_plan`` handoff report, but with no model to
-  hand off to the run publishes a clean, hash-verifiable ``failed`` RunBundle. That
-  is the correct offline terminal, and it doubles as a live proof of the standing
-  guarantee that a failed run never advances the latest pointer.
+  so the subtitles stage hands off to ASR and the run proceeds to the first heavy
+  stage whose model the offline boundary forbids (audio analysis), where it
+  decision-pauses. The run publishes a clean, hash-verifiable ``incomplete``
+  RunBundle carrying that required decision; with no partial content the latest
+  pointer does not advance. That is the correct offline terminal for a
+  model-dependent branch, and it proves the run reaches, executes, and publishes
+  rather than failing at the subtitles stage.
 
 The cross-branch orchestration commands are exercised once each (for budget), all
 against real runs: ``pause``/``resume`` at a real unit boundary, ``cancel`` at a
 real unit boundary, and ``vcp improve`` carrying an unaffected Part forward from a
 genuinely published subtitle-bearing bundle. The 16 expert commands are out of
 scope — their per-phase contract tests remain their contract.
-
-Observation for a follow-up (not fixed here, per the ticket's offline boundary):
-the composition maps a subtitle stage that returns top-level ``blocked`` while
-carrying a full-ASR handoff (a non-empty ``subtitle_unavailable_parts``) to a
-stage *failure*, so a full-ASR source fails at the subtitles stage rather than
-proceeding to transcription's resource-confirmation pause. Offline the terminal is
-a published failed bundle either way; wiring the handoff through to transcription
-is a production change deferred to the ASR workstream.
 """
 
 from __future__ import annotations
@@ -152,9 +145,9 @@ _BRANCHES: tuple[_BranchCase, ...] = (
     _BranchCase(
         "anomalous-subtitles", ("anomalous-subtitles",), True, RunStatus.COMPLETE, True, True
     ),
-    _BranchCase("full-asr", ("full-asr",), False, RunStatus.FAILED, False, False),
-    _BranchCase("multi-part", ("multi-part",), False, RunStatus.FAILED, False, False),
-    _BranchCase("visual-text", ("visual-text",), False, RunStatus.FAILED, False, False),
+    _BranchCase("full-asr", ("full-asr",), False, RunStatus.INCOMPLETE, False, False),
+    _BranchCase("multi-part", ("multi-part",), False, RunStatus.INCOMPLETE, False, False),
+    _BranchCase("visual-text", ("visual-text",), False, RunStatus.INCOMPLETE, False, False),
 )
 
 
@@ -391,10 +384,12 @@ def test_branch_runs_through_cli_to_a_published_bundle(
     assert inventory_doc["inventory"]["schema_version"] == 1
     assert isinstance(inventory_doc["inventory"]["entries"], list)
 
-    _assert_branch_content(case, output_dir, tmp_path)
+    _assert_branch_content(case, run_doc, output_dir, tmp_path)
 
 
-def _assert_branch_content(case: _BranchCase, output_dir: Path, root: Path) -> None:
+def _assert_branch_content(
+    case: _BranchCase, run_doc: Mapping[str, object], output_dir: Path, root: Path
+) -> None:
     """Assert the branch's published content and the standing latest-pointer rule."""
 
     artifacts = _manifest_artifacts(output_dir)
@@ -405,10 +400,15 @@ def _assert_branch_content(case: _BranchCase, output_dir: Path, root: Path) -> N
         # A real extracted analysis derivative proves ffmpeg ran inside the run.
         assert any((root / "work").rglob("*.wav")), "expected a real analysis derivative"
     else:
-        # A failed offline branch publishes the audit floor with no VALID content.
+        # A model-dependent branch decision-pauses past the subtitles stage and
+        # publishes the audit floor with no VALID content — proof it reached and
+        # executed rather than failing at subtitles.
+        assert run_doc["disposition"] == "decision_required", run_doc
+        assert run_doc.get("required_decision"), run_doc
         content = [a for a in artifacts if a.get("kind") in _CORE_CONTENT_KINDS]
         assert all(a["status"] != "valid" for a in content), content
-        # The standing guarantee: a failed run never advances the latest pointer.
+        # The standing guarantee: a run with no published partial content (a failed
+        # or content-free decision pause) never advances the latest pointer.
         source_id = output_dir.parent.name
         pointer = read_latest_pointer(root / "outputs" / source_id / "latest.json")
         assert pointer is None or pointer.run_id != output_dir.name

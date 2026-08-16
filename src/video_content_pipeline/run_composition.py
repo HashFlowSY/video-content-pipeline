@@ -246,7 +246,35 @@ def _invoke_subtitles(state: _CompositionState) -> StageResult:
         )
         status, report = _split(result)
     _record_subtitle_handoff(state, report)
-    return _record(state, StageName.SUBTITLES, map_stage_return(status, report))
+    mapped = map_stage_return(status, report)
+    if _is_full_asr_handoff(state, mapped):
+        # A source with no usable embedded subtitle track makes the subtitles stage
+        # return ``blocked``, but when every Part is instead recorded as a clean
+        # full-ASR handoff the stage has not failed — it has produced exactly the
+        # report transcription needs. Complete the stage (carrying its report id) so
+        # the run proceeds to transcription, which applies its own full-ASR logic (a
+        # subtitle-first upgrade or a full-ASR resource-confirmation pause), rather
+        # than failing the whole run at the subtitles stage. A genuinely broken
+        # subtitle report leaves at least one Part outside the handoff set and so
+        # stays a failure.
+        mapped = StageResult.completed({"report_id": report.get("report_id")})
+    return _record(state, StageName.SUBTITLES, mapped)
+
+
+def _is_full_asr_handoff(state: _CompositionState, mapped: StageResult) -> bool:
+    """Whether a failed subtitle mapping is really an all-Parts full-ASR handoff.
+
+    True only when the mapping failed, the subtitle report parsed, and *every* Part
+    of the plan is in the report's ASR handoff set (``subtitle_unavailable_parts``,
+    recorded by :func:`_record_subtitle_handoff`). Requiring all Parts keeps a
+    genuine subtitle failure — where some Part is broken rather than merely
+    subtitle-unavailable — a failure.
+    """
+
+    if mapped.kind is not StageResultKind.FAILED or state.subtitle_report is None:
+        return False
+    part_ids = {artifact.source_id for artifact in state.plan.source_artifacts}
+    return bool(part_ids) and part_ids <= set(state.subtitle_asr_handoff)
 
 
 def _record_subtitle_handoff(state: _CompositionState, report: Mapping[str, object]) -> None:
@@ -471,9 +499,7 @@ def _gather_subtitle_evidence(
 
     report = state.subtitle_report
     assert report is not None
-    bases = tuple(
-        basis for basis in expected_subtitle_bases(mode) if basis in _BASIS_RENDERINGS
-    )
+    bases = tuple(basis for basis in expected_subtitle_bases(mode) if basis in _BASIS_RENDERINGS)
     part_subtitles: dict[tuple[str, PublicationBasis], TimedArtifactEvidence] = {}
     valid_by_source = _valid_candidates_by_source(report)
     for source_id, candidate in valid_by_source.items():

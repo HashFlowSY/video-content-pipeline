@@ -31,12 +31,15 @@ from video_content_pipeline.run_choices import (
 )
 from video_content_pipeline.run_composition import (
     StageFunctions,
+    _CompositionState,
+    _is_full_asr_handoff,
     build_run_composition,
     map_stage_return,
 )
 from video_content_pipeline.source import SourceArtifact
 from video_content_pipeline.stage_dag import (
     StageName,
+    StageResult,
     StageResultKind,
     StageUnit,
     plan_stage_units,
@@ -118,6 +121,85 @@ def test_map_blocked_audio_with_acquisition_capability_is_a_decision_pause() -> 
 def test_map_plain_blocked_is_a_failure() -> None:
     result = map_stage_return("blocked", {"report_id": "r", "diagnostics": []})
     assert result.kind is StageResultKind.FAILED
+
+
+# --- Subtitle full-ASR handoff override -------------------------------------
+
+#: ``_is_full_asr_handoff`` only checks the report parsed (is not ``None``); the
+#: report's own contents are irrelevant to the predicate, so a sentinel suffices.
+_PARSED_REPORT = object()
+
+
+def _multi_plan(part_ids: tuple[str, ...]) -> RunPlan:
+    return RunPlan(
+        plan_id=_PLAN_ID,
+        report_id="0" * 32,
+        source_artifacts=tuple(
+            SourceArtifact(source_id=p, sha256=p, byte_count=1, media_path=Path("m"))
+            for p in part_ids
+        ),
+        tools=(),
+        disk_headroom=calculate_disk_headroom(0),
+        configuration_fingerprint="cfg" + "0" * 61,
+        run_choices=RunPlanChoices.build(
+            (
+                RunChoice(
+                    STAGE_RUN,
+                    KEY_ASR_MODE,
+                    COLLECTION_SCOPE,
+                    AsrMode.FULL_ASR.value,
+                    ChoiceProvenance.USER_CHOSEN,
+                ),
+                RunChoice(
+                    STAGE_RUN,
+                    KEY_VISUAL_TEXT_ENABLED,
+                    COLLECTION_SCOPE,
+                    "false",
+                    ChoiceProvenance.USER_CHOSEN,
+                ),
+            )
+        ),
+    )
+
+
+def _handoff_state(
+    tmp_path: Path, part_ids: tuple[str, ...], handoff: tuple[str, ...], *, report: object
+) -> _CompositionState:
+    state = _CompositionState(
+        layout=_layout(tmp_path), plan=_multi_plan(part_ids), functions=StageFunctions()
+    )
+    state.subtitle_report = report  # type: ignore[assignment]
+    state.subtitle_asr_handoff = handoff
+    return state
+
+
+_A_FAILURE = map_stage_return("blocked", {"report_id": "r"})
+
+
+def test_all_parts_handoff_overrides_a_failure(tmp_path: Path) -> None:
+    state = _handoff_state(tmp_path, (_PART,), (_PART,), report=_PARSED_REPORT)
+    assert _is_full_asr_handoff(state, _A_FAILURE) is True
+
+
+def test_a_partial_handoff_stays_a_failure(tmp_path: Path) -> None:
+    parts = (_PART, "b" * 64)
+    state = _handoff_state(tmp_path, parts, (_PART,), report=_PARSED_REPORT)
+    assert _is_full_asr_handoff(state, _A_FAILURE) is False
+
+
+def test_no_handoff_stays_a_failure(tmp_path: Path) -> None:
+    state = _handoff_state(tmp_path, (_PART,), (), report=_PARSED_REPORT)
+    assert _is_full_asr_handoff(state, _A_FAILURE) is False
+
+
+def test_an_unparsed_report_stays_a_failure(tmp_path: Path) -> None:
+    state = _handoff_state(tmp_path, (_PART,), (_PART,), report=None)
+    assert _is_full_asr_handoff(state, _A_FAILURE) is False
+
+
+def test_a_successful_mapping_is_never_overridden(tmp_path: Path) -> None:
+    state = _handoff_state(tmp_path, (_PART,), (_PART,), report=_PARSED_REPORT)
+    assert _is_full_asr_handoff(state, StageResult.completed()) is False
 
 
 # --- Executor chaining and translation --------------------------------------
