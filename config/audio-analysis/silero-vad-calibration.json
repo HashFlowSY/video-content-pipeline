@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "capability": "vad",
+  "candidate_id": "silero-vad",
+  "calibration_version": "silero-vad-v6.2.1-first-device-baseline-2026-08-16",
+  "model_asset_sha256": "0898f9226ecd53bbc80e54b9511c9047ae66c9e5ec13c7dc822195e7fc1dc1d6",
+  "sample_rate": 16000,
+  "window_samples": 512,
+  "qualification_scope": "first_device_baseline",
+  "classification": {
+    "speech_probability_threshold": 0.5,
+    "min_speech_samples": 4000,
+    "min_silence_samples": 1600,
+    "speech_pad_samples": 480
+  },
+  "thresholds": {
+    "uncovered_speech_duration": { "numerator": 1, "denominator": 2 },
+    "long_silence_duration": { "numerator": 2, "denominator": 1 }
+  },
+  "notes": "Model-specific silero-vad calibration record (ADR 0029). Classification thresholds are the silero v6 published defaults at 16 kHz (0.5 probability threshold; 250 ms minimum speech; 100 ms minimum silence; 30 ms speech pad -> 4000/1600/480 samples). Partition-risk durations (uncovered_speech_duration, long_silence_duration) match the audio-analysis VAD contract. qualification_scope is 'first_device_baseline': these thresholds gate formal speech_likely/non_speech classification (uncalibrated audio stays indeterminate per ADR 0029) but the Chinese/English quality of the selection is only confirmed by the maintainer sample review in the Phase 11 prototype ticket, not by this record."
+}

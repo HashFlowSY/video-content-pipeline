@@ -80,6 +80,15 @@ class HalfOpenInterval:
         return self.start < other.end and other.start < self.end
 
 
+def interval_as_json(interval: HalfOpenInterval) -> dict[str, object]:
+    """Serialize a half-open interval as exact ``{start, end}`` numerator/denominator pairs."""
+
+    return {
+        "start": {"numerator": interval.start.numerator, "denominator": interval.start.denominator},
+        "end": {"numerator": interval.end.numerator, "denominator": interval.end.denominator},
+    }
+
+
 @dataclass(frozen=True)
 class PartCoverageStart:
     """The observed raw source boundary that anchors a Part's export time."""

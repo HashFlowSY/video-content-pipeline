@@ -83,3 +83,9 @@ python_version = "3.12"
 strict = true
 files = ["src"]
 warn_unused_configs = true
+
+# onnxruntime ships no py.typed; the real VAD engine (Phase 11 ticket 06) is the
+# first in-process ONNX consumer. Its wrapper is fully typed at our boundary.
+[[tool.mypy.overrides]]
+module = ["onnxruntime", "onnxruntime.*"]
+ignore_missing_imports = true

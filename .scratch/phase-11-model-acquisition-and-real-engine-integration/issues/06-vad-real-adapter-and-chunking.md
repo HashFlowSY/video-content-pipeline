@@ -11,16 +11,16 @@ authoritative timeline. Calibration follows ADR 0029 (model-specific VAD
 calibration record).
 
 **Blocked by:** 03, 04
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Real silero inference over a fixture-derived wav produces a valid
+- [x] Real silero inference over a fixture-derived wav produces a valid
       Complete VAD partition (integration test, offline, model from the
       registry path)
-- [ ] Missing/hash-mismatched asset yields the typed acquisition failure,
+- [x] Missing/hash-mismatched asset yields the typed acquisition failure,
       never a network attempt
-- [ ] Chunk derivation is deterministic, ≤5 min per chunk, cuts only in
+- [x] Chunk derivation is deterministic, ≤5 min per chunk, cuts only in
       silence, covers all speech, and round-trips time mappings exactly
       (unit + property tests)
-- [ ] VAD calibration record produced and gate-checked per ADR 0029
-- [ ] Full suite green within budget
+- [x] VAD calibration record produced and gate-checked per ADR 0029
+- [x] Full suite green within budget
