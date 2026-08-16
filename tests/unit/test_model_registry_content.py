@@ -55,9 +55,7 @@ def _registry() -> dict[str, Any]:
 
 
 def _grouped() -> dict[str, list[Any]]:
-    return parse_candidate_matrix(
-        _registry(), _ALL_CAPABILITIES, invalid_error=_RegistryError
-    )
+    return parse_candidate_matrix(_registry(), _ALL_CAPABILITIES, invalid_error=_RegistryError)
 
 
 def test_registry_is_the_schema_2_candidate_matrix() -> None:

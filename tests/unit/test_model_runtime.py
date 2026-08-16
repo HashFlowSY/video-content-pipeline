@@ -122,9 +122,7 @@ def _request() -> EngineRequest:
 
 
 def test_protocol_round_trips_with_stub(tmp_path: Path) -> None:
-    stub = _write_stub(
-        tmp_path, "echo.py", _ECHO_STUB % {"guard_names": tuple(HUB_OFFLINE_GUARDS)}
-    )
+    stub = _write_stub(tmp_path, "echo.py", _ECHO_STUB % {"guard_names": tuple(HUB_OFFLINE_GUARDS)})
     request = _request()
 
     result = run_engine_subprocess(_command(stub), request, timeout_seconds=30)
@@ -138,9 +136,7 @@ def test_protocol_round_trips_with_stub(tmp_path: Path) -> None:
 
 
 def test_offline_guards_set_in_child_environment(tmp_path: Path) -> None:
-    stub = _write_stub(
-        tmp_path, "echo.py", _ECHO_STUB % {"guard_names": tuple(HUB_OFFLINE_GUARDS)}
-    )
+    stub = _write_stub(tmp_path, "echo.py", _ECHO_STUB % {"guard_names": tuple(HUB_OFFLINE_GUARDS)})
 
     result = run_engine_subprocess(_command(stub), _request(), timeout_seconds=30)
 
@@ -151,9 +147,7 @@ def test_offline_guards_set_in_child_environment(tmp_path: Path) -> None:
 
 def test_memory_returned_after_exit(tmp_path: Path) -> None:
     """Once the runner returns, the child process no longer exists on the OS."""
-    stub = _write_stub(
-        tmp_path, "echo.py", _ECHO_STUB % {"guard_names": tuple(HUB_OFFLINE_GUARDS)}
-    )
+    stub = _write_stub(tmp_path, "echo.py", _ECHO_STUB % {"guard_names": tuple(HUB_OFFLINE_GUARDS)})
 
     result = run_engine_subprocess(_command(stub), _request(), timeout_seconds=30)
 
@@ -162,9 +156,7 @@ def test_memory_returned_after_exit(tmp_path: Path) -> None:
 
 
 def test_parent_writes_nothing_to_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    stub = _write_stub(
-        tmp_path, "echo.py", _ECHO_STUB % {"guard_names": tuple(HUB_OFFLINE_GUARDS)}
-    )
+    stub = _write_stub(tmp_path, "echo.py", _ECHO_STUB % {"guard_names": tuple(HUB_OFFLINE_GUARDS)})
     workdir = tmp_path / "work"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
