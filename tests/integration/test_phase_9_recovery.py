@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.executors import KillingExecutor
 from video_content_pipeline.heavy_task_lock import (
     ProcessIdentity,
     acquire_heavy_task_lock,
@@ -135,18 +136,6 @@ def _layout(tmp_path: Path) -> RunLayout:
     )
 
 
-def _crash_after(count: int, executed: list[StageUnit]) -> Callable[..., StageResult]:
-    """An executor that completes ``count`` units then dies mid-unit (a kill)."""
-
-    def executor(unit: StageUnit, key: StageInvalidationKey) -> StageResult:
-        if len(executed) >= count:
-            raise RuntimeError("process killed mid-unit")
-        executed.append(unit)
-        return StageResult.completed()
-
-    return executor
-
-
 def _crash_a_running_run(layout: RunLayout, *, completed_units: int) -> list[StageUnit]:
     """Drive a fresh run to ``running``, complete some units, then kill it.
 
@@ -157,17 +146,17 @@ def _crash_a_running_run(layout: RunLayout, *, completed_units: int) -> list[Sta
     writer = RunStateWriter.create(layout, plan_id=_PLAN_ID, clock=_clock())
     writer.transition_to(RunStatus.QUEUED)
     writer.transition_to(RunStatus.RUNNING)
-    executed: list[StageUnit] = []
+    killer = KillingExecutor(survive=completed_units)
     with pytest.raises(RuntimeError):
         execute_stages(
             writer=writer,
             layout=layout,
             plan=_plan(),
-            executor=_crash_after(completed_units, executed),
+            executor=killer,
             on_boundary=lambda: ControlDirective.CONTINUE,
         )
     assert read_run_state(layout.state_path).status is RunStatus.RUNNING
-    return executed
+    return killer.executed
 
 
 def _crash_a_pausing_run(layout: RunLayout) -> None:
