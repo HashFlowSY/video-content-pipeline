@@ -325,6 +325,9 @@ definition may be changed.
 - `Persistent subtitle audio-completeness limitation` → `text-analysis`
 - `Controlled offline text adapter` → `text-analysis`
 - `Text-model identity invalidation` → `text-analysis`
+- `Text-semantics capability contract` → `text-analysis`
+- `Model-acquisition-required text-analysis result` → `text-analysis`
+- `Text-semantics decoding calibration` → `text-analysis`
 - `Text-analysis unavailable result and offline exit gate` → `text-analysis`
 - `Phase 6 report language boundary` → `text-analysis`
 - `Technical text-processing block` → `text-analysis`
@@ -509,3 +512,4 @@ future ADR can be routed without creating a context-local tree.
 - [ADR 0053](docs/adr/0053-use-single-writer-run-state-with-file-based-control-requests.md)
 - [ADR 0054](docs/adr/0054-verify-engineering-with-synthetic-media-and-a-deterministic-fault-matrix.md)
 - [ADR 0055](docs/adr/0055-run-mlx-model-engines-in-per-stage-subprocesses.md)
+- [ADR 0056](docs/adr/0056-require-model-specific-text-semantics-calibration.md)

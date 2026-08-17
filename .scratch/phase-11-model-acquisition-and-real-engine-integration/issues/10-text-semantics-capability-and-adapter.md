@@ -16,18 +16,18 @@ statuses as the docstrings always promised. Glossary and CONTEXT-MAP
 updated (term ownership: text-analysis).
 
 **Blocked by:** 04, 05
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Capability evaluation over the registry yields
+- [x] Capability evaluation over the registry yields
       eligible/acquisition-required/ineligible states with the same
       semantics as the audio capabilities (unit tests mirror prior art)
-- [ ] Offline adapter can never satisfy the real-model path (explicit
+- [x] Offline adapter can never satisfy the real-model path (explicit
       test)
-- [ ] Real adapter subprocess request carries model path, prompt version,
+- [x] Real adapter subprocess request carries model path, prompt version,
       sampling, KV bound; response projects into the existing text-model
       output projection (stub unit tests + offline real-engine
       integration test)
-- [ ] Malformed model JSON becomes retained diagnostics + typed status,
+- [x] Malformed model JSON becomes retained diagnostics + typed status,
       never a crash or fabricated content
-- [ ] Glossary/CONTEXT-MAP entries added; full suite green within budget
+- [x] Glossary/CONTEXT-MAP entries added; full suite green within budget

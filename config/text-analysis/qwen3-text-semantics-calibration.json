@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "capability": "text_semantics",
+  "candidate_id": "qwen3-4b-instruct-2507-8bit",
+  "calibration_version": "qwen3-4b-instruct-2507-8bit-first-device-baseline-2026-08-17",
+  "model_identity": {
+    "model_asset_sha256": "2a1b7ba81037c15882e233f7a1e40dd41251d51fb4afac48a164a3cc61e479e2",
+    "backend": "mlx-lm",
+    "backend_version": "0.31.3",
+    "precision": "8bit",
+    "device_class": "apple-m1",
+    "rules_fingerprint": "text-analysis-rules-v1"
+  },
+  "prompt_template_version": "phase-06-prompt-template-v1",
+  "qualification_scope": "first_device_baseline",
+  "decoding": {
+    "temperature": 0.0,
+    "seed": 0,
+    "max_tokens": 4096,
+    "max_kv_size": 8192
+  },
+  "notes": "Model-specific text-semantics decoding calibration profile (ADR 0056) for the Qwen3-4B-Instruct-2507-8bit engine executed through the Model runtime subprocess (ADR 0055) with mlx-lm. model_identity binds the exact pinned model asset SHA-256, the mlx-lm backend and version, the 8-bit precision, the apple-m1 device class, and the text-analysis rules fingerprint; any bound-identity change invalidates the profile. prompt_template_version binds the versioned prompt template the profile was calibrated for, so a prompt revision invalidates the profile. decoding fixes the deterministic sampling controls: temperature 0.0 is decoded as greedy argmax and seed makes the (already deterministic) run reproducible, max_tokens bounds the generation length, and max_kv_size bounds the KV cache so peak memory stays within the 12 GiB envelope on this device. qualification_scope is 'first_device_baseline': these settings qualify the real engine only for offline engineering verification here; the Chinese/English semantic quality of the selection is confirmed only by the maintainer sample review in the Phase 11 prototype ticket, not by this record. Model-proposed boundaries and content are always validated against the revalidated cue evidence by the unchanged Text-model output projection and adjudication, so this profile never makes unproven model output authoritative."
+}

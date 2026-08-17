@@ -110,3 +110,12 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["mlx_whisper", "mlx_whisper.*"]
 ignore_missing_imports = true
+
+# mlx-lm ships py.typed but exposes untyped helpers (e.g. the tokenizer's
+# apply_chat_template) and a union-typed load(); the real text-semantics engine
+# (Phase 11 ticket 10) loads Qwen3-4B only inside its Model runtime subprocess
+# child, so treat the package as untyped there rather than annotate around it.
+[[tool.mypy.overrides]]
+module = ["mlx_lm", "mlx_lm.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

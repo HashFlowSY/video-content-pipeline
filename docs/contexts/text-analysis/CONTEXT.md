@@ -9,8 +9,9 @@ and ADRs.
 Relevant global decisions include [ADR 0040](../../adr/0040-require-cue-level-evidence-for-phase-6-facts.md),
 [ADR 0041](../../adr/0041-keep-phase-6-text-analysis-in-immutable-workspaces.md),
 [ADR 0042](../../adr/0042-use-context-map-and-domain-owned-glossaries.md),
-[ADR 0046](../../adr/0046-recompute-affected-parts-with-carried-forward-analysis.md), and
-[ADR 0049](../../adr/0049-separate-visual-evidence-classification-from-fact-upgrade.md).
+[ADR 0046](../../adr/0046-recompute-affected-parts-with-carried-forward-analysis.md),
+[ADR 0049](../../adr/0049-separate-visual-evidence-classification-from-fact-upgrade.md), and
+[ADR 0056](../../adr/0056-require-model-specific-text-semantics-calibration.md).
 
 ## Language
 
@@ -136,6 +137,22 @@ _Avoid_: alignment-proved completeness
 The fixed substitute capability used to verify text-analysis contracts without
 claiming real-world model quality.
 _Avoid_: synthetic model qualification
+
+**Text-semantics capability contract**:
+The provider-neutral `text_semantics` capability evaluated from the model registry
+through the shared eligibility gate; the Controlled offline text adapter is not a
+registry candidate and can never satisfy its real-model path.
+_Avoid_: offline adapter as real model
+
+**Model-acquisition-required text-analysis result**:
+The registry-only capability outcome recorded when no eligible, acquired
+text-semantics model is available, producing no SemanticSegments.
+_Avoid_: acquisition implies execution
+
+**Text-semantics decoding calibration**:
+The model-specific, hash-bound profile that pins the real text-semantics model's
+deterministic decoding configuration and versioned prompt template before real use.
+_Avoid_: portable decoding configuration
 
 **Text-model identity invalidation**:
 The state in which a changed model or generation-rule identity makes prior

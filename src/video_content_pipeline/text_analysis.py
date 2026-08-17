@@ -51,7 +51,13 @@ from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
 
-from video_content_pipeline.capabilities import MAX_MODEL_RESOURCE_BYTES
+from video_content_pipeline.capabilities import (
+    MAX_MODEL_RESOURCE_BYTES,
+    CandidateAssessment,
+    assess_candidate,
+    capability_state_from_grades,
+    load_candidate_matrix,
+)
 from video_content_pipeline.evidence import (
     InputEvidence,
     validated_report_id,
@@ -131,9 +137,11 @@ class TextAnalysisReportStatus(StrEnum):
     recorded when no eligible offline text adapter exists, and
     ``resource_envelope_exceeded`` is the resumable decision-pause outcome
     recorded when a conservative future-real-model resource estimate exceeds the
-    12 GiB envelope; both retain no SemanticSegments. (A future real-model path
-    would add its own ``model_acquisition_required`` outcome when that capability
-    is built.)
+    12 GiB envelope; both retain no SemanticSegments. ``model_acquisition_required``
+    is the ``text_semantics`` capability-evaluation outcome recorded when the real
+    text-semantics model is not yet an eligible, acquired engine (Phase 11 ticket
+    10): a registry-only evaluation that produces no SemanticSegments, mirroring the
+    transcription and visual-text capability results.
     """
 
     COMPLETE = "complete"
@@ -141,6 +149,7 @@ class TextAnalysisReportStatus(StrEnum):
     FAILED = "failed"
     CONTROLLED_ADAPTER_UNAVAILABLE = "controlled_adapter_unavailable"
     RESOURCE_ENVELOPE_EXCEEDED = "resource_envelope_exceeded"
+    MODEL_ACQUISITION_REQUIRED = "model_acquisition_required"
 
 
 class TextAnalysisError(ValueError):
@@ -149,6 +158,154 @@ class TextAnalysisError(ValueError):
     def __init__(self, reason: str, message: str) -> None:
         super().__init__(message)
         self.reason = reason
+
+
+# --- text_semantics capability evaluation (Phase 11 ticket 10) ----------------
+#
+# ``text_semantics`` is this phase's one new capability. Like transcription's
+# ``asr_*`` and visual-text's ``ocr_primary``, it is evaluated from
+# ``models/registry.json`` through the shared, security-sensitive eligibility gate
+# (:mod:`video_content_pipeline.capabilities`) and never downloads or runs a model.
+# The Controlled offline text adapter is not a registry candidate and carries no
+# pinned asset hash, so it can never grade as an eligible real model here (ADR 0037
+# lineage): the capability's real-model path is satisfied only by an eligible,
+# acquired registry candidate.
+
+#: The provider-neutral text-semantics capability defined by Phase 11.
+TEXT_SEMANTICS_CAPABILITY = "text_semantics"
+TEXT_SEMANTICS_CAPABILITIES: tuple[str, ...] = (TEXT_SEMANTICS_CAPABILITY,)
+
+
+@dataclass(frozen=True)
+class TextSemanticsCapabilityAvailability:
+    """The explicit availability state for the ``text_semantics`` capability."""
+
+    capability: str
+    state: str
+    candidates: tuple[CandidateAssessment, ...]
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "capability": self.capability,
+            "state": self.state,
+            "model": None,
+            "diagnostic": {
+                "reason": self.state,
+                "message": _capability_message(self.capability, self.state),
+            },
+            "candidates": [candidate.as_json() for candidate in self.candidates],
+        }
+
+
+@dataclass(frozen=True)
+class TextSemanticsCapabilityReport:
+    """Immutable ``text_semantics`` capability evaluation with no text evidence."""
+
+    result: str
+    capabilities: tuple[TextSemanticsCapabilityAvailability, ...]
+    model_registry_evidence: InputEvidence | None
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "result": self.result,
+            "capabilities": [capability.as_json() for capability in self.capabilities],
+            "text_analysis_evidence": None,
+            "model_registry": (
+                self.model_registry_evidence.as_json()
+                if self.model_registry_evidence is not None
+                else None
+            ),
+            "guarantees": {
+                "model_acquisition": "not_attempted",
+                "model_execution": "not_attempted",
+                "network_access": "not_attempted",
+                "outputs_publication": "not_attempted",
+            },
+        }
+
+
+def evaluate_text_semantics_capability(project_root: Path) -> TextSemanticsCapabilityReport:
+    """Evaluate ``text_semantics`` from the model registry, offline.
+
+    With no eligible, acquired model available the result is always
+    ``model_acquisition_required`` and no text-analysis evidence is produced; the
+    per-capability state and candidate grades carry the detail a later, separately
+    authorized acquisition and execution step consumes. Same semantics as the audio
+    ``asr_*`` and visual-text ``ocr_primary`` capabilities: a credential-gated
+    candidate keeps the capability ``model_credential_gated``, an over-envelope or
+    evidence-incomplete candidate is ``model_ineligible``, and an eligible candidate
+    (or no candidate at all) means acquisition is the remaining step.
+    """
+
+    registry_path = project_root / "models" / "registry.json"
+    if not registry_path.exists():
+        return _text_semantics_report(
+            tuple(
+                TextSemanticsCapabilityAvailability(
+                    capability,
+                    TextAnalysisReportStatus.MODEL_ACQUISITION_REQUIRED.value,
+                    (),
+                )
+                for capability in TEXT_SEMANTICS_CAPABILITIES
+            ),
+            registry_evidence=None,
+        )
+
+    grouped = load_candidate_matrix(
+        registry_path,
+        TEXT_SEMANTICS_CAPABILITIES,
+        invalid_error=lambda message: TextAnalysisError("model_registry_invalid", message),
+    )
+    capabilities = tuple(
+        _text_semantics_availability(capability, grouped[capability], project_root)
+        for capability in TEXT_SEMANTICS_CAPABILITIES
+    )
+    return _text_semantics_report(capabilities, registry_evidence=_input_evidence(registry_path))
+
+
+def _text_semantics_report(
+    capabilities: tuple[TextSemanticsCapabilityAvailability, ...],
+    *,
+    registry_evidence: InputEvidence | None,
+) -> TextSemanticsCapabilityReport:
+    # A registry-only evaluation never acquires or executes: the result is always
+    # ``model_acquisition_required`` (mirroring the ASR/OCR capability reports).
+    return TextSemanticsCapabilityReport(
+        result=TextAnalysisReportStatus.MODEL_ACQUISITION_REQUIRED.value,
+        capabilities=capabilities,
+        model_registry_evidence=registry_evidence,
+    )
+
+
+def _text_semantics_availability(
+    capability: str, candidates: list[Mapping[str, object]], project_root: Path
+) -> TextSemanticsCapabilityAvailability:
+    # The asset-level model identity assess_candidate binds for an eligible
+    # candidate is exposed only when eligible; the finer model identity binds later
+    # at the Text-model output projection (ADR 0036), never at the offline adapter.
+    assessments = tuple(
+        assess_candidate(candidate, capability, project_root) for candidate in candidates
+    )
+    state = capability_state_from_grades(
+        (assessment.state, assessment.reason) for assessment in assessments
+    )
+    return TextSemanticsCapabilityAvailability(capability, state, assessments)
+
+
+def _capability_message(capability: str, state: str) -> str:
+    messages = {
+        "model_acquisition_required": (
+            f"No acquired offline model is available for {capability}; acquisition is required "
+            "before text-semantics generation."
+        ),
+        "model_credential_gated": (
+            f"A {capability} candidate requires credentials and is blocked."
+        ),
+        "model_ineligible": (
+            f"No registered {capability} candidate satisfies the eligibility gates."
+        ),
+    }
+    return messages[state]
 
 
 @dataclass(frozen=True)

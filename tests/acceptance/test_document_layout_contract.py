@@ -174,6 +174,10 @@ POST_MIGRATION_TERMS = {
     "Fault matrix",
     # Phase 11 (orchestration addition)
     "Model runtime subprocess",
+    # Phase 11 (text-analysis additions, ticket 10)
+    "Text-semantics capability contract",
+    "Model-acquisition-required text-analysis result",
+    "Text-semantics decoding calibration",
 }
 
 RUNTIME_TERMS = {
