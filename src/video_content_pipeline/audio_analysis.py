@@ -1853,11 +1853,22 @@ def _resource_pause(
 
 
 def _record_stage_execution(
-    candidate: Mapping[str, object], output: Mapping[str, object], workspace_path: Path
+    candidate: Mapping[str, object],
+    output: Mapping[str, object],
+    workspace_path: Path,
+    *,
+    runtime_controls: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     capability = candidate.get("capability")
     candidate_id = candidate.get("candidate_id")
-    controls = candidate.get("execution_controls")
+    # The offline path reads the controlled candidate's fixture execution controls;
+    # a real run passes measured ``runtime_controls`` (its own child's peak plus the
+    # truthful released/0 unload after the child exits), validated by the identical
+    # envelope gate below so an over-envelope real stage fails closed exactly as a
+    # fixture one would.
+    controls = (
+        runtime_controls if runtime_controls is not None else candidate.get("execution_controls")
+    )
     if not isinstance(capability, str) or not isinstance(candidate_id, str):
         raise AudioAnalysisError("model_output_invalid", "Controlled stage identity is invalid.")
     stage_path = workspace_path / "stage-execution" / capability / candidate_id
