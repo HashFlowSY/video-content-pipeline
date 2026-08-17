@@ -13,17 +13,17 @@ arbitration, and gate-checked interval replacement are unchanged
 consumers of the real output shapes.
 
 **Blocked by:** 04, 05, 06
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Primary subprocess adapter round-trips the transcription projection
+- [x] Primary subprocess adapter round-trips the transcription projection
       contract (stub unit tests + offline real-engine integration test)
-- [ ] Chunked results assemble into a monotonic, coverage-consistent
+- [x] Chunked results assemble into a monotonic, coverage-consistent
       transcript on the authoritative timeline (property test)
-- [ ] Review adapter runs only on given intervals, from VAD-trimmed
+- [x] Review adapter runs only on given intervals, from VAD-trimmed
       audio, and its identity differs from primary (contract test)
-- [ ] Same-model retry is still classified recovery, never independent
+- [x] Same-model retry is still classified recovery, never independent
       review (existing rule re-proven with real identities)
-- [ ] Peak-memory evidence per stage; typed failures on missing asset /
+- [x] Peak-memory evidence per stage; typed failures on missing asset /
       child crash; hub-offline guards proven
-- [ ] Full suite green within budget
+- [x] Full suite green within budget
