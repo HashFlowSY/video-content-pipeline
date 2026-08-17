@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from video_content_pipeline import cli
+from video_content_pipeline.acquisition import MediaDownloadPlan, URLAcquisitionError
 from video_content_pipeline.cli import _parser
 from video_content_pipeline.external_tools import PinnedExternalTool
 from video_content_pipeline.inspection import PlanInspectionEvidence
@@ -174,6 +175,76 @@ def test_public_url_acquisition_enters_the_local_probe_and_decode_workflow(
     assert result["report"]["tools"] == [yt_dlp.as_json(), ffprobe.as_json(), ffmpeg.as_json()]
     assert result["report"]["url_authorizations"][0]["provenance"]["path"] == "/watch"
     assert "secret" not in _report_path(tmp_path, result["report"]).read_text(encoding="utf-8")
+
+
+def _acquire_after_confirmation(artifact: SourceArtifact) -> object:
+    """A stand-in acquisition that mirrors the real plan-then-confirm contract."""
+
+    def fake_acquire(
+        authorization: object, _downloader: object, _project_root: object, confirm: object
+    ) -> SourceArtifact:
+        plan = MediaDownloadPlan(
+            provenance=authorization.provenance,  # type: ignore[attr-defined]
+            media_hosts=("cdn-a.fake.test", "example.test"),
+            byte_count=12,
+            duration_seconds=61.5,
+            planned_increment_bytes=12 * 2 + 64 * 1024**2,
+            required_free_bytes=12 * 2 + 64 * 1024**2 + 1024**3,
+        )
+        if not confirm(plan):  # type: ignore[operator]
+            raise URLAcquisitionError("download_plan_unconfirmed", "declined in test")
+        return artifact
+
+    return fake_acquire
+
+
+def test_public_url_download_plan_is_disclosed_and_confirmed_before_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+    _write_url_planning_configuration(tmp_path)
+    artifact = _public_artifact(tmp_path)
+    yt_dlp = PinnedExternalTool("yt-dlp", tmp_path / "yt-dlp", "test", "a" * 64)
+    ffprobe = PinnedExternalTool("ffprobe", tmp_path / "ffprobe", "test", "b" * 64)
+    ffmpeg = PinnedExternalTool("ffmpeg", tmp_path / "ffmpeg", "test", "c" * 64)
+
+    monkeypatch.setattr(
+        cli,
+        "_configured_tool",
+        lambda _root, tool_id: {"yt-dlp": yt_dlp, "ffprobe": ffprobe, "ffmpeg": ffmpeg}[tool_id],
+    )
+    monkeypatch.setattr(cli, "acquire_public_source", _acquire_after_confirmation(artifact))
+    monkeypatch.setattr(cli, "capture_probe_documents", lambda *_args: _valid_probe_documents())
+    monkeypatch.setattr(cli, "_read_download_confirmation_line", lambda _prompt: "确认")
+
+    exit_code = cli.main(["plan", "https://example.test/watch", "--url-mode", "direct", "--json"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["status"] == "awaiting_decode_confirmation"
+    assert "cdn-a.fake.test" in captured.err
+    assert "确认" in captured.err
+
+
+def test_declined_download_plan_blocks_the_public_url_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+    artifact = _public_artifact(tmp_path)
+    yt_dlp = PinnedExternalTool("yt-dlp", tmp_path / "yt-dlp", "test", "a" * 64)
+
+    monkeypatch.setattr(cli, "_configured_tool", lambda _root, _tool_id: yt_dlp)
+    monkeypatch.setattr(cli, "acquire_public_source", _acquire_after_confirmation(artifact))
+    monkeypatch.setattr(cli, "_read_download_confirmation_line", lambda _prompt: "yes")
+
+    exit_code = cli.main(["plan", "https://example.test/watch", "--url-mode", "direct", "--json"])
+
+    assert exit_code == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "blocked"
+    assert result["report"]["diagnostics"][0]["reason"] == "download_plan_unconfirmed"
+    assert result["report"]["source_artifacts"] == []
 
 
 def test_duplicate_collection_content_is_retained_once_and_blocks_the_timeline(

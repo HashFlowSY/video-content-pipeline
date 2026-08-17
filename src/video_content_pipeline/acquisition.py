@@ -9,6 +9,8 @@ import socketserver
 import stat
 import threading
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 from urllib.parse import urlsplit
@@ -27,9 +29,11 @@ from video_content_pipeline.source import (
     snapshot_local_source,
 )
 from video_content_pipeline.url_policy import (
+    RedactedSourceProvenance,
     URLAccessMode,
     URLAuthorization,
     URLPolicyError,
+    disclose_destination_host,
     validate_destination,
 )
 
@@ -42,16 +46,51 @@ class URLAcquisitionError(ValueError):
         self.reason = reason
 
 
+DOWNLOAD_PLAN_CONFIRMATION_SIGNAL = "确认"
+
+
+@dataclass(frozen=True)
+class MediaDownloadPlan:
+    """One download's plan-time disclosure: media hosts, size, duration, disk need.
+
+    Confirming this plan authorizes exactly ``media_hosts`` for that single
+    download (ADR 0057). The set lives only in this in-memory value; the next
+    download of the same platform discloses and confirms its hosts again.
+    ``duration_seconds`` is disclosure-only and may honestly be unknown; the
+    byte count is the fail-closed quantity.
+    """
+
+    provenance: RedactedSourceProvenance
+    media_hosts: tuple[str, ...]
+    byte_count: int
+    duration_seconds: float | None
+    planned_increment_bytes: int
+    required_free_bytes: int
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "provenance": self.provenance.as_json(),
+            "media_hosts": list(self.media_hosts),
+            "byte_count": self.byte_count,
+            "duration_seconds": self.duration_seconds,
+            "planned_increment_bytes": self.planned_increment_bytes,
+            "required_free_bytes": self.required_free_bytes,
+        }
+
+
 def acquire_public_source(
     authorization: URLAuthorization,
     downloader: PinnedExternalTool,
     project_root: Path,
+    confirm_download_plan: Callable[[MediaDownloadPlan], bool],
 ) -> SourceArtifact:
-    """Acquire one authorized URL after validating its declared media destinations.
+    """Acquire one authorized URL after its download plan is confirmed.
 
     The downloader is queried in simulation mode first. Its structured metadata
-    must name a same-host media URL and an exact byte count before the second,
-    project-local download invocation is allowed to write anything.
+    must resolve the media hosts and an exact byte count, and the resulting
+    download plan must be confirmed, before the second, project-local download
+    invocation is allowed to write anything. The download admits connections to
+    exactly the confirmed host set (ADR 0057), fail-closed.
     """
 
     if downloader.tool_id != "yt-dlp":
@@ -77,11 +116,25 @@ def acquire_public_source(
             "url_downloader_unavailable", "The pinned downloader could not start."
         ) from error
     metadata = _parse_metadata(metadata_result)
-    _validate_metadata_destinations(authorization, metadata)
+    media_hosts = _resolve_media_hosts(authorization, metadata)
     byte_count = _metadata_byte_count(metadata)
     planned_increment = byte_count * 2 + 64 * 1024**2
+    headroom = calculate_disk_headroom(planned_increment)
+    plan = MediaDownloadPlan(
+        provenance=authorization.provenance,
+        media_hosts=media_hosts,
+        byte_count=byte_count,
+        duration_seconds=_metadata_duration(metadata),
+        planned_increment_bytes=planned_increment,
+        required_free_bytes=headroom.required_bytes,
+    )
+    if not confirm_download_plan(plan):
+        raise URLAcquisitionError(
+            "download_plan_unconfirmed",
+            "The media download plan was not confirmed; no bytes were moved.",
+        )
     try:
-        ensure_disk_headroom(project_root, calculate_disk_headroom(planned_increment))
+        ensure_disk_headroom(project_root, headroom)
         revalidate_external_tool(downloader)
         download_result = _run_download_under_host_control(
             authorization,
@@ -89,6 +142,7 @@ def acquire_public_source(
             cache_root,
             staging_root,
             byte_count,
+            confirmed_media_hosts=frozenset(plan.media_hosts),
         )
     except SourceIntakeError:
         raise
@@ -179,24 +233,38 @@ def _parse_metadata(result: object) -> dict[str, object]:
     return decoded
 
 
-def _validate_metadata_destinations(
+def _resolve_media_hosts(
     authorization: URLAuthorization, metadata: dict[str, object]
-) -> None:
+) -> tuple[str, ...]:
+    """Resolve every declared media destination host for plan disclosure (ADR 0057)."""
+
     destinations = _metadata_destinations(metadata)
     if not destinations:
         raise URLAcquisitionError(
             "url_media_location_missing", "The downloader did not declare a public media location."
         )
-    for destination in destinations:
-        validate_destination(authorization, destination)
+    hosts = {disclose_destination_host(authorization, destination) for destination in destinations}
+    return tuple(sorted(hosts))
+
+
+_DESTINATION_KEYS = ("webpage_url", "original_url", "url", "manifest_url", "fragment_base_url")
 
 
 def _metadata_destinations(metadata: dict[str, object]) -> tuple[str, ...]:
     values: list[str] = []
-    for key in ("webpage_url", "original_url", "url", "manifest_url", "fragment_base_url"):
+    for key in _DESTINATION_KEYS:
         value = metadata.get(key)
         if isinstance(value, str):
             values.append(value)
+    requested_formats = metadata.get("requested_formats")
+    if isinstance(requested_formats, list):
+        for component in requested_formats:
+            if not isinstance(component, dict):
+                continue
+            for key in _DESTINATION_KEYS:
+                value = component.get(key)
+                if isinstance(value, str):
+                    values.append(value)
     return tuple(dict.fromkeys(values))
 
 
@@ -236,6 +304,13 @@ def _is_positive_size(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _metadata_duration(metadata: dict[str, object]) -> float | None:
+    value = metadata.get("duration")
+    if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+        return float(value)
+    return None
+
+
 def _downloaded_media_path(result: object, staging_root: Path, maximum_byte_count: int) -> Path:
     returncode = getattr(result, "returncode", None)
     stdout = getattr(result, "stdout", None)
@@ -270,10 +345,19 @@ def _downloaded_media_path(result: object, staging_root: Path, maximum_byte_coun
 
 
 class _HostAuthorizationProxy:
-    """A local CONNECT/HTTP proxy that fails closed outside one URL authorization."""
+    """A local CONNECT/HTTP proxy that fails closed outside one URL authorization.
 
-    def __init__(self, authorization: URLAuthorization) -> None:
+    ``confirmed_media_hosts`` widens admission to exactly one confirmed download
+    plan's disclosed host set (ADR 0057); the metadata pass runs without it.
+    """
+
+    def __init__(
+        self,
+        authorization: URLAuthorization,
+        confirmed_media_hosts: frozenset[str] = frozenset(),
+    ) -> None:
         self.authorization = authorization
+        self.confirmed_media_hosts = confirmed_media_hosts
         self.failure: URLPolicyError | None = None
         self._server: socketserver.ThreadingTCPServer | None = None
         self._thread: threading.Thread | None = None
@@ -342,7 +426,11 @@ class _HostAuthorizationProxy:
         return f"http://{host}:{port}"
 
     def _authorize(self, host: str, scheme: str) -> None:
-        validate_destination(self.authorization, f"{scheme}://{host}/")
+        validate_destination(
+            self.authorization,
+            f"{scheme}://{host}/",
+            confirmed_media_hosts=self.confirmed_media_hosts,
+        )
 
     def __exit__(self, *_args: object) -> None:
         if self._server is not None:
@@ -370,8 +458,10 @@ def _run_download_under_host_control(
     cache_root: Path,
     staging_root: Path,
     maximum_byte_count: int,
+    *,
+    confirmed_media_hosts: frozenset[str],
 ) -> object:
-    with _HostAuthorizationProxy(authorization) as proxy:
+    with _HostAuthorizationProxy(authorization, confirmed_media_hosts) as proxy:
         result = run_tool(
             _download_command(
                 authorization,

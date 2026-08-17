@@ -15,10 +15,10 @@ allowlists and strict page-host equality were both rejected).
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Media hosts resolved from canned metadata appear in the download plan artifact
-- [ ] The proxy admits exactly the confirmed host set for the run
-- [ ] An undisclosed destination host (including a redirect target) is rejected as host escalation
-- [ ] No configuration or state carries host authority beyond the single confirmed download
-- [ ] Tests live at the URL-policy / proxy admission seam with fake hosts
+- [x] Media hosts resolved from canned metadata appear in the download plan artifact
+- [x] The proxy admits exactly the confirmed host set for the run
+- [x] An undisclosed destination host (including a redirect target) is rejected as host escalation
+- [x] No configuration or state carries host authority beyond the single confirmed download
+- [x] Tests live at the URL-policy / proxy admission seam with fake hosts

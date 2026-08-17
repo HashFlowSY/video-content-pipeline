@@ -11,7 +11,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from video_content_pipeline import __version__
-from video_content_pipeline.acquisition import URLAcquisitionError, acquire_public_source
+from video_content_pipeline.acquisition import (
+    DOWNLOAD_PLAN_CONFIRMATION_SIGNAL,
+    MediaDownloadPlan,
+    URLAcquisitionError,
+    acquire_public_source,
+)
 from video_content_pipeline.audio_analysis import analyze_audio, resume_audio_analysis
 from video_content_pipeline.durable_io import utc_now
 from video_content_pipeline.enhancement import (
@@ -484,7 +489,9 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
             )
         except URLPolicyError as error:
             return _blocked_url_report(error.reason, str(error), plans_root, ())
-        return _plan_public_sources((authorization,), project_root, plans_root)
+        return _plan_public_sources(
+            (authorization,), project_root, plans_root, json_output=arguments.json
+        )
     return _plan_local_file(Path(arguments.target), project_root, plans_root)
 
 
@@ -763,11 +770,15 @@ def _plan_manual_collection(
         entries = _collect_manual_urls(session, json_output=json_output)
     except URLPolicyError as error:
         return _blocked_url_report(error.reason, str(error), plans_root, session.entries)
-    return _plan_public_sources(entries, project_root, plans_root)
+    return _plan_public_sources(entries, project_root, plans_root, json_output=json_output)
 
 
 def _plan_public_sources(
-    authorizations: tuple[URLAuthorization, ...], project_root: Path, plans_root: Path
+    authorizations: tuple[URLAuthorization, ...],
+    project_root: Path,
+    plans_root: Path,
+    *,
+    json_output: bool,
 ) -> dict[str, object]:
     """Acquire authorized public sources before passing their snapshots to preflight."""
 
@@ -785,9 +796,13 @@ def _plan_public_sources(
         )
     artifacts: list[SourceArtifact] = []
     source_ids: set[str] = set()
+
+    def confirm(plan: MediaDownloadPlan) -> bool:
+        return _confirm_media_download_plan(plan, json_output=json_output)
+
     for ordinal, authorization in enumerate(authorizations, start=1):
         try:
-            artifact = acquire_public_source(authorization, downloader, project_root)
+            artifact = acquire_public_source(authorization, downloader, project_root, confirm)
         except (SourceIntakeError, URLAcquisitionError, URLPolicyError) as error:
             return _blocked_report(
                 error.reason,
@@ -850,6 +865,43 @@ def _collect_manual_urls(
 
 
 def _read_collection_line(prompt: str) -> str:
+    return input(prompt)
+
+
+def _confirm_media_download_plan(plan: MediaDownloadPlan, *, json_output: bool) -> bool:
+    """Disclose one download plan and require the per-run confirmation signal.
+
+    Anything other than the exact signal — including end of input — declines,
+    so a non-interactive invocation can never authorize a download implicitly.
+    """
+
+    duration = "unknown" if plan.duration_seconds is None else f"{plan.duration_seconds} seconds"
+    disclosure = "\n".join(
+        (
+            f"Media download plan for {plan.provenance.host}{plan.provenance.path}:",
+            f"  media hosts: {', '.join(plan.media_hosts)}",
+            f"  duration: {duration}",
+            f"  download size: {plan.byte_count} bytes",
+            f"  disk headroom required: {plan.required_free_bytes} bytes free",
+        )
+    )
+    prompt = (
+        "Authorize exactly these media hosts for this download only with "
+        f"{DOWNLOAD_PLAN_CONFIRMATION_SIGNAL}: "
+    )
+    if json_output:
+        print(disclosure, file=sys.stderr)
+        print(prompt, end="", file=sys.stderr)
+    else:
+        print(disclosure)
+    try:
+        submitted = _read_download_confirmation_line("" if json_output else prompt)
+    except EOFError:
+        return False
+    return submitted == DOWNLOAD_PLAN_CONFIRMATION_SIGNAL
+
+
+def _read_download_confirmation_line(prompt: str) -> str:
     return input(prompt)
 
 

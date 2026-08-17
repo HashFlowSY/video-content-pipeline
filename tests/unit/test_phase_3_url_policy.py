@@ -58,6 +58,46 @@ def test_new_host_and_https_downgrade_are_not_implicit() -> None:
     assert downgrade_error.value.reason == "https_downgrade"
 
 
+def test_confirmed_media_hosts_are_admitted_for_one_validation_only() -> None:
+    authorization = authorize_public_url("https://example.test/watch/1", URLAccessMode.DIRECT)
+    confirmed = frozenset({"cdn-a.fake.test", "cdn-b.fake.test"})
+
+    validate_destination(
+        authorization, "https://cdn-a.fake.test/video.m4s", confirmed_media_hosts=confirmed
+    )
+    validate_destination(
+        authorization, "https://cdn-b.fake.test/audio.m4s", confirmed_media_hosts=confirmed
+    )
+    validate_destination(
+        authorization, "https://example.test/watch/1", confirmed_media_hosts=confirmed
+    )
+
+
+def test_undisclosed_host_is_escalation_even_with_a_confirmed_set() -> None:
+    authorization = authorize_public_url("https://example.test/watch/1", URLAccessMode.DIRECT)
+    confirmed = frozenset({"cdn-a.fake.test"})
+
+    with pytest.raises(URLPolicyError) as error:
+        validate_destination(
+            authorization, "https://undisclosed.fake.test/media", confirmed_media_hosts=confirmed
+        )
+
+    assert error.value.reason == "host_escalation"
+
+
+def test_confirmed_media_hosts_never_relax_transport_integrity() -> None:
+    authorization = authorize_public_url("https://example.test/watch/1", URLAccessMode.DIRECT)
+
+    with pytest.raises(URLPolicyError) as error:
+        validate_destination(
+            authorization,
+            "http://cdn-a.fake.test/video.m4s",
+            confirmed_media_hosts=frozenset({"cdn-a.fake.test"}),
+        )
+
+    assert error.value.reason == "https_downgrade"
+
+
 def test_manual_collection_is_ordered_and_requires_endsignal() -> None:
     collection = ManualCollectionSession(mode=URLAccessMode.FILTERED)
     collection.append("https://example.test/part-1")

@@ -131,14 +131,41 @@ def redact_url(raw_url: str) -> RedactedSourceProvenance:
     )
 
 
-def validate_destination(authority: URLAuthorization, destination_url: str) -> None:
-    """Reject redirects and discovered hosts outside the original authorization."""
+def validate_destination(
+    authority: URLAuthorization,
+    destination_url: str,
+    *,
+    confirmed_media_hosts: frozenset[str] = frozenset(),
+) -> None:
+    """Reject redirects and discovered hosts outside the original authorization.
+
+    ``confirmed_media_hosts`` is the host set one confirmed media download plan
+    disclosed (ADR 0057). It exists only as this per-call value — nothing
+    records it beyond the single download it was confirmed for — and it never
+    relaxes the transport-integrity rule.
+    """
 
     destination = _parse_public_url(destination_url)
-    if destination.hostname != authority.host:
+    if destination.hostname != authority.host and destination.hostname not in confirmed_media_hosts:
         raise URLPolicyError(
             "host_escalation", "The URL would access a host outside the authorization."
         )
+    _require_transport_integrity(authority, destination)
+
+
+def disclose_destination_host(authority: URLAuthorization, destination_url: str) -> str:
+    """Return a destination's host for download-plan disclosure (ADR 0057).
+
+    Transport integrity is still validated here — disclosure never launders an
+    HTTPS-to-HTTP downgrade into something confirmable.
+    """
+
+    destination = _parse_public_url(destination_url)
+    _require_transport_integrity(authority, destination)
+    return destination.hostname or ""
+
+
+def _require_transport_integrity(authority: URLAuthorization, destination: SplitResult) -> None:
     if authority.provenance.scheme == "https" and destination.scheme != "https":
         raise URLPolicyError("https_downgrade", "The URL would downgrade an HTTPS authorization.")
 
