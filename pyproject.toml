@@ -103,3 +103,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["mlx", "mlx.*", "mlx_audio", "mlx_audio.*"]
 ignore_missing_imports = true
+
+# mlx-whisper ships no py.typed; the real review ASR engine (Phase 11 ticket 09)
+# loads whisper-large-v3 only inside its Model runtime subprocess child, and only
+# via ``mlx_whisper.transcribe`` (never ``mlx_whisper.torch_whisper``).
+[[tool.mypy.overrides]]
+module = ["mlx_whisper", "mlx_whisper.*"]
+ignore_missing_imports = true
