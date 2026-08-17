@@ -70,6 +70,30 @@ def test_derivative_time_mapping_uses_exact_source_boundaries() -> None:
     assert error.value.reason == "derivative_boundary_unmappable"
 
 
+def test_derivative_time_mapping_round_trips_through_json() -> None:
+    mapping = DerivativeTimeMapping(
+        source_interval=HalfOpenInterval(ExactTime(-1, 2), ExactTime(3, 2)),
+        sample_rate=2,
+        sample_count=4,
+    )
+
+    assert DerivativeTimeMapping.from_json(mapping.as_json()) == mapping
+
+
+def test_derivative_time_mapping_from_json_rejects_malformed_payloads() -> None:
+    valid = DerivativeTimeMapping(
+        source_interval=HalfOpenInterval(ExactTime(0), ExactTime(1)),
+        sample_rate=1,
+        sample_count=1,
+    ).as_json()
+
+    for mutation in ({"sample_rate": "1"}, {"sample_count": None}, {"source_interval": {}}):
+        payload = {**valid, **mutation}
+        with pytest.raises(AnalysisAudioDerivationError) as error:
+            DerivativeTimeMapping.from_json(payload)
+        assert error.value.reason == "derivative_mapping_invalid"
+
+
 def test_sample_for_source_time_is_the_rounding_inverse() -> None:
     mapping = DerivativeTimeMapping(
         source_interval=HalfOpenInterval(ExactTime(-1, 2), ExactTime(3, 2)),

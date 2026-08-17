@@ -160,6 +160,45 @@ class DerivativeTimeMapping:
             "sample_count": self.sample_count,
         }
 
+    @classmethod
+    def from_json(cls, payload: Mapping[str, object]) -> DerivativeTimeMapping:
+        """Reconstruct a mapping from its :meth:`as_json` form.
+
+        The inverse of :meth:`as_json`, used by the real-engine audio bridge to
+        recover the source-clock mapping from a retained derivative record so the
+        real engines receive the exact same pinned derivative the offline path
+        prepared. A malformed payload raises ``derivative_mapping_invalid``.
+        """
+
+        if not isinstance(payload, Mapping):
+            raise AnalysisAudioDerivationError(
+                "derivative_mapping_invalid", "Derivative mapping payload must be a mapping."
+            )
+        interval = payload.get("source_interval")
+        sample_rate = payload.get("sample_rate")
+        sample_count = payload.get("sample_count")
+        if (
+            not isinstance(sample_rate, int)
+            or isinstance(sample_rate, bool)
+            or not isinstance(sample_count, int)
+            or isinstance(sample_count, bool)
+        ):
+            raise AnalysisAudioDerivationError(
+                "derivative_mapping_invalid", "Derivative sample dimensions must be integers."
+            )
+        try:
+            return cls(
+                source_interval=_interval_from_json(interval),
+                sample_rate=sample_rate,
+                sample_count=sample_count,
+            )
+        except AnalysisAudioDerivationError:
+            raise
+        except (ValueError, TypeError, ZeroDivisionError) as error:
+            raise AnalysisAudioDerivationError(
+                "derivative_mapping_invalid", "Derivative source interval is invalid."
+            ) from error
+
     def _validate_boundary(self, sample_index: int) -> None:
         if not isinstance(sample_index, int) or isinstance(sample_index, bool):
             raise AnalysisAudioDerivationError(
@@ -339,6 +378,35 @@ def _interval_as_json(interval: HalfOpenInterval) -> dict[str, object]:
         "start": {"numerator": interval.start.numerator, "denominator": interval.start.denominator},
         "end": {"numerator": interval.end.numerator, "denominator": interval.end.denominator},
     }
+
+
+def _exact_time_from_json(payload: object) -> ExactTime:
+    if not isinstance(payload, Mapping):
+        raise AnalysisAudioDerivationError(
+            "derivative_mapping_invalid", "An exact time must be a numerator/denominator mapping."
+        )
+    numerator = payload.get("numerator")
+    denominator = payload.get("denominator")
+    if (
+        not isinstance(numerator, int)
+        or isinstance(numerator, bool)
+        or not isinstance(denominator, int)
+        or isinstance(denominator, bool)
+    ):
+        raise AnalysisAudioDerivationError(
+            "derivative_mapping_invalid", "An exact time numerator/denominator must be integers."
+        )
+    return ExactTime(numerator, denominator)
+
+
+def _interval_from_json(payload: object) -> HalfOpenInterval:
+    if not isinstance(payload, Mapping):
+        raise AnalysisAudioDerivationError(
+            "derivative_mapping_invalid", "A source interval must be a start/end mapping."
+        )
+    return HalfOpenInterval(
+        _exact_time_from_json(payload.get("start")), _exact_time_from_json(payload.get("end"))
+    )
 
 
 def _sha256_json(value: object) -> str:
