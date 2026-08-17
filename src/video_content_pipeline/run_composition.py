@@ -46,10 +46,12 @@ import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 
 from video_content_pipeline import environment
 from video_content_pipeline.audio_analysis import analyze_audio
+from video_content_pipeline.capabilities import candidate_eligibility
 from video_content_pipeline.enhancement import enhance
 from video_content_pipeline.orchestration import RunLayout
 from video_content_pipeline.planning import (
@@ -67,6 +69,7 @@ from video_content_pipeline.publication_projection import (
     expected_subtitle_bases,
     transcript_basis,
 )
+from video_content_pipeline.real_engine_adapter import RealEngineSelection
 from video_content_pipeline.run_choices import (
     COLLECTION_SCOPE,
     AsrMode,
@@ -117,6 +120,124 @@ _ACQUISITION_PAUSE_STATUSES: frozenset[str] = frozenset(
 #: Shared capability state that marks an audio ``blocked`` return as a model
 #: acquisition pause rather than a failure.
 _MODEL_ACQUISITION_CAPABILITY = "model_acquisition_required"
+
+
+# --- Real-vs-offline adapter selection (Phase 12 ticket 06) -----------------
+
+
+class AdapterKind(Enum):
+    """Which adapter a model capability runs in one orchestrated run.
+
+    ``OFFLINE`` is the controlled offline adapter ADR 0037 keeps as the
+    automated-test path; ``REAL`` drives the acquired real engine (Phase 11),
+    selected only for a run whose registry says the capability is really
+    acquired.
+    """
+
+    OFFLINE = "offline"
+    REAL = "real"
+
+
+#: The real-engine capabilities each model-bearing stage can run, so run
+#: composition can hand a stage the subset of its capabilities the adapter profile
+#: graded real. The deterministic subtitle stage names no model and is absent;
+#: enhancement re-runs ASR over named intervals, so it shares ``asr_primary``.
+#: This is the single source of truth for the real capabilities — the flat set
+#: below and the engine-adapter verifier map are both bound to it.
+_STAGE_CAPABILITIES: Mapping[StageName, tuple[str, ...]] = {
+    StageName.AUDIO_ANALYSIS: ("vad", "forced_alignment", "diarization"),
+    StageName.TRANSCRIPTION: ("asr_primary", "asr_review"),
+    StageName.ENHANCEMENT: ("asr_primary",),
+    StageName.TEXT_ANALYSIS: ("text_semantics",),
+    StageName.VISUAL_TEXT: ("ocr_primary",),
+}
+
+#: The model capabilities selection considers real, derived from the stage map so
+#: the two never drift. A capability not named here always stays offline.
+REAL_ENGINE_CAPABILITIES: frozenset[str] = frozenset(
+    capability for capabilities in _STAGE_CAPABILITIES.values() for capability in capabilities
+)
+
+
+@dataclass(frozen=True)
+class AdapterProfile:
+    """Per-capability real-vs-offline adapter selection for one orchestrated run.
+
+    Built by :func:`select_adapter_profile` from the model registry's metadata
+    alone; a capability the profile does not name defaults to ``OFFLINE`` so the
+    absence of an entry is never mistaken for a real selection.
+    """
+
+    selections: Mapping[str, AdapterKind]
+
+    def kind(self, capability: str) -> AdapterKind:
+        return self.selections.get(capability, AdapterKind.OFFLINE)
+
+    def is_real(self, capability: str) -> bool:
+        return self.kind(capability) is AdapterKind.REAL
+
+    @property
+    def real_capabilities(self) -> frozenset[str]:
+        return frozenset(
+            capability
+            for capability, kind in self.selections.items()
+            if kind is AdapterKind.REAL
+        )
+
+    @property
+    def any_real(self) -> bool:
+        return any(kind is AdapterKind.REAL for kind in self.selections.values())
+
+
+def select_adapter_profile(project_root: Path) -> AdapterProfile:
+    """Choose, per model capability, the real engine or the controlled offline adapter.
+
+    Pure metadata: reads only ``models/registry.json`` and never opens a model
+    asset. A capability runs the real engine when the shared eligibility gate
+    (:func:`~video_content_pipeline.capabilities.candidate_eligibility`) grades one
+    of its schema-2 candidates ``eligible`` *and* that candidate carries no
+    ``controlled_adapter`` fixture — the controlled offline adapter the ADR 0037
+    automated-test path seeds. A real selection wins over an offline one whenever
+    any eligible non-controlled candidate exists, whatever the candidate order.
+
+    Everything else stays offline: an absent, unreadable, or schema-1 registry, a
+    candidate carrying a controlled adapter, an ineligible candidate, or an
+    unrecognised capability. So the automated suite — whose registries carry
+    controlled adapters or grade ineligible — always selects offline, and a real
+    acquired registry selects real. A candidate the registry lists as eligible but
+    whose asset is missing on disk is still selected real here; the stage's real
+    adapter then fails typed at invocation (never a download), per the ticket.
+    """
+
+    registry_path = project_root / "models" / "registry.json"
+    try:
+        decoded = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return AdapterProfile({})
+    if not isinstance(decoded, Mapping) or decoded.get("schema_version") != 2:
+        return AdapterProfile({})
+    candidates = decoded.get("candidates")
+    if not isinstance(candidates, list):
+        return AdapterProfile({})
+    selections: dict[str, AdapterKind] = {}
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        capability = candidate.get("capability")
+        if capability not in REAL_ENGINE_CAPABILITIES:
+            continue
+        if candidate.get("controlled_adapter") is not None:
+            # A controlled offline adapter fixture is always the test path; it
+            # never forces a capability real, but it must not overwrite a real
+            # selection another candidate of the same capability already earned.
+            selections.setdefault(capability, AdapterKind.OFFLINE)
+            continue
+        state, _reason = candidate_eligibility(candidate, project_root)
+        if state == "eligible":
+            selections[capability] = AdapterKind.REAL
+        else:
+            selections.setdefault(capability, AdapterKind.OFFLINE)
+    return AdapterProfile(dict(selections))
 
 
 def _extract_required_decision(report: Mapping[str, object]) -> dict[str, object] | None:
@@ -205,6 +326,7 @@ class _CompositionState:
     layout: RunLayout
     plan: RunPlan
     functions: StageFunctions
+    profile: AdapterProfile = field(default_factory=lambda: AdapterProfile({}))
     reports: dict[StageName, str] = field(default_factory=dict)
     results: dict[StageName, StageResult] = field(default_factory=dict)
     #: The subtitle candidate report the subtitles stage produced, retained so
@@ -220,6 +342,21 @@ def _record(state: _CompositionState, stage: StageName, result: StageResult) -> 
     if result.kind is StageResultKind.COMPLETED and isinstance(report_id, str):
         state.reports[stage] = report_id
     return result
+
+
+def _real_engines(state: _CompositionState, stage: StageName) -> RealEngineSelection | None:
+    """The real-adapter selection for ``stage``, or ``None`` when it is all-offline.
+
+    The intersection of the stage's capabilities and the profile's real set; an
+    all-offline stage (every automated-test run, and any capability the registry
+    has not promoted to a real acquisition) yields ``None`` so the stage function
+    keeps its controlled offline path unchanged.
+    """
+
+    selected = frozenset(_STAGE_CAPABILITIES.get(stage, ())) & state.profile.real_capabilities
+    if not selected:
+        return None
+    return RealEngineSelection(project_root=state.layout.project_root, capabilities=selected)
 
 
 def _invoke_source_revalidation(state: _CompositionState) -> StageResult:
@@ -248,6 +385,8 @@ def _invoke_source_revalidation(state: _CompositionState) -> StageResult:
 def _invoke_subtitles(state: _CompositionState) -> StageResult:
     root = state.layout.project_root
     params = subtitle_stage_parameters(state.plan.run_choices)
+    # The subtitle stage is deterministic (Phase 4) and names no model, so it has
+    # no real-adapter path; it always runs unchanged.
     result = state.functions.process_subtitles(state.plan.plan_id, root, params.decoders)
     status, report = _split(result)
     if status == "awaiting_subtitle_selection" and params.select:
@@ -325,6 +464,7 @@ def _invoke_audio(state: _CompositionState) -> StageResult:
         params.audio_stream,
         params.diarization_candidate,
         params.role_metadata,
+        real_engines=_real_engines(state, StageName.AUDIO_ANALYSIS),
     )
     status, report = _split(result)
     return _record(state, StageName.AUDIO_ANALYSIS, map_stage_return(status, report))
@@ -356,6 +496,7 @@ def _invoke_transcription(state: _CompositionState) -> StageResult:
         audio_id,
         state.layout.project_root,
         upgrade_all=params.upgrade_all,
+        real_engines=_real_engines(state, StageName.TRANSCRIPTION),
     )
     status, report = _split(result)
     return _record(state, StageName.TRANSCRIPTION, map_stage_return(status, report))
@@ -374,6 +515,7 @@ def _invoke_enhancement(state: _CompositionState) -> StageResult:
         range_selectors=params.range_selectors,
         cue_selectors=params.cue_selectors,
         audio_report_id=state.reports.get(StageName.AUDIO_ANALYSIS),
+        real_engines=_real_engines(state, StageName.ENHANCEMENT),
     )
     status, report = _split(result)
     return _record(state, StageName.ENHANCEMENT, map_stage_return(status, report))
@@ -388,6 +530,7 @@ def _invoke_text_analysis(state: _CompositionState) -> StageResult:
         subtitle_id,
         state.layout.project_root,
         audio_report_id=state.reports.get(StageName.AUDIO_ANALYSIS),
+        real_engines=_real_engines(state, StageName.TEXT_ANALYSIS),
     )
     status, report = _split(result)
     return _record(state, StageName.TEXT_ANALYSIS, map_stage_return(status, report))
@@ -402,6 +545,7 @@ def _invoke_visual_text(state: _CompositionState) -> StageResult:
         part_selectors=params.part_selectors,
         range_selectors=params.range_selectors,
         audio_report_id=state.reports.get(StageName.AUDIO_ANALYSIS),
+        real_engines=_real_engines(state, StageName.VISUAL_TEXT),
     )
     status, report = _split(result)
     return _record(state, StageName.VISUAL_TEXT, map_stage_return(status, report))
@@ -1067,9 +1211,18 @@ def build_run_composition(
     choices into each function's selectors, and maps each stage's own pause
     vocabulary onto the DAG's decision-pause contract. The evidence and
     report-input gatherers read the resulting workspaces conservatively.
+
+    Before execution it selects, per capability, the real engine or the controlled
+    offline adapter (:func:`select_adapter_profile`) from the run's registry
+    metadata alone — no model is loaded here. Each model-bearing stage is handed
+    the subset of its capabilities graded real; a stage with none keeps its offline
+    path. The automated suite always selects offline (Phase 12 ticket 06).
     """
 
-    state = _CompositionState(layout=layout, plan=plan, functions=functions or StageFunctions())
+    profile = select_adapter_profile(layout.project_root)
+    state = _CompositionState(
+        layout=layout, plan=plan, functions=functions or StageFunctions(), profile=profile
+    )
     return RunComposition(
         executor=_build_executor(state),
         evidence=lambda: _gather_evidence(state),

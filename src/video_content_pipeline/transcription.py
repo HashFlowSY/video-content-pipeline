@@ -44,6 +44,10 @@ from video_content_pipeline.planning import (
     load_run_plan,
     revalidate_confirmed_inspection_evidence,
 )
+from video_content_pipeline.real_engine_adapter import (
+    RealEngineSelection,
+    dispatch_real_stage,
+)
 from video_content_pipeline.source import SourceArtifact
 from video_content_pipeline.subtitle_pipeline import (
     SubtitleCandidateReport,
@@ -451,6 +455,7 @@ def transcribe(
     resumed_from_report: InputEvidence | None = None,
     resumed_from_report_id: str | None = None,
     resumption_decision: str | None = None,
+    real_engines: RealEngineSelection | None = None,
 ) -> dict[str, object]:
     """Create one immutable transcription report from fully revalidated inputs.
 
@@ -468,8 +473,15 @@ def transcribe(
     ``model_acquisition_required`` with no transcription evidence. A resume passes
     ``resumption_decision``; each attempt owns a fresh workspace and never
     overwrites prior evidence, so there is no automatic retry.
+
+    ``real_engines`` is run composition's real-adapter selection (Phase 12 ticket
+    06): ``None`` on every automated-test run (the controlled offline path below),
+    and the acquired real ASR engines when set, reached through
+    :func:`~video_content_pipeline.real_engine_adapter.dispatch_real_stage`.
     """
 
+    if real_engines is not None:
+        return dispatch_real_stage(real_engines, stage="transcription")
     report_id = uuid.uuid4().hex
     workspace_path = project_root / "work" / "transcription-reports" / report_id
     report_path = workspace_path / "transcription-report.json"

@@ -47,6 +47,10 @@ from video_content_pipeline.planning import (
     revalidate_confirmed_inspection_evidence,
 )
 from video_content_pipeline.probe import project_probe_document
+from video_content_pipeline.real_engine_adapter import (
+    RealEngineSelection,
+    dispatch_real_stage,
+)
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval, TimeValidationError
 from video_content_pipeline.visual_page_index import (
     FrameMetricFixture,
@@ -664,6 +668,7 @@ def run_visual_text(
     resumed_from_report: InputEvidence | None = None,
     resumed_from_report_id: str | None = None,
     resumption_decision: str | None = None,
+    real_engines: RealEngineSelection | None = None,
 ) -> dict[str, object]:
     """Run one immutable visual-text attempt over an explicitly given scope.
 
@@ -688,8 +693,15 @@ def run_visual_text(
     decision produces gated evidence, each admitted item is classified deterministically
     as page text, speaker supplement, or background UI, with platform noise retained as
     non-evidence and low-confidence items marked ``classification_uncertain``.
+
+    ``real_engines`` is run composition's real-adapter selection (Phase 12 ticket
+    06): ``None`` on every automated-test run (the controlled offline OCR path
+    below), and the acquired real OCR engine when set, reached through
+    :func:`~video_content_pipeline.real_engine_adapter.dispatch_real_stage`.
     """
 
+    if real_engines is not None:
+        return dispatch_real_stage(real_engines, stage="visual_text")
     selectors = parse_visual_text_scope(all_parts, part_selectors, range_selectors)
     scope_mode = "all" if any(isinstance(s, AllScope) for s in selectors) else "explicit"
     report_id = uuid.uuid4().hex

@@ -41,6 +41,10 @@ from video_content_pipeline.planning import (
     load_run_plan,
     revalidate_confirmed_inspection_evidence,
 )
+from video_content_pipeline.real_engine_adapter import (
+    RealEngineSelection,
+    dispatch_real_stage,
+)
 from video_content_pipeline.source import SourceArtifact, sha256_file
 from video_content_pipeline.subtitle_pipeline import (
     CandidateReportState,
@@ -478,9 +482,19 @@ def analyze_audio(
     resumed_release_verified: bool = False,
     expected_analysis_audio_derivatives: tuple[dict[str, object], ...] = (),
     analysis_audio_profile: PreprocessingProfile | None = None,
+    real_engines: RealEngineSelection | None = None,
 ) -> dict[str, object]:
-    """Run the controlled Phase 5 sequence without real model or media access."""
+    """Run the Phase 5 sequence: the controlled offline adapters, or the real engines.
 
+    ``real_engines`` is the composition's real-adapter selection (Phase 12 ticket
+    06). When ``None`` — every automated-test run — this runs the controlled
+    offline adapters without real model or media access, exactly as before. When
+    set, the acquired real engines for the selected capabilities are reached
+    through :func:`~video_content_pipeline.real_engine_adapter.dispatch_real_stage`.
+    """
+
+    if real_engines is not None:
+        return dispatch_real_stage(real_engines, stage="audio_analysis")
     report_id = uuid.uuid4().hex
     workspace_path = project_root / "work" / "audio-analysis-reports" / report_id
     report_path = workspace_path / "audio-analysis-report.json"

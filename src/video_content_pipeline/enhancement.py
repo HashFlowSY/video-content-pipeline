@@ -50,6 +50,10 @@ from video_content_pipeline.planning import (
     load_run_plan,
     revalidate_confirmed_inspection_evidence,
 )
+from video_content_pipeline.real_engine_adapter import (
+    RealEngineSelection,
+    dispatch_real_stage,
+)
 from video_content_pipeline.source import SourceArtifact
 from video_content_pipeline.subtitle_pipeline import (
     CandidateState,
@@ -761,6 +765,7 @@ def enhance(
     resumed_from_report: InputEvidence | None = None,
     resumed_from_report_id: str | None = None,
     resumption_decision: str | None = None,
+    real_engines: RealEngineSelection | None = None,
 ) -> dict[str, object]:
     """Create one immutable enhancement report by Gate-checked interval replacement.
 
@@ -774,8 +779,15 @@ def enhance(
     ``audio_completeness``. Any drift, invalid scope, or invalid projection retains a
     ``failed`` report; each attempt owns a fresh workspace and never overwrites prior
     evidence.
+
+    ``real_engines`` is run composition's real-adapter selection (Phase 12 ticket
+    06): ``None`` on every automated-test run (the controlled offline ASR path
+    above), and the acquired real ASR engine when set, reached through
+    :func:`~video_content_pipeline.real_engine_adapter.dispatch_real_stage`.
     """
 
+    if real_engines is not None:
+        return dispatch_real_stage(real_engines, stage="enhancement")
     report_id = uuid.uuid4().hex
     workspace_path = project_root / "work" / "enhancement-reports" / report_id
     report_path = workspace_path / "enhancement-report.json"
