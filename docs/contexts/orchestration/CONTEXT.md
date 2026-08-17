@@ -210,3 +210,29 @@ exit and stderr; there is no automatic retry and the parent writes nothing.
 ONNX-scale models (vad, diarization, ocr) run in-process; the size boundary
 and memory-return rationale live in ADR 0055.
 _Avoid_: in-process model unloading
+
+**Formal branch**:
+One of the five pipeline scenarios the execution plan requires real-video
+acceptance to cover: subtitle-priority, full ASR, anomalous subtitles
+(rolling repeats or time drift), multi-part sources, and explicitly enabled
+visual-text OCR. A Formal branch counts as covered only by a Real-run
+confirmation; scenarios may share one video, but each branch needs its own
+recorded confirmation.
+_Avoid_: test case, happy path
+
+**Real-run confirmation**:
+The maintainer's recorded per-run acceptance decision, made after inspecting
+a published RunBundle's subtitles, speakers, detailed content, and summary.
+It names the run identity, the model stack that produced the outputs, the
+Formal branches the run covers, and a per-capability verbal rating
+(acceptable / marginal / unacceptable). Silence or an unrecorded glance is
+not a confirmation.
+_Avoid_: implicit sign-off
+
+**Coverage ledger**:
+The durable record mapping each Formal branch to the Real-run confirmations
+that cover it. It is the sole evidence base for declaring real-video
+acceptance complete; the project may only be marked production-validated
+when every Formal branch row is confirmed and the user has explicitly
+confirmed the whole.
+_Avoid_: progress notes

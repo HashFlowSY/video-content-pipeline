@@ -436,6 +436,9 @@ definition may be changed.
 - `Fault class` → `orchestration`
 - `Fault matrix` → `orchestration`
 - `Model runtime subprocess` → `orchestration`
+- `Formal branch` → `orchestration`
+- `Real-run confirmation` → `orchestration`
+- `Coverage ledger` → `orchestration`
 
 ## Reading and writing protocol
 
