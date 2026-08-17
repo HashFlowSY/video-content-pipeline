@@ -12,10 +12,26 @@ that produced the outputs — the phase's acceptance item "输出文件、证据
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done (`eb1eb5b`, 2026-08-17)
 
-- [ ] An offline golden run publishes a processing report with non-empty models, tools, environment, parameters, and resource-usage sections
-- [ ] Model entries carry name, revision, sha256, size, and purpose consistent with the registry
-- [ ] Resource usage reflects measured values (peak memory, durations, disk delta), not placeholders
-- [ ] A run that used no model for a stage honestly omits it (no padding)
-- [ ] Assertions run at the CLI command boundary against published RunBundle contents (Phase 9/10 golden-run prior art)
+- [x] An offline golden run publishes a processing report with non-empty models, tools, environment, parameters, and resource-usage sections
+- [x] Model entries carry name, revision, sha256, size, and purpose consistent with the registry
+- [x] Resource usage reflects measured values (peak memory, durations, disk delta), not placeholders
+- [x] A run that used no model for a stage honestly omits it (no padding)
+- [x] Assertions run at the CLI command boundary against published RunBundle contents (Phase 9/10 golden-run prior art)
+
+**Closure note.** `_gather_report_inputs` (run_composition.py) now reads the
+completed stages' `stage_execution` records through one seam
+(`_completed_executions`) and describes each executed engine from
+`models/registry.json`; tools come from the confirmed plan, environment from the
+running interpreter + `uv.lock`, parameters from the front-loaded run choices,
+and resource usage is measured (peak from the recorded `resource_measurement`,
+elapsed from the run journal, disk delta from the run-owned `work/` tree). Two
+CLI-boundary acceptance tests in `test_phase_10_cli_acceptance.py` cover the
+completed and no-model cases; suite 1647, mypy/ruff clean.
+
+Boundary with ticket 06: audio analysis is the only orchestrated stage that
+records executed-model evidence today, so the ASR/text/visual executed-model and
+subprocess-peak figures flow in through the same seam once ticket 06 invokes the
+real engines — no further change here. Per-stage durations are not recorded by
+any stage; whole-run elapsed is the honest measurement available.
