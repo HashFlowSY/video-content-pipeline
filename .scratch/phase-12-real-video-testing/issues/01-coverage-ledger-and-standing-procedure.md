@@ -18,9 +18,9 @@ Documentation only; no code changes.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Coverage ledger exists with all five Formal branches listed as unconfirmed (0/5) and an empty run log
-- [ ] The standing per-run procedure is written, including the D10 verbal-rating requirement (acceptable/marginal/unacceptable per capability)
-- [ ] The closure protocol is written, including the explicit-user-confirmation gate before any `production_validated` flip
-- [ ] The record format references the Phase 11 maintainer-review shape (source + hash, dated decision line, confirmation table, notes, provenance)
+- [x] Coverage ledger exists with all five Formal branches listed as unconfirmed (0/5) and an empty run log
+- [x] The standing per-run procedure is written, including the D10 verbal-rating requirement (acceptable/marginal/unacceptable per capability)
+- [x] The closure protocol is written, including the explicit-user-confirmation gate before any `production_validated` flip
+- [x] The record format references the Phase 11 maintainer-review shape (source + hash, dated decision line, confirmation table, notes, provenance)
