@@ -516,3 +516,4 @@ future ADR can be routed without creating a context-local tree.
 - [ADR 0054](docs/adr/0054-verify-engineering-with-synthetic-media-and-a-deterministic-fault-matrix.md)
 - [ADR 0055](docs/adr/0055-run-mlx-model-engines-in-per-stage-subprocesses.md)
 - [ADR 0056](docs/adr/0056-require-model-specific-text-semantics-calibration.md)
+- [ADR 0057](docs/adr/0057-authorize-media-hosts-per-run-from-the-download-plan.md)

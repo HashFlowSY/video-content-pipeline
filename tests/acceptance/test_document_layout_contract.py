@@ -178,6 +178,10 @@ POST_MIGRATION_TERMS = {
     "Text-semantics capability contract",
     "Model-acquisition-required text-analysis result",
     "Text-semantics decoding calibration",
+    # Phase 12 (orchestration additions)
+    "Formal branch",
+    "Real-run confirmation",
+    "Coverage ledger",
 }
 
 RUNTIME_TERMS = {
