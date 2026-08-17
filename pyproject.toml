@@ -96,3 +96,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["sherpa_onnx", "sherpa_onnx.*"]
 ignore_missing_imports = true
+
+# mlx / mlx-audio ship no py.typed; the real forced-alignment engine (Phase 11
+# ticket 08) loads Qwen3-ForcedAligner only inside its Model runtime subprocess
+# child. The heavy imports are confined to that child module.
+[[tool.mypy.overrides]]
+module = ["mlx", "mlx.*", "mlx_audio", "mlx_audio.*"]
+ignore_missing_imports = true

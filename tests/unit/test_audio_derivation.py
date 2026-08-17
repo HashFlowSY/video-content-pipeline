@@ -70,6 +70,23 @@ def test_derivative_time_mapping_uses_exact_source_boundaries() -> None:
     assert error.value.reason == "derivative_boundary_unmappable"
 
 
+def test_sample_for_source_time_is_the_rounding_inverse() -> None:
+    mapping = DerivativeTimeMapping(
+        source_interval=HalfOpenInterval(ExactTime(-1, 2), ExactTime(3, 2)),
+        sample_rate=2,
+        sample_count=4,
+    )
+
+    # Exact boundaries round-trip through the forward mapping.
+    for sample in range(mapping.sample_count + 1):
+        assert mapping.sample_for_source_time(mapping.source_time_for_sample(sample)) == sample
+
+    # A time between two samples rounds to the nearest, and an out-of-coverage time
+    # is returned unclamped (the caller decides how to clamp).
+    assert mapping.sample_for_source_time(ExactTime(1, 4)) == 2  # 0.25 s -> sample 1.5 -> 2
+    assert mapping.sample_for_source_time(ExactTime(5, 2)) == 6  # past the coverage end
+
+
 def test_prepare_analysis_audio_revalidates_ffmpeg_and_retains_mapping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -128,6 +128,18 @@ class DerivativeTimeMapping:
         self._validate_boundary(sample_index)
         return self.source_interval.start + ExactTime(sample_index, self.sample_rate)
 
+    def sample_for_source_time(self, time: ExactTime) -> int:
+        """Return the nearest derivative sample to a source time (rounding inverse).
+
+        The rounding inverse of :meth:`source_time_for_sample`. Unlike that method
+        it does not validate a boundary, so a caller mapping an arbitrary source
+        time -- for example a subtitle cue edge that may fall outside the coverage
+        -- receives the nearest sample and can clamp it to the derivative itself.
+        """
+
+        offset = (time - self.source_interval.start).as_fraction() * self.sample_rate
+        return round(offset)
+
     def source_interval_for_samples(self, start_sample: int, end_sample: int) -> HalfOpenInterval:
         self._validate_boundary(start_sample)
         self._validate_boundary(end_sample)

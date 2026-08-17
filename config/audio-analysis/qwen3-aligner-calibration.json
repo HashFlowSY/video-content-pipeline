@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "capability": "forced_alignment",
+  "candidate_id": "qwen3-forced-aligner-0-6b",
+  "calibration_version": "qwen3-forced-aligner-0.6b-8bit-first-device-baseline-2026-08-17",
+  "model_identity": {
+    "model_asset_sha256": "f567e26b47881fd6603826964517afd35f1a404fd8202eceb1d27169d7f50c36",
+    "backend": "mlx-audio",
+    "backend_version": "0.4.8",
+    "precision": "8bit",
+    "device_class": "apple-m1",
+    "rules_fingerprint": "alignment-rules-v1"
+  },
+  "sample_rate": 16000,
+  "qualification_scope": "first_device_baseline",
+  "window": {
+    "window_pad_samples": 8000
+  },
+  "thresholds": {
+    "minimum_confidence": 0.5,
+    "duration_rules": {
+      "en": {
+        "minimum_duration": { "numerator": 3, "denominator": 10 },
+        "maximum_duration": { "numerator": 10, "denominator": 1 }
+      },
+      "zh": {
+        "minimum_duration": { "numerator": 3, "denominator": 10 },
+        "maximum_duration": { "numerator": 10, "denominator": 1 }
+      }
+    }
+  },
+  "notes": "Model-specific forced-alignment calibration profile (ADR 0027) for the Qwen3-ForcedAligner-0.6B-8bit engine executed through the Model runtime subprocess (ADR 0055) with mlx-audio. model_identity binds the exact pinned model asset SHA-256, the mlx-audio backend and version, the 8-bit precision, the apple-m1 device class, and the alignment rules fingerprint; any bound-identity change invalidates the profile for adoption. window.window_pad_samples is the symmetric audio breathing room (0.5 s at 16 kHz) added around each Primary cue's original subtitle interval before the aligner refines its boundaries within the containing VAD chunk. thresholds.minimum_confidence gates candidate adoption in the existing Adopted alignment timing view (ADR 0027): Qwen3-ForcedAligner performs a single non-autoregressive forward pass emitting decided word/char timestamps with no soft score, so a placed cue carries confidence 1.0 (not a soft probability) and the threshold reserves the confidence gate for any future soft-scoring aligner while keeping ADR 0027's meaning; the operative adoption gate for this engine is the language-aware duration-plausibility rule plus the usable-audio-coverage and VAD-conflict checks. thresholds.duration_rules are the versioned, language-aware minimum/maximum cue durations (ADR 0027 forbids a global character/word-count substitute); the en/zh baselines are 0.3 s minimum and 10 s maximum. qualification_scope is 'first_device_baseline': these settings qualify formal adopted timing only for synthetic verification here, and the Chinese/English alignment quality of the selection is confirmed only by the maintainer sample review in the Phase 11 prototype ticket, not by this record."
+}

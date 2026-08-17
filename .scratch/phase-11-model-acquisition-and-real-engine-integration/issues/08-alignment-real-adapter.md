@@ -11,18 +11,18 @@ ADR 0027 (model-specific alignment calibration profile) — synthetic
 calibration first, real-sample calibration lands in ticket 13.
 
 **Blocked by:** 04, 05, 06
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Subprocess request/response for an alignment chunk round-trips the
+- [x] Subprocess request/response for an alignment chunk round-trips the
       projection contract (stub-executable unit tests; real-engine
       integration test behind the registry path, offline)
-- [ ] Chunk-local timestamps map back to the authoritative timeline
+- [x] Chunk-local timestamps map back to the authoritative timeline
       exactly (property test over the time mapping)
-- [ ] Low-confidence alignment never overrides original cue times
+- [x] Low-confidence alignment never overrides original cue times
       (existing gate proven against real-adapter output shape)
-- [ ] Alignment calibration profile produced and gate-checked per ADR
+- [x] Alignment calibration profile produced and gate-checked per ADR
       0027
-- [ ] Peak-memory evidence recorded per run; typed failures on
+- [x] Peak-memory evidence recorded per run; typed failures on
       missing asset / child crash
-- [ ] Full suite green within budget
+- [x] Full suite green within budget
