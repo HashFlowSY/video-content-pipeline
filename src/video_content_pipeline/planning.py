@@ -15,12 +15,18 @@ from enum import StrEnum
 from fractions import Fraction
 from pathlib import Path
 
+from video_content_pipeline.capabilities import (
+    assess_candidate,
+    capability_state_from_grades,
+    load_candidate_matrix,
+)
 from video_content_pipeline.external_tools import (
     PinnedExternalTool,
     revalidate_external_tool,
     run_tool,
 )
 from video_content_pipeline.inspection import PlanInspectionEvidence
+from video_content_pipeline.prototype import DeviceBaseline, load_device_baselines
 from video_content_pipeline.run_choices import RunPlanChoices
 from video_content_pipeline.source import (
     DiskHeadroom,
@@ -108,6 +114,149 @@ class ThreePointEstimate:
         }
 
 
+#: Every model capability a full run consumes, in stage order (audio analysis,
+#: transcription, visual-text, text analysis). The plan reports one model status
+#: per capability so a missing or ineligible model is visible at plan time rather
+#: than surfacing mid-run (Phase 12 ticket 04). Kept honest against the stages'
+#: own capability constants by ``test_plan_model_capabilities_cover_every_stage``.
+PLAN_MODEL_CAPABILITIES: tuple[str, ...] = (
+    "vad",
+    "forced_alignment",
+    "diarization",
+    "asr_primary",
+    "asr_review",
+    "ocr_primary",
+    "text_semantics",
+)
+
+#: The retained Phase 11 device-baseline measurements that seed the peak-memory
+#: estimate: an evidence file, never an invented number (Phase 12 ticket 04).
+_DEVICE_BASELINES_RELATIVE_PATH = Path("docs/phase-11-prototypes/device-baselines.json")
+
+
+@dataclass(frozen=True)
+class CapabilityPeakMemory:
+    """One capability's largest retained device-baseline peak-memory measurement."""
+
+    capability: str
+    peak_memory_bytes: int
+
+    def as_json(self) -> dict[str, object]:
+        return {"capability": self.capability, "peak_memory_bytes": self.peak_memory_bytes}
+
+
+@dataclass(frozen=True)
+class PlanPeakMemoryEstimate:
+    """A device-baseline-backed peak-memory estimate for a full sequential run.
+
+    Stages load one capability model at a time, so the run's peak is the largest
+    single-capability measured peak, not the sum of them. Every number here is a
+    retained Phase 11 measurement (:data:`_DEVICE_BASELINES_RELATIVE_PATH`); the
+    estimate invents nothing, matching the phase-bounded style of the decode
+    :class:`ThreePointEstimate`.
+    """
+
+    peak_memory_bytes: int
+    per_capability: tuple[CapabilityPeakMemory, ...]
+    confidence: str
+    basis: str
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "peak_memory_bytes": self.peak_memory_bytes,
+            "per_capability": [item.as_json() for item in self.per_capability],
+            "confidence": self.confidence,
+            "basis": self.basis,
+        }
+
+
+@dataclass(frozen=True)
+class PlanModelStatus:
+    """One capability's model-registry state, surfaced at plan time."""
+
+    capability: str
+    state: str
+
+    def as_json(self) -> dict[str, str]:
+        return {"capability": self.capability, "state": self.state}
+
+
+def estimate_plan_peak_memory(
+    baselines: tuple[DeviceBaseline, ...],
+) -> PlanPeakMemoryEstimate | None:
+    """Reduce retained device baselines to one plan-level peak-memory estimate.
+
+    The estimate is the largest single-capability measured peak, with the
+    per-capability maxima retained as its evidence basis. Absent baselines yield
+    ``None`` rather than a fabricated figure.
+    """
+
+    if not baselines:
+        return None
+    largest: dict[str, int] = {}
+    for baseline in baselines:
+        current = largest.get(baseline.capability)
+        if current is None or baseline.peak_memory_bytes > current:
+            largest[baseline.capability] = baseline.peak_memory_bytes
+    per_capability = tuple(
+        CapabilityPeakMemory(capability, peak) for capability, peak in sorted(largest.items())
+    )
+    # Derive confidence from the evidence rather than asserting it: a uniform
+    # label carries through, a mixed set degrades to "mixed" so an estimated
+    # baseline could never masquerade as measured.
+    confidences = {baseline.confidence for baseline in baselines}
+    return PlanPeakMemoryEstimate(
+        peak_memory_bytes=max(item.peak_memory_bytes for item in per_capability),
+        per_capability=per_capability,
+        confidence=next(iter(confidences)) if len(confidences) == 1 else "mixed",
+        basis=f"device-baselines:{baselines[0].device_class}",
+    )
+
+
+def load_plan_peak_memory_estimate(project_root: Path) -> PlanPeakMemoryEstimate | None:
+    """Load the retained device baselines and reduce them to a plan estimate."""
+
+    return estimate_plan_peak_memory(
+        load_device_baselines(project_root / _DEVICE_BASELINES_RELATIVE_PATH)
+    )
+
+
+def plan_model_statuses(project_root: Path) -> tuple[PlanModelStatus, ...]:
+    """Derive one model status per run capability from the model registry.
+
+    Uses the shared eligibility gate the stages themselves consume, so a status
+    shown at plan time is the status a stage will read at run time. A missing
+    registry or a capability with no candidate is ``model_acquisition_required``;
+    an ineligible candidate surfaces its aggregated blocking state.
+    """
+
+    registry_path = project_root / "models" / "registry.json"
+    if not registry_path.exists():
+        return tuple(
+            PlanModelStatus(capability, "model_acquisition_required")
+            for capability in PLAN_MODEL_CAPABILITIES
+        )
+    grouped = load_candidate_matrix(
+        registry_path,
+        PLAN_MODEL_CAPABILITIES,
+        invalid_error=lambda message: PlanningError("model_registry_invalid", message),
+    )
+
+    def capability_state(capability: str) -> str:
+        assessments = (
+            assess_candidate(candidate, capability, project_root)
+            for candidate in grouped[capability]
+        )
+        return capability_state_from_grades(
+            (assessment.state, assessment.reason) for assessment in assessments
+        )
+
+    return tuple(
+        PlanModelStatus(capability, capability_state(capability))
+        for capability in PLAN_MODEL_CAPABILITIES
+    )
+
+
 @dataclass(frozen=True)
 class PlanReport:
     """An immutable audit record for successful, blocked, or pending planning."""
@@ -124,6 +273,8 @@ class PlanReport:
     inspection_evidence: tuple[PlanInspectionEvidence, ...] = ()
     parent_report_id: str | None = None
     run_choices: RunPlanChoices = RunPlanChoices(())
+    peak_memory_estimate: PlanPeakMemoryEstimate | None = None
+    model_statuses: tuple[PlanModelStatus, ...] = ()
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -142,6 +293,10 @@ class PlanReport:
                 authorization.as_json() for authorization in self.url_authorizations
             ],
             "decode_estimate": self.decode_estimate.as_json() if self.decode_estimate else None,
+            "peak_memory_estimate": (
+                self.peak_memory_estimate.as_json() if self.peak_memory_estimate else None
+            ),
+            "model_statuses": [status.as_json() for status in self.model_statuses],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
             "inspection_evidence": [evidence.as_json() for evidence in self.inspection_evidence],
             "run_choices": self.run_choices.as_json(),
@@ -331,8 +486,16 @@ def create_plan_report(
     inspection_evidence: tuple[PlanInspectionEvidence, ...] = (),
     parent_report_id: str | None = None,
     run_choices: RunPlanChoices = RunPlanChoices(()),
+    project_root: Path | None = None,
 ) -> PlanReport:
-    """Build one new immutable report without embedding raw URL inputs."""
+    """Build one new immutable report without embedding raw URL inputs.
+
+    When ``project_root`` is given the report also carries the two remaining
+    pre-run plan legal fields (Phase 12 ticket 04): a device-baseline-backed
+    peak-memory estimate and per-capability model status from the registry. Both
+    are advisory and excluded from the confirmation identity, so they stay off
+    :func:`confirmed_plan_matches` and the :class:`RunPlan`.
+    """
 
     _validate_inspection_evidence(source_artifacts, inspection_evidence)
     return PlanReport(
@@ -348,6 +511,10 @@ def create_plan_report(
         inspection_evidence=inspection_evidence,
         parent_report_id=parent_report_id,
         run_choices=run_choices,
+        peak_memory_estimate=(
+            None if project_root is None else load_plan_peak_memory_estimate(project_root)
+        ),
+        model_statuses=() if project_root is None else plan_model_statuses(project_root),
     )
 
 
@@ -434,6 +601,8 @@ def load_plan_report(path: Path) -> PlanReport:
                 basis=_required_string(estimate_value, "basis"),
             )
         )
+        peak_memory_estimate = _peak_memory_estimate_from_json(decoded.get("peak_memory_estimate"))
+        model_statuses = _model_statuses_from_json(decoded.get("model_statuses", []))
         diagnostic_values = decoded.get("diagnostics", [])
         authorization_values = decoded.get("url_authorizations", [])
         inspection_values = decoded.get("inspection_evidence", [])
@@ -474,9 +643,49 @@ def load_plan_report(path: Path) -> PlanReport:
             if isinstance(decoded.get("parent_report_id"), str)
             else None,
             run_choices=RunPlanChoices.from_json(decoded.get("run_choices", {})),
+            peak_memory_estimate=peak_memory_estimate,
+            model_statuses=model_statuses,
         )
     except (KeyError, TypeError, ValueError) as error:
         raise PlanningError("plan_report_invalid", "PlanReport has an invalid schema.") from error
+
+
+def _peak_memory_estimate_from_json(value: object) -> PlanPeakMemoryEstimate | None:
+    """Rebuild a peak-memory estimate from its serialized form, tolerating absence."""
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError
+    per_capability_values = value["per_capability"]
+    if not isinstance(per_capability_values, list):
+        raise TypeError
+    return PlanPeakMemoryEstimate(
+        peak_memory_bytes=_required_integer(value, "peak_memory_bytes"),
+        per_capability=tuple(
+            CapabilityPeakMemory(
+                capability=_required_string(item, "capability"),
+                peak_memory_bytes=_required_integer(item, "peak_memory_bytes"),
+            )
+            for item in per_capability_values
+        ),
+        confidence=_required_string(value, "confidence"),
+        basis=_required_string(value, "basis"),
+    )
+
+
+def _model_statuses_from_json(value: object) -> tuple[PlanModelStatus, ...]:
+    """Rebuild per-capability model statuses, tolerating a legacy report's absence."""
+
+    if not isinstance(value, list):
+        raise TypeError
+    return tuple(
+        PlanModelStatus(
+            capability=_required_string(item, "capability"),
+            state=_required_string(item, "state"),
+        )
+        for item in value
+    )
 
 
 def load_run_plan(path: Path) -> RunPlan:
@@ -651,6 +860,7 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
             url_authorizations=report.url_authorizations,
             inspection_evidence=report.inspection_evidence,
             parent_report_id=report.report_id,
+            project_root=project_root,
         )
         persist_plan_report(stale, plans_root)
         raise PlanningError(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import namedtuple
 from fractions import Fraction
 from pathlib import Path
@@ -11,6 +12,8 @@ from video_content_pipeline.coverage import StreamCoverage
 from video_content_pipeline.external_tools import PinnedExternalTool
 from video_content_pipeline.inspection import PlanInspectionEvidence, SubtitleTrackCandidate
 from video_content_pipeline.planning import (
+    PLAN_MODEL_CAPABILITIES,
+    CapabilityPeakMemory,
     DecodeThroughputProfile,
     PlanningError,
     PlanState,
@@ -20,16 +23,20 @@ from video_content_pipeline.planning import (
     confirmed_plan_matches,
     create_plan_report,
     estimate_full_decode,
+    estimate_plan_peak_memory,
     load_decode_measurements,
     load_decode_throughput_profile,
+    load_plan_peak_memory_estimate,
     load_plan_report,
     load_run_plan,
     perform_full_decode_validation,
     persist_plan_report,
+    plan_model_statuses,
     planning_configuration_fingerprint,
     record_decode_measurement,
     revalidate_report,
 )
+from video_content_pipeline.prototype import DeviceBaseline
 from video_content_pipeline.probe import ProbeDocument
 from video_content_pipeline.run_choices import (
     COLLECTION_SCOPE,
@@ -532,3 +539,138 @@ def _artifact_reuse(tmp_path: Path) -> SourceArtifact:
     media = tmp_path / "input" / "hash" / "media"
     digest, byte_count = sha256_file(media)
     return SourceArtifact(digest, digest, byte_count, media)
+
+
+def _baseline(capability: str, candidate_id: str, peak_memory_bytes: int) -> DeviceBaseline:
+    return DeviceBaseline(
+        capability=capability,
+        candidate_id=candidate_id,
+        device_class="apple-m1",
+        real_time_factor=Fraction(5, 1),
+        peak_memory_bytes=peak_memory_bytes,
+        basis=f"prototype:{candidate_id}",
+    )
+
+
+def test_peak_memory_estimate_is_the_largest_measured_capability_peak() -> None:
+    # Stages load one model at a time, so the plan peak is the largest single
+    # capability peak, and each capability keeps its own largest measurement.
+    baselines = (
+        _baseline("asr_primary", "qwen3-asr", 5_000),
+        _baseline("asr_primary", "qwen3-asr", 5_400),
+        _baseline("vad", "silero-vad", 120),
+    )
+
+    estimate = estimate_plan_peak_memory(baselines)
+
+    assert estimate is not None
+    assert estimate.peak_memory_bytes == 5_400
+    assert estimate.confidence == "measured"
+    assert estimate.basis == "device-baselines:apple-m1"
+    assert estimate.per_capability == (
+        CapabilityPeakMemory("asr_primary", 5_400),
+        CapabilityPeakMemory("vad", 120),
+    )
+
+
+def test_peak_memory_estimate_is_absent_without_measurements() -> None:
+    assert estimate_plan_peak_memory(()) is None
+
+
+def test_peak_memory_confidence_is_derived_from_the_baselines_not_asserted() -> None:
+    # An estimated baseline mixed with measured ones must never present itself as
+    # "measured": the estimate reports the weaker, evidence-honest label.
+    estimated = DeviceBaseline(
+        capability="text_semantics",
+        candidate_id="qwen3-4b",
+        device_class="apple-m1",
+        real_time_factor=Fraction(3, 1),
+        peak_memory_bytes=4_000,
+        basis="projection",
+        confidence="estimated",
+    )
+
+    estimate = estimate_plan_peak_memory((_baseline("vad", "silero-vad", 120), estimated))
+
+    assert estimate is not None
+    assert estimate.confidence == "mixed"
+
+
+def test_load_peak_memory_estimate_reads_the_retained_device_baselines(tmp_path: Path) -> None:
+    baselines_path = tmp_path / "docs" / "phase-11-prototypes" / "device-baselines.json"
+    baselines_path.parent.mkdir(parents=True)
+    baselines_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "device_class": "apple-m1",
+                "baselines": [_baseline("vad", "silero-vad", 200).as_json()],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    estimate = load_plan_peak_memory_estimate(tmp_path)
+
+    assert estimate is not None
+    assert estimate.peak_memory_bytes == 200
+
+
+def test_load_peak_memory_estimate_is_none_when_the_baseline_file_is_absent(tmp_path: Path) -> None:
+    assert load_plan_peak_memory_estimate(tmp_path) is None
+
+
+def _write_registry(tmp_path: Path, candidates: list[dict[str, object]]) -> None:
+    registry_path = tmp_path / "models" / "registry.json"
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps({"schema_version": 2, "candidates": candidates}), encoding="utf-8"
+    )
+
+
+def test_plan_model_statuses_flag_missing_and_ineligible_capabilities(tmp_path: Path) -> None:
+    # One capability has a candidate with incomplete evidence (ineligible); every
+    # other capability has no candidate at all (acquisition still required).
+    _write_registry(tmp_path, [{"candidate_id": "rapidocr", "capability": "ocr_primary"}])
+
+    statuses = plan_model_statuses(tmp_path)
+
+    by_capability = {status.capability: status.state for status in statuses}
+    assert tuple(status.capability for status in statuses) == PLAN_MODEL_CAPABILITIES
+    assert by_capability["ocr_primary"] == "model_ineligible"
+    assert by_capability["vad"] == "model_acquisition_required"
+    assert by_capability["asr_primary"] == "model_acquisition_required"
+
+
+def test_plan_model_statuses_treat_a_missing_registry_as_acquisition_required(
+    tmp_path: Path,
+) -> None:
+    statuses = plan_model_statuses(tmp_path)
+
+    assert tuple(status.capability for status in statuses) == PLAN_MODEL_CAPABILITIES
+    assert all(status.state == "model_acquisition_required" for status in statuses)
+
+
+def test_plan_model_statuses_surface_a_credential_gated_capability(tmp_path: Path) -> None:
+    _write_registry(
+        tmp_path,
+        [{"candidate_id": "gated-asr", "capability": "asr_primary", "credential_required": True}],
+    )
+
+    statuses = {status.capability: status.state for status in plan_model_statuses(tmp_path)}
+
+    assert statuses["asr_primary"] == "model_credential_gated"
+
+
+def test_plan_model_capabilities_cover_every_stage_capability() -> None:
+    from video_content_pipeline.audio_analysis import _CAPABILITIES as AUDIO_CAPABILITIES
+    from video_content_pipeline.text_analysis import TEXT_SEMANTICS_CAPABILITIES
+    from video_content_pipeline.transcription_contracts import ASR_CAPABILITIES
+    from video_content_pipeline.visual_text import VISUAL_TEXT_CAPABILITIES
+
+    assert set(PLAN_MODEL_CAPABILITIES) == (
+        set(AUDIO_CAPABILITIES)
+        | set(ASR_CAPABILITIES)
+        | set(VISUAL_TEXT_CAPABILITIES)
+        | set(TEXT_SEMANTICS_CAPABILITIES)
+    )

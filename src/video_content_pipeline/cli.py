@@ -447,6 +447,7 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
                 "Manual collection accepts URLs only through its session.",
                 plans_root,
                 (),
+                project_root=project_root,
             )
         if arguments.url_mode is None:
             return _blocked_url_report(
@@ -454,6 +455,7 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
                 "A manual collection requires an explicit --url-mode.",
                 plans_root,
                 (),
+                project_root=project_root,
             )
         return _plan_manual_collection(
             URLAccessMode(arguments.url_mode),
@@ -473,6 +475,7 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
                 "A public source must use HTTP or HTTPS.",
                 plans_root,
                 (),
+                project_root=project_root,
             )
         if arguments.url_mode is None:
             return _blocked_url_report(
@@ -480,6 +483,7 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
                 "A public URL requires an explicit --url-mode.",
                 plans_root,
                 (),
+                project_root=project_root,
             )
         try:
             authorization = authorize_public_url(
@@ -488,7 +492,9 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
                 allow_insecure_http=arguments.allow_insecure_http,
             )
         except URLPolicyError as error:
-            return _blocked_url_report(error.reason, str(error), plans_root, ())
+            return _blocked_url_report(
+                error.reason, str(error), plans_root, (), project_root=project_root
+            )
         return _plan_public_sources(
             (authorization,), project_root, plans_root, json_output=arguments.json
         )
@@ -500,7 +506,9 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
     try:
         candidate = validate_local_source_candidate(source_path)
     except SourceIntakeError as error:
-        return _blocked_local_report(error, 0, plans_root, configuration_fingerprint)
+        return _blocked_local_report(
+            error, 0, plans_root, configuration_fingerprint, project_root=project_root
+        )
     planned_increment = 0
 
     def check_snapshot_headroom(byte_count: int) -> None:
@@ -514,7 +522,7 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
         )
     except SourceIntakeError as error:
         return _blocked_local_report(
-            error, planned_increment, plans_root, configuration_fingerprint
+            error, planned_increment, plans_root, configuration_fingerprint, project_root=project_root
         )
     return _plan_source_artifacts(
         (artifact,),
@@ -546,6 +554,7 @@ def _plan_source_artifacts(
             planned_increment,
             plans_root,
             configuration_fingerprint,
+            project_root=project_root,
             source_artifacts=source_artifacts,
             tools=initial_tools,
             url_authorizations=url_authorizations,
@@ -572,6 +581,7 @@ def _plan_source_artifacts(
                 planned_increment,
                 plans_root,
                 configuration_fingerprint,
+                project_root=project_root,
                 source_artifacts=source_artifacts,
                 tools=tools,
                 url_authorizations=url_authorizations,
@@ -593,6 +603,7 @@ def _plan_source_artifacts(
                 planned_increment,
                 plans_root,
                 configuration_fingerprint,
+                project_root=project_root,
                 source_artifacts=source_artifacts,
                 tools=tools,
                 url_authorizations=url_authorizations,
@@ -616,6 +627,7 @@ def _plan_source_artifacts(
             planned_increment,
             plans_root,
             configuration_fingerprint,
+            project_root=project_root,
             source_artifacts=source_artifacts,
             tools=tools,
             url_authorizations=url_authorizations,
@@ -640,6 +652,7 @@ def _plan_source_artifacts(
         ),
         url_authorizations=tuple(authorization.evidence for authorization in url_authorizations),
         inspection_evidence=tuple(inspection_evidence),
+        project_root=project_root,
     )
     persist_plan_report(awaiting_decode, plans_root)
     return {"status": "awaiting_decode_confirmation", "report": awaiting_decode.as_json()}
@@ -651,6 +664,7 @@ def _blocked_local_report(
     plans_root: Path,
     configuration_fingerprint: str,
     *,
+    project_root: Path,
     source_artifacts: tuple[SourceArtifact, ...] = (),
     tools: tuple[PinnedExternalTool, ...] = (),
     inspection_evidence: tuple[PlanInspectionEvidence, ...] = (),
@@ -663,6 +677,7 @@ def _blocked_local_report(
         planned_increment,
         plans_root,
         configuration_fingerprint,
+        project_root=project_root,
         source_artifacts=source_artifacts,
         tools=tools,
         inspection_evidence=inspection_evidence,
@@ -676,6 +691,7 @@ def _blocked_report(
     plans_root: Path,
     configuration_fingerprint: str,
     *,
+    project_root: Path,
     source_artifacts: tuple[SourceArtifact, ...] = (),
     tools: tuple[PinnedExternalTool, ...] = (),
     url_authorizations: tuple[URLAuthorization, ...] = (),
@@ -694,6 +710,7 @@ def _blocked_report(
         inspection_evidence=_complete_inspection_evidence(
             source_artifacts, list(inspection_evidence)
         ),
+        project_root=project_root,
     )
     persist_plan_report(report, plans_root)
     return {"status": "blocked", "report": report.as_json()}
@@ -716,6 +733,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
             url_authorizations=report.url_authorizations,
             inspection_evidence=report.inspection_evidence,
             parent_report_id=report.report_id,
+            project_root=project_root,
         )
         persist_plan_report(stale, plans_root)
         return {"status": "blocked", "report": stale.as_json()}
@@ -740,6 +758,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
             url_authorizations=report.url_authorizations,
             inspection_evidence=report.inspection_evidence,
             parent_report_id=report.report_id,
+            project_root=project_root,
         )
         persist_plan_report(blocked, plans_root)
         return {"status": "blocked", "report": blocked.as_json()}
@@ -753,6 +772,7 @@ def _decode_report(report_id: str, project_root: Path, plans_root: Path) -> dict
         url_authorizations=report.url_authorizations,
         inspection_evidence=report.inspection_evidence,
         parent_report_id=report.report_id,
+        project_root=project_root,
     )
     persist_plan_report(ready, plans_root)
     return {"status": "ready_for_confirmation", "report": ready.as_json()}
@@ -769,7 +789,9 @@ def _plan_manual_collection(
     try:
         entries = _collect_manual_urls(session, json_output=json_output)
     except URLPolicyError as error:
-        return _blocked_url_report(error.reason, str(error), plans_root, session.entries)
+        return _blocked_url_report(
+            error.reason, str(error), plans_root, session.entries, project_root=project_root
+        )
     return _plan_public_sources(entries, project_root, plans_root, json_output=json_output)
 
 
@@ -792,6 +814,7 @@ def _plan_public_sources(
             0,
             plans_root,
             configuration_fingerprint,
+            project_root=project_root,
             url_authorizations=authorizations,
         )
     artifacts: list[SourceArtifact] = []
@@ -810,6 +833,7 @@ def _plan_public_sources(
                 _public_planned_increment(artifacts),
                 plans_root,
                 configuration_fingerprint,
+                project_root=project_root,
                 source_artifacts=tuple(artifacts),
                 tools=(downloader,),
                 url_authorizations=authorizations,
@@ -824,6 +848,7 @@ def _plan_public_sources(
                 _public_planned_increment(artifacts),
                 plans_root,
                 configuration_fingerprint,
+                project_root=project_root,
                 source_artifacts=tuple(artifacts),
                 tools=(downloader,),
                 url_authorizations=authorizations,
@@ -910,6 +935,8 @@ def _blocked_url_report(
     message: str,
     plans_root: Path,
     authorizations: tuple[URLAuthorization, ...],
+    *,
+    project_root: Path,
 ) -> dict[str, object]:
     report = create_plan_report(
         state=PlanState.BLOCKED,
@@ -919,6 +946,7 @@ def _blocked_url_report(
         configuration_fingerprint="phase-03-url-policy-v1",
         diagnostics=(PlanningDiagnostic(reason, message),),
         url_authorizations=tuple(authorization.evidence for authorization in authorizations),
+        project_root=project_root,
     )
     persist_plan_report(report, plans_root)
     return {"status": "blocked", "report": report.as_json()}

@@ -520,3 +520,102 @@ def _awaiting_decode_report(tmp_path: Path):
         decode_estimate=ThreePointEstimate(1, 2, 3, "low", "decode-throughput-profile:v1"),
         inspection_evidence=(inspection,),
     )
+
+
+def _write_model_registry(project_root: Path) -> None:
+    """A schema-2 registry with one ineligible candidate; every other capability empty."""
+
+    registry_path = project_root / "models" / "registry.json"
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "candidates": [{"candidate_id": "rapidocr", "capability": "ocr_primary"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_device_baselines(project_root: Path) -> None:
+    baselines_path = project_root / "docs" / "phase-11-prototypes" / "device-baselines.json"
+    baselines_path.parent.mkdir(parents=True)
+    baselines_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "device_class": "apple-m1",
+                "baselines": [
+                    {
+                        "capability": "asr_primary",
+                        "candidate_id": "qwen3-asr-1-7b",
+                        "device_class": "apple-m1",
+                        "real_time_factor": {"numerator": 5, "denominator": 1},
+                        "real_time_factor_approx": 5.0,
+                        "peak_memory_bytes": 5_462_840_040,
+                        "basis": "prototype:104eeec2:en",
+                        "confidence": "measured",
+                    },
+                    {
+                        "capability": "vad",
+                        "candidate_id": "silero-vad",
+                        "device_class": "apple-m1",
+                        "real_time_factor": {"numerator": 285, "denominator": 1},
+                        "real_time_factor_approx": 285.0,
+                        "peak_memory_bytes": 124_551_168,
+                        "basis": "prototype:104eeec2:en",
+                        "confidence": "measured",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_plan_report_carries_peak_memory_and_model_status_legal_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Phase 12 ticket 04: the plan the maintainer confirms shows all four legal
+    # fields -- estimated time and disk (already present) plus a device-baseline
+    # peak-memory estimate and per-capability model status from the registry.
+    _prepare_phase_3_cli(monkeypatch, tmp_path)
+    _write_url_planning_configuration(tmp_path)
+    _write_model_registry(tmp_path)
+    _write_device_baselines(tmp_path)
+    artifact = _public_artifact(tmp_path)
+    yt_dlp = PinnedExternalTool("yt-dlp", tmp_path / "yt-dlp", "test", "a" * 64)
+    ffprobe = PinnedExternalTool("ffprobe", tmp_path / "ffprobe", "test", "b" * 64)
+    ffmpeg = PinnedExternalTool("ffmpeg", tmp_path / "ffmpeg", "test", "c" * 64)
+    monkeypatch.setattr(
+        cli,
+        "_configured_tool",
+        lambda _root, tool_id: {"yt-dlp": yt_dlp, "ffprobe": ffprobe, "ffmpeg": ffmpeg}[tool_id],
+    )
+    monkeypatch.setattr(cli, "acquire_public_source", lambda *_args: artifact)
+    monkeypatch.setattr(cli, "capture_probe_documents", lambda *_args: _valid_probe_documents())
+
+    exit_code = cli.main(
+        ["plan", "https://example.test/watch", "--url-mode", "direct", "--json"]
+    )
+
+    assert exit_code == 0
+    report = json.loads(capsys.readouterr().out)["report"]
+    # Estimated time and disk headroom (the two pre-existing legal fields).
+    assert report["decode_estimate"] is not None
+    assert report["disk_headroom"]["required_bytes"] > 0
+    # Peak-memory estimate, backed by the retained device-baseline measurements.
+    assert report["peak_memory_estimate"]["peak_memory_bytes"] == 5_462_840_040
+    assert report["peak_memory_estimate"]["basis"] == "device-baselines:apple-m1"
+    assert report["peak_memory_estimate"]["confidence"] == "measured"
+    # Per-capability model status: ocr_primary is ineligible, others still need
+    # acquisition -- both surfaced at plan time rather than mid-run.
+    statuses = {status["capability"]: status["state"] for status in report["model_statuses"]}
+    assert statuses["ocr_primary"] == "model_ineligible"
+    assert statuses["asr_primary"] == "model_acquisition_required"
+    assert statuses["text_semantics"] == "model_acquisition_required"
+    # The legal fields survive a persistence round-trip.
+    assert load_plan_report(_report_path(tmp_path, report)).as_json()["model_statuses"] == (
+        report["model_statuses"]
+    )
