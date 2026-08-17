@@ -27,6 +27,7 @@ inference touch the model.
 from __future__ import annotations
 
 import json
+import sys
 import wave
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -49,11 +50,25 @@ from video_content_pipeline.model_acquisition import (
     AssetVerificationError,
     verify_acquired_asset,
 )
-from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
+from video_content_pipeline.model_runtime import EngineRequest, run_engine_subprocess
+from video_content_pipeline.timecode import ExactTime, HalfOpenInterval, interval_as_json
 from video_content_pipeline.vad_chunking import FIVE_MINUTES, SpeechChunk, derive_speech_chunks
 
 CAPABILITY = "vad"
 CANDIDATE_ID = "silero-vad"
+
+#: The production VAD child argv and its per-derivative subprocess budget. The
+#: whole ``analyze_derivative_vad`` sequence runs in the child so its peak is an
+#: honest fresh-process figure; the ONNX session is small, so the budget is far
+#: below the MLX engines' 300 s.
+VAD_CHILD_MODULE = "video_content_pipeline.vad_child"
+DEFAULT_VAD_TIMEOUT_SECONDS = 300.0
+
+
+def default_vad_command() -> list[str]:
+    """The production child argv: this interpreter running the VAD child module."""
+
+    return [sys.executable, "-m", VAD_CHILD_MODULE]
 
 #: silero v6 processes fixed 512-sample windows at 16 kHz; the model is loaded
 #: and calibrated for exactly this configuration.
@@ -574,3 +589,98 @@ def _exact_time(value: object) -> ExactTime:
 
 def _exact_time_as_json(value: ExactTime) -> dict[str, int]:
     return {"numerator": value.numerator, "denominator": value.denominator}
+
+
+# --- isolated (subprocess) analysis -------------------------------------------
+
+
+@dataclass(frozen=True)
+class IsolatedVadResult:
+    """One derivative's real VAD evidence measured in its own child process.
+
+    ``part_evidence`` is the report-shaped Complete VAD partition (identical to
+    the offline path's per-part evidence); ``speech_runs_samples`` lets the parent
+    re-derive the shared speech chunks with the pure :func:`derive_speech_chunks`
+    (no model, no cross-process dataclass rebuild); ``peak_memory_bytes`` is the
+    child's fresh-process high-water mark, comparable to the device baselines.
+    """
+
+    part_evidence: Mapping[str, object]
+    speech_runs_samples: tuple[tuple[int, int], ...]
+    model_asset_sha256: str
+    calibrated: bool
+    peak_memory_bytes: int
+
+
+def run_isolated_vad(
+    project_root: Path,
+    wav_path: Path,
+    mapping: DerivativeTimeMapping,
+    *,
+    source_id: str,
+    stream_index: int,
+    caption_intervals: Sequence[HalfOpenInterval] = (),
+    command: Sequence[str] | None = None,
+    timeout_seconds: float = DEFAULT_VAD_TIMEOUT_SECONDS,
+) -> IsolatedVadResult:
+    """Run the real silero VAD in its own child and return report evidence + peak.
+
+    The whole ``analyze_derivative_vad`` sequence runs in the child
+    (:mod:`video_content_pipeline.vad_child`) so the pinned asset is loaded in a
+    fresh process whose peak is honest; a malformed child response is a typed
+    ``vad_output_invalid`` failure, and subprocess crashes/timeouts surface as
+    :class:`~video_content_pipeline.model_runtime.ModelRuntimeError`.
+    """
+
+    request = EngineRequest(
+        model_path=str(project_root),
+        task={
+            "wav_path": str(wav_path),
+            "mapping": mapping.as_json(),
+            "source_id": source_id,
+            "stream_index": stream_index,
+            "caption_intervals": [interval_as_json(interval) for interval in caption_intervals],
+        },
+    )
+    result = run_engine_subprocess(
+        list(command) if command is not None else default_vad_command(),
+        request,
+        timeout_seconds=timeout_seconds,
+    )
+    return _parse_isolated_vad_result(result.result, result.peak_memory_bytes)
+
+
+def _parse_isolated_vad_result(
+    result: Mapping[str, object], peak_memory_bytes: int
+) -> IsolatedVadResult:
+    part_evidence = result.get("part_evidence")
+    speech_runs = result.get("speech_runs_samples")
+    model_asset_sha256 = result.get("model_asset_sha256")
+    calibrated = result.get("calibrated")
+    if (
+        not isinstance(part_evidence, Mapping)
+        or not isinstance(speech_runs, list)
+        or not isinstance(model_asset_sha256, str)
+        or not isinstance(calibrated, bool)
+    ):
+        raise VadEngineError(
+            "vad_output_invalid", "The VAD child response is missing required fields."
+        )
+    parsed_runs: list[tuple[int, int]] = []
+    for run in speech_runs:
+        if (
+            not isinstance(run, list)
+            or len(run) != 2
+            or not all(isinstance(bound, int) and not isinstance(bound, bool) for bound in run)
+        ):
+            raise VadEngineError(
+                "vad_output_invalid", "A VAD child speech-run span is malformed."
+            )
+        parsed_runs.append((run[0], run[1]))
+    return IsolatedVadResult(
+        part_evidence=part_evidence,
+        speech_runs_samples=tuple(parsed_runs),
+        model_asset_sha256=model_asset_sha256,
+        calibrated=calibrated,
+        peak_memory_bytes=peak_memory_bytes,
+    )
