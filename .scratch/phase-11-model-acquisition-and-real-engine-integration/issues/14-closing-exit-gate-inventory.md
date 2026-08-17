@@ -15,13 +15,13 @@ stays `real_world_testing` (only Phase 12 user confirmation can reach
 `production_validated`).
 
 **Blocked by:** 01–13
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Inventory lists every exit gate with named proof; acceptance test
+- [x] Inventory lists every exit gate with named proof; acceptance test
       green
-- [ ] Completion report records deviations, known limitations (real-video
+- [x] Completion report records deviations, known limitations (real-video
       quality remains Phase 12's subject), and the constraint flips
-- [ ] Final full verification at the closure commit: pytest, ruff check,
+- [x] Final full verification at the closure commit: pytest, ruff check,
       ruff format --check, mypy — all clean
-- [ ] `project-state.json` phase history updated; `next_phase: 12`
+- [x] `project-state.json` phase history updated; `next_phase: 12`

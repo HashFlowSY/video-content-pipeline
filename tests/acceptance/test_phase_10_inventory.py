@@ -166,14 +166,20 @@ def test_the_state_flip_gate_was_performed_by_the_maintainer() -> None:
 
 
 def test_project_state_reflects_the_closure_flip() -> None:
-    """The third plan gate happened: overall_stage flipped with the phase fields."""
+    """The third plan gate happened: overall_stage flipped with the phase fields.
+
+    The durable evidence is the flipped ``overall_stage`` plus Phase 10's own
+    completed/passed_offline history entry. The live ``current_phase`` /
+    ``next_phase`` pointers legitimately advance as later phases close (Phase 11
+    closure moves them to 11 / 12), so this gate checks the history entry rather
+    than the moving pointer.
+    """
 
     state = json.loads(PROJECT_STATE_PATH.read_text(encoding="utf-8"))
     assert state["overall_stage"] == "real_world_testing"
     assert state["real_world_testing"] is True
-    assert state["current_phase"] == 10
-    assert state["phase_status"] == "completed"
-    assert state["next_phase"] == 11
+    assert state["current_phase"] >= 10
+    assert state["next_phase"] >= 11
     phase_10 = [entry for entry in state["phase_history"] if entry["phase"] == 10]
     assert len(phase_10) == 1
     assert phase_10[0]["status"] == "completed"

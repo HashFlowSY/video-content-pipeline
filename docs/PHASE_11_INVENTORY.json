@@ -1,0 +1,371 @@
+{
+  "schema_version": 1,
+  "phase": 11,
+  "status": "completed",
+  "ticket_14_verification": "passed_offline",
+  "phase_exit_gates": "all_confirmed",
+  "phase_completion_note": "Ticket 14 closes Phase 11 (模型采集与真实引擎集成): the four 阶段 11 退出门禁 from docs/PHASED_EXECUTION_PLAN.md plus the seven derived gates named in docs/PHASE_11_SPECIFICATION.md :: Exit gates are each mapped to named proving tests or retained-evidence pointers and cross-linked to a summary boolean. All seven capabilities (vad, asr_primary, asr_review, forced_alignment, diarization, ocr_primary, text_semantics) ran real-engine prototypes on the two Public-Domain VOA clips and were maintainer-confirmed 2026-08-17 (docs/phase-11-prototypes/maintainer-review.md); every measured peak is <= 5.5 GiB, well within the 12 GiB envelope. Unlike Phase 10, no plan gate flips overall_stage: the closure ritual advances the phase fields (current_phase 11, phase_status completed, next_phase 12) while overall_stage stays real_world_testing and production_validated stays false -- only Phase 12 user acceptance can reach production_validated.",
+  "recorded_at": "2026-08-17T08:00:00+0800",
+  "project_root": "/Users/apple/Desktop/wp/video-content-pipeline",
+  "summary": {
+    "all_seven_capabilities_prototyped_on_real_material_confirmed": true,
+    "registry_entries_carry_full_provenance_confirmed": true,
+    "every_prototype_peak_within_12_gib_confirmed": true,
+    "suite_green_no_unauthorized_download_confirmed": true,
+    "lockfile_is_torch_free_confirmed": true,
+    "registry_entries_hash_verify_on_disk_confirmed": true,
+    "production_adapters_fail_typed_never_download_confirmed": true,
+    "subprocess_boundary_returns_memory_confirmed": true,
+    "envelope_is_twelve_gib_everywhere_confirmed": true,
+    "constraint_flips_recorded_with_evidence_confirmed": true,
+    "full_suite_wall_time_within_budget_confirmed": true
+  },
+  "summary_note": "The `summary` block is the conventional exit-gate declaration mirroring prior phase inventories. Every boolean is cross-linked to an `exit_gates` entry via `summary_key`. All eleven gates (four plan + seven derived) are confirmed. The machine-checkable backing for every gate lives in `exit_gates` (named proving tests + retained-evidence pointers), `guarantees_asserted`, and `full_suite`, all asserted by tests/acceptance/test_phase_11_inventory.py. The heavy per-capability prototype runs (vcp-prototype over the 4-minute clips) are maintainer-invoked commands whose retained evidence lives under docs/phase-11-prototypes/; the pytest gate itself stays offline and exercises the real engines only under the `slow` marker over short windows.",
+  "exit_gates": [
+    {
+      "id": "all_seven_capabilities_prototyped_on_real_material",
+      "requirement": "全部七个能力在真实素材上跑通原型且样例经维护者确认。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "all_seven_capabilities_prototyped_on_real_material_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_11_vad_engine.py::test_real_silero_produces_a_valid_complete_vad_partition",
+        "tests/integration/test_phase_11_diarization_engine.py::test_real_diarization_produces_contract_valid_speaker_turns",
+        "tests/integration/test_phase_11_asr_engine.py::test_real_primary_transcription_is_contract_valid",
+        "tests/integration/test_phase_11_asr_engine.py::test_real_review_is_independent_evidence_with_real_peak",
+        "tests/integration/test_phase_11_alignment_engine.py::test_real_alignment_produces_contract_valid_proposals",
+        "tests/integration/test_phase_11_ocr_engine.py::test_real_ocr_yields_contract_valid_items_through_the_gate",
+        "tests/integration/test_phase_11_text_semantics_engine.py::test_real_text_semantics_run_is_contract_valid_and_reports_peak"
+      ],
+      "retained_evidence": [
+        "docs/phase-11-prototypes/maintainer-review.md",
+        "docs/phase-11-prototypes/device-baselines.json"
+      ],
+      "note": "The slow-marked integration tests prove each real engine loads its pinned asset offline and produces contract-valid output on the authoritative timeline. The maintainer quality confirmation of the Chinese/English samples is retained evidence (a human decision, not a pytest assertion): docs/phase-11-prototypes/maintainer-review.md marks all seven Confirmed, with the diarization over-clustering and chunk-granularity notes recorded and the text_semantics adapter fixed by ticket 15."
+    },
+    {
+      "id": "registry_entries_carry_full_provenance",
+      "requirement": "模型注册表每个采集条目含 revision、哈希、大小、量化与授权记录。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "registry_entries_carry_full_provenance_confirmed",
+      "proving_tests": [
+        "tests/unit/test_model_registry_content.py::test_every_candidate_is_acquired_and_carries_provenance",
+        "tests/unit/test_model_registry_content.py::test_no_candidate_is_credential_gated",
+        "tests/integration/test_phase_11_acquired_assets.py::test_all_seven_downloads_plus_rapidocr_are_acquired"
+      ],
+      "note": "The eight acquired registry entries (models/registry.json) each carry revision, asset_sha256, size, quantization/precision, and license/authorization records; the cited tests assert provenance completeness and that no candidate is credential-gated."
+    },
+    {
+      "id": "every_prototype_peak_within_12_gib",
+      "requirement": "任一原型阶段实测峰值内存不超过 12 GiB。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "every_prototype_peak_within_12_gib_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_11_inventory.py::test_every_recorded_prototype_peak_is_within_the_envelope",
+        "tests/unit/test_prototype.py::test_peak_within_envelope_passes",
+        "tests/unit/test_prototype.py::test_over_envelope_peak_fails_engineering",
+        "tests/integration/test_phase_11_asr_engine.py::test_real_review_is_independent_evidence_with_real_peak"
+      ],
+      "retained_evidence": [
+        "docs/phase-11-prototypes/device-baselines.json"
+      ],
+      "note": "The fourteen measured prototype peaks (seven capabilities x two clips) live in device-baselines.json, each a positive integer <= 5.5 GiB; the cited acceptance test re-reads them and asserts each is within the 12 GiB envelope. The engines report a real MLX/ONNX peak through the subprocess/in-process boundary (asserted > 0 by the real integration tests), and the within-envelope math is unit-tested."
+    },
+    {
+      "id": "suite_green_no_unauthorized_download",
+      "requirement": "工程自动化测试全绿；未经授权不发生任何下载。",
+      "source": "plan",
+      "confirmed": true,
+      "summary_key": "suite_green_no_unauthorized_download_confirmed",
+      "proving_tests": [
+        "tests/unit/test_lockfile_gate.py::test_no_banned_distribution_is_installable",
+        "tests/unit/test_inference_imports.py::test_import_is_offline_and_side_effect_free",
+        "tests/integration/test_phase_11_acquired_assets.py::test_models_tree_holds_only_planned_asset_files",
+        "tests/acceptance/test_phase_11_inventory.py::test_recorded_suite_wall_time_is_within_budget"
+      ],
+      "note": "The full suite is green (see `full_suite`: 1624 passed at the closure commit, including the fifteen real-model slow integration tests). No unauthorized download can occur: the inference imports run under HOME-isolated, network-blocked subprocesses writing zero files, and the models tree holds only the planned, pre-acquired asset files. The only authorized acquisition was the one-off ticket-04 download, recorded in constraint_events."
+    },
+    {
+      "id": "lockfile_is_torch_free",
+      "requirement": "lockfile is torch-free",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "lockfile_is_torch_free_confirmed",
+      "proving_tests": [
+        "tests/unit/test_lockfile_gate.py::test_only_torch_may_appear_and_only_as_a_neutered_phantom",
+        "tests/unit/test_lockfile_gate.py::test_no_banned_distribution_is_installable",
+        "tests/unit/test_lockfile_gate.py::test_pyproject_declares_the_recorded_torch_override",
+        "tests/unit/test_inference_imports.py::test_torch_is_not_installed"
+      ],
+      "note": "torch survives only as an artifact-free phantom node via the sanctioned override-dependencies pin (ticket 03); the cited tests assert no banned distribution is installable, torch appears only as the neutered phantom, the pyproject override is recorded, and torch is never importable."
+    },
+    {
+      "id": "registry_entries_hash_verify_on_disk",
+      "requirement": "every registry entry hash-verifies on disk",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "registry_entries_hash_verify_on_disk_confirmed",
+      "proving_tests": [
+        "tests/integration/test_phase_11_acquired_assets.py::test_acquired_asset_verifies_from_disk",
+        "tests/integration/test_phase_11_acquired_assets.py::test_all_seven_downloads_plus_rapidocr_are_acquired"
+      ],
+      "note": "Each acquired asset's canonical file-manifest sha256 is re-derived from disk and matched to the recorded registry asset_sha256; identity is verified, not trusted."
+    },
+    {
+      "id": "production_adapters_fail_typed_never_download",
+      "requirement": "production adapters fail typed (never download) when an asset is missing",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "production_adapters_fail_typed_never_download_confirmed",
+      "proving_tests": [
+        "tests/unit/test_vad_engine.py::test_missing_asset_tree_is_a_typed_failure",
+        "tests/unit/test_diarization_engine.py::test_tampered_asset_is_a_typed_mismatch_never_a_network_attempt",
+        "tests/unit/test_alignment_engine.py::test_absent_asset_tree_is_a_typed_failure",
+        "tests/unit/test_asr_engine.py::test_tampered_asset_is_a_typed_mismatch_never_a_network_attempt",
+        "tests/unit/test_ocr_engine.py::test_locate_bundled_models_dir_typed_when_runtime_missing",
+        "tests/unit/test_text_semantics_engine.py::test_tampered_asset_is_a_typed_mismatch_never_a_network_attempt"
+      ],
+      "note": "Every real adapter re-hashes its pinned asset before load and raises a distinct typed error (vad/diarization/alignment/asr/ocr/text_semantics) on a missing or tampered asset, never attempting a network fetch."
+    },
+    {
+      "id": "subprocess_boundary_returns_memory",
+      "requirement": "the subprocess boundary returns memory (post-stage RSS assertion)",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "subprocess_boundary_returns_memory_confirmed",
+      "proving_tests": [
+        "tests/unit/test_model_runtime.py::test_memory_returned_after_exit",
+        "tests/unit/test_model_runtime.py::test_process_peak_rss_is_a_positive_int",
+        "tests/unit/test_model_runtime.py::test_missing_peak_memory_field_is_rejected",
+        "tests/integration/test_phase_11_asr_engine.py::test_real_review_is_independent_evidence_with_real_peak"
+      ],
+      "note": "The Model runtime subprocess (ADR 0055) returns a positive peak_memory_bytes on child exit; a missing or negative peak is rejected as engine_response_invalid. The real ASR integration test confirms a genuine MLX peak is returned across the boundary."
+    },
+    {
+      "id": "envelope_is_twelve_gib_everywhere",
+      "requirement": "envelope constant is 12 GiB everywhere it is asserted",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "envelope_is_twelve_gib_everywhere_confirmed",
+      "proving_tests": [
+        "tests/unit/test_capabilities.py::test_resource_envelope_is_twelve_gib",
+        "tests/unit/test_capabilities.py::test_estimate_between_twelve_and_twenty_four_gib_pauses"
+      ],
+      "note": "capabilities.MAX_MODEL_RESOURCE_BYTES = 12 GiB is the single source of truth (ticket 02); text_analysis imports it rather than re-declaring, and an 18 GiB estimate pauses at the boundary."
+    },
+    {
+      "id": "constraint_flips_recorded_with_evidence",
+      "requirement": "`media_processed`/`models_downloaded` flips are recorded with evidence",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "constraint_flips_recorded_with_evidence_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_11_inventory.py::test_the_constraint_flips_are_recorded_with_evidence",
+        "tests/acceptance/test_phase_10_inventory.py::test_project_state_constraints_remain_untouched"
+      ],
+      "note": "models_downloaded (ticket 04) and media_processed (ticket 13) are both true, each recorded in project-state.json constraint_events with an object + purpose; paid_apis_used stays false. The cited tests assert the flips carry evidence and that the boundary constraint holds."
+    },
+    {
+      "id": "full_suite_wall_time_within_budget",
+      "requirement": "full-suite wall time stays within the ≤5-minute budget",
+      "source": "derived",
+      "confirmed": true,
+      "summary_key": "full_suite_wall_time_within_budget_confirmed",
+      "proving_tests": [
+        "tests/acceptance/test_phase_11_inventory.py::test_recorded_suite_wall_time_is_within_budget"
+      ],
+      "note": "The measured wall time and the <= 5-minute budget are recorded in `full_suite`; the cited test asserts the recorded value is within budget. The full suite includes the fifteen real-model slow integration tests; the heavy per-capability prototype runs are separate maintainer-invoked commands, not part of the pytest gate."
+    }
+  ],
+  "exit_gates_source": "docs/PHASED_EXECUTION_PLAN.md :: ### 阶段 11：模型采集与真实引擎集成 :: 退出门禁 (plan gates) + docs/PHASE_11_SPECIFICATION.md :: Exit gates :: Derived gates (derived gates)",
+  "derived_gate_ids": [
+    "lockfile_is_torch_free",
+    "registry_entries_hash_verify_on_disk",
+    "production_adapters_fail_typed_never_download",
+    "subprocess_boundary_returns_memory",
+    "envelope_is_twelve_gib_everywhere",
+    "constraint_flips_recorded_with_evidence",
+    "full_suite_wall_time_within_budget"
+  ],
+  "known_limitations": [
+    "真实中英 ASR 准确率、真实直播重叠说话质量、真实字幕强制对齐成功率、真实 OCR 召回和数字准确率、真实长视频摘要忠实度——这些真实视频质量问题不在本阶段验证范围内，是阶段 12（真实视频测试）的主题。",
+    "diarization en 片段在当前 cluster_threshold 0.5 下过度聚类（约 15 簇对约 3 说话人）；真实阈值调优交由阶段 12 对照人工参考进行。",
+    "单主题原型片段被 text_semantics 归为单一 SemanticSegment；多段行为尚未演练，留待阶段 12 对照人工参考调优。",
+    "所有真实引擎均以「beside」方式接线（ADR 0037），未接入 CLI 命令；端到端真实运行、暂停/恢复、用户验收属于阶段 12。"
+  ],
+  "known_limitations_source": "docs/PHASE_11_SPECIFICATION.md :: Out of scope + docs/phase-11-prototypes/maintainer-review.md (recorded notes). The 阶段 11 plan section has no 本阶段不能验证 block; real-video quality is Phase 12's subject.",
+  "guarantees_asserted": {
+    "network_access": "not_attempted",
+    "fast_suite_model_execution": "not_attempted",
+    "real_engine_execution": "slow_marked_and_maintainer_invoked_only",
+    "model_acquisition": "one_off_authorized_offline",
+    "asserted_by": [
+      "tests/unit/test_inference_imports.py::test_import_is_offline_and_side_effect_free",
+      "tests/unit/test_lockfile_gate.py::test_no_banned_distribution_is_installable",
+      "tests/integration/test_phase_11_acquired_assets.py::test_models_tree_holds_only_planned_asset_files"
+    ],
+    "note": "The fast pytest gate never downloads or runs a real model: inference imports are proven offline and side-effect-free under network-blocked, HOME-isolated subprocesses, and the lockfile forbids any banned distribution from being installable. The real engines execute only under the `slow` marker (fifteen integration tests over short windows against the pinned on-disk assets) and in maintainer-invoked vcp-prototype commands whose evidence is retained under docs/phase-11-prototypes/. The only model acquisition was the one-off, individually authorized ticket-04 download; no network is touched at runtime (runtime_auto_downloads_allowed stays false)."
+  },
+  "full_suite": {
+    "command": "pytest -q",
+    "test_count": 1624,
+    "wall_time_seconds": 73,
+    "wall_time_budget_seconds": 300,
+    "within_budget": true,
+    "measured_at": "2026-08-17T08:00:00+0800",
+    "note": "Full suite at the closure commit: 1624 passed in 72.07s wall (real 73.07s), including the fifteen real-model slow integration tests and this inventory's acceptance test, far inside the 5-minute budget. (At inventory authoring, pre-closure HEAD d784c95, it was 1610 before this acceptance test was added.) The gate is ALWAYS the full suite; markers integration/slow select subsets but never replace it."
+  },
+  "retained_evidence": [
+    "docs/phase-11-prototypes",
+    "docs/phase-11-prototypes/maintainer-review.md",
+    "docs/phase-11-prototypes/device-baselines.json",
+    "docs/phase-11-download-plans",
+    "docs/phase-11-download-plans/prototype-media.md",
+    "research/phase-11-model-selection.md",
+    "models/registry.json"
+  ],
+  "created_or_modified": [
+    ".gitignore",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/spec.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/01-plan-amendment-registry-candidates-and-tool-reprobe.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/02-resource-envelope-12gib.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/03-runtime-dependencies-and-torch-free-gate.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/04-model-download-plans-and-acquisition.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/05-model-runtime-subprocess-and-adr.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/06-vad-real-adapter-and-chunking.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/07-diarization-real-adapter.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/08-alignment-real-adapter.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/09-asr-real-adapters.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/10-text-semantics-capability-and-adapter.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/11-ocr-real-adapter.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/12-prototype-material-acquisition.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/13-capability-prototypes-and-sample-review.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/14-closing-exit-gate-inventory.md",
+    ".scratch/phase-11-model-acquisition-and-real-engine-integration/issues/15-text-semantics-prompt-content-and-recalibration.md",
+    "CONTEXT-MAP.md",
+    "config/audio-analysis/qwen3-aligner-calibration.json",
+    "config/audio-analysis/sherpa-diarization-calibration.json",
+    "config/audio-analysis/silero-vad-calibration.json",
+    "config/text-analysis-rules.json",
+    "config/text-analysis/controlled-adapter.json",
+    "config/text-analysis/prompt-template.json",
+    "config/text-analysis/qwen3-text-semantics-calibration.json",
+    "config/tools.json",
+    "config/visual-text/rapidocr-engine-config.json",
+    "docs/PHASED_EXECUTION_PLAN.md",
+    "docs/PHASE_11_SPECIFICATION.md",
+    "docs/PHASE_11_INVENTORY.json",
+    "docs/PHASE_11_COMPLETION_REPORT.md",
+    "docs/adr/0055-run-mlx-model-engines-in-per-stage-subprocesses.md",
+    "docs/adr/0056-require-model-specific-text-semantics-calibration.md",
+    "docs/contexts/orchestration/CONTEXT.md",
+    "docs/contexts/text-analysis/CONTEXT.md",
+    "docs/phase-11-download-plans/prototype-media.md",
+    "docs/phase-11-prototypes/maintainer-review.md",
+    "docs/phase-11-prototypes/device-baselines.json",
+    "project-state.json",
+    "pyproject.toml",
+    "research/phase-11-model-selection.md",
+    "models/registry.json",
+    "src/video_content_pipeline/alignment_engine.py",
+    "src/video_content_pipeline/alignment_engine_child.py",
+    "src/video_content_pipeline/asr_engine.py",
+    "src/video_content_pipeline/asr_primary_child.py",
+    "src/video_content_pipeline/asr_review_child.py",
+    "src/video_content_pipeline/audio_analysis.py",
+    "src/video_content_pipeline/capabilities.py",
+    "src/video_content_pipeline/diarization_engine.py",
+    "src/video_content_pipeline/model_acquisition.py",
+    "src/video_content_pipeline/model_runtime.py",
+    "src/video_content_pipeline/ocr_engine.py",
+    "src/video_content_pipeline/prototype.py",
+    "src/video_content_pipeline/prototype_runs.py",
+    "src/video_content_pipeline/text_analysis.py",
+    "src/video_content_pipeline/text_semantics_child.py",
+    "src/video_content_pipeline/text_semantics_engine.py",
+    "src/video_content_pipeline/vad_chunking.py",
+    "src/video_content_pipeline/vad_engine.py",
+    "tests/acceptance/test_document_layout_contract.py",
+    "tests/acceptance/test_phase_10_inventory.py",
+    "tests/acceptance/test_phase_11_inventory.py",
+    "tests/integration/test_phase_11_acquired_assets.py",
+    "tests/integration/test_phase_11_alignment_engine.py",
+    "tests/integration/test_phase_11_asr_engine.py",
+    "tests/integration/test_phase_11_diarization_engine.py",
+    "tests/integration/test_phase_11_ocr_engine.py",
+    "tests/integration/test_phase_11_text_semantics_engine.py",
+    "tests/integration/test_phase_11_vad_engine.py",
+    "tests/property/test_alignment_engine_properties.py",
+    "tests/property/test_asr_engine_properties.py",
+    "tests/property/test_vad_chunking_properties.py",
+    "tests/unit/test_alignment_engine.py",
+    "tests/unit/test_asr_engine.py",
+    "tests/unit/test_capabilities.py",
+    "tests/unit/test_diarization_engine.py",
+    "tests/unit/test_inference_imports.py",
+    "tests/unit/test_lockfile_gate.py",
+    "tests/unit/test_model_acquisition.py",
+    "tests/unit/test_model_registry_content.py",
+    "tests/unit/test_model_runtime.py",
+    "tests/unit/test_models_gitignore.py",
+    "tests/unit/test_ocr_engine.py",
+    "tests/unit/test_prototype.py",
+    "tests/unit/test_prototype_runs.py",
+    "tests/unit/test_text_semantics_capabilities.py",
+    "tests/unit/test_text_semantics_engine.py",
+    "tests/unit/test_vad_chunking.py",
+    "tests/unit/test_vad_engine.py",
+    "uv.lock"
+  ],
+  "external_reads": [
+    "config/tools.json (pinned yt-dlp/ffmpeg/ffprobe identities; the host binaries are read and identity-verified, never modified).",
+    "Hugging Face Hub and the pinned URL asset hosts (one-off, individually authorized ticket-04 model downloads at fixed revisions/hashes; no runtime network access)."
+  ],
+  "retention": "No model, dependency, source media, cache, temporary data, or failed output has been deleted.",
+  "governance": {
+    "performed_by_maintainer": [
+      "Confirmed the seven capability prototype samples on real Public-Domain VOA material (2026-08-17); decision retained in docs/phase-11-prototypes/maintainer-review.md.",
+      "Individually authorized each of the ticket-04 model downloads (pinned revision + hash) and the ticket-12 prototype media acquisition.",
+      "Advanced the project-state.json phase fields at closure (current_phase 11, phase_status completed, next_phase 12); overall_stage deliberately left at real_world_testing and production_validated at false, reserved for Phase 12 user acceptance."
+    ],
+    "performed_at": "2026-08-17",
+    "note": "Phase 11 has no overall_stage exit gate. The two constraint flips (models_downloaded ticket 04, media_processed ticket 13) were performed earlier under individual maintainer authorization and are recorded in project-state.json constraint_events with object + purpose. This ticket only advances the phase-history fields."
+  },
+  "implementation_audit": {
+    "head": "d784c95",
+    "ticket_status": {
+      "01": "done",
+      "02": "done",
+      "03": "done",
+      "04": "done",
+      "05": "done",
+      "06": "done",
+      "07": "done",
+      "08": "done",
+      "09": "done",
+      "10": "done",
+      "11": "done",
+      "12": "acquisition_done",
+      "13": "done",
+      "14": "done",
+      "15": "done"
+    },
+    "completed_work": [
+      "Plan amendment (Phase 11 split from real-video testing into model acquisition & real engine integration; old Phase 11 renumbered to Phase 12), registry candidate completion, tool re-probe, and the 12 GiB resource-envelope shrink as the single source of truth.",
+      "Torch-free inference dependency group locked with the sanctioned torch-phantom override and a lockfile gate; seven maintainer-confirmed model downloads plus RapidOCR from the pinned wheel = eight acquired registry entries, each hash-verified from disk.",
+      "The Model runtime subprocess seam (ADR 0055) and the seven real engines wired beside the controlled offline adapters (ADR 0037): silero VAD and sherpa-onnx diarization in-process (ONNX-scale), Qwen3 forced alignment, both ASR adapters, and Qwen3-4B text_semantics out-of-process (MLX-scale), RapidOCR ocr_primary in-process from bundled wheel models; the new text_semantics capability and its model-specific calibration (ADR 0056).",
+      "Prototype material acquisition (two Public-Domain VOA clips), the reusable pytest-gated prototype harness, and the fourteen maintainer-invoked real prototype runs with retained device baselines and per-capability samples; the text_semantics prompt-v2 adapter fix and recalibration (ticket 15) that flipped its sample from model_output_invalid to confirmed Chinese-prose segments.",
+      "This closing exit-gate inventory with tests/acceptance/test_phase_11_inventory.py (regex-derived plan gates, the seven specified derived gates, AST-verified citations, machine-checked constraint flips and closure ritual, measured device peaks within the 12 GiB envelope, and the full-suite wall-time budget)."
+    ],
+    "open_requirements": [
+      "The five 本阶段不能验证 real-video quality questions (real zh/en ASR accuracy, real overlapping-speech quality, real subtitle forced-alignment success, real OCR recall and digit accuracy, real long-video summary faithfulness) remain out of reach without human reference and are the subject of Phase 12 real-video testing.",
+      "diarization cluster_threshold tuning, text_semantics multi-segment behaviour, and CLI wiring of the real engines are Phase 12 concerns (real engines currently slot beside the offline path per ADR 0037)."
+    ],
+    "current_head_verification": {
+      "pytest": "1624 passed",
+      "production_validated": false
+    }
+  }
+}
