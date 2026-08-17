@@ -12,6 +12,7 @@ dependencies = []
 
 [project.scripts]
 vcp = "video_content_pipeline.cli:main"
+vcp-prototype = "video_content_pipeline.prototype_runs:main"
 
 [dependency-groups]
 dev = [

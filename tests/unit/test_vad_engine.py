@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from video_content_pipeline.audio_derivation import DerivativeTimeMapping
@@ -19,6 +20,9 @@ from video_content_pipeline.model_acquisition import build_file_manifest, manife
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
 from video_content_pipeline.vad_engine import (
     CANDIDATE_ID,
+    SILERO_CONTEXT_SAMPLES,
+    SILERO_STATE_DIM,
+    SILERO_WINDOW_SAMPLES,
     SileroVadCalibration,
     VadEngineError,
     VoiceActivityState,
@@ -28,6 +32,7 @@ from video_content_pipeline.vad_engine import (
     load_silero_asset,
     load_silero_calibration,
     resolve_silero_candidate,
+    silero_frame_probabilities,
     speech_runs_from_probabilities,
 )
 
@@ -238,3 +243,40 @@ def test_absent_candidate_is_a_typed_failure(tmp_path: Path) -> None:
     with pytest.raises(VadEngineError) as excinfo:
         resolve_silero_candidate(tmp_path)
     assert excinfo.value.reason == "vad_candidate_absent"
+
+
+class _RecordingSileroSession:
+    """A fake onnxruntime session that records each input window it is fed.
+
+    It returns a constant high speech probability so the test can assert the
+    *shape and context* of the model input, not any model behaviour.
+    """
+
+    def __init__(self) -> None:
+        self.inputs: list[np.ndarray] = []
+
+    def run(self, _outputs: object, feeds: dict[str, np.ndarray]) -> tuple[object, object]:
+        self.inputs.append(np.array(feeds["input"], dtype=np.float32))
+        return (
+            np.array([[0.9]], dtype=np.float32),
+            np.zeros((2, 1, SILERO_STATE_DIM), dtype=np.float32),
+        )
+
+
+def test_silero_frame_probabilities_prepends_the_64_sample_context() -> None:
+    rng = np.random.default_rng(20260817)
+    samples = rng.standard_normal(2 * SILERO_WINDOW_SAMPLES).astype(np.float32)
+    session = _RecordingSileroSession()
+
+    probabilities = silero_frame_probabilities(session, samples)
+
+    assert len(probabilities) == 2
+    # Every model input is context + window, never a bare window (the bug).
+    for fed in session.inputs:
+        assert fed.shape == (1, SILERO_CONTEXT_SAMPLES + SILERO_WINDOW_SAMPLES)
+    # The first window sees a silent context; the second sees the first window's tail.
+    assert np.all(session.inputs[0][0, :SILERO_CONTEXT_SAMPLES] == 0.0)
+    first_window = samples[:SILERO_WINDOW_SAMPLES]
+    np.testing.assert_allclose(
+        session.inputs[1][0, :SILERO_CONTEXT_SAMPLES], first_window[-SILERO_CONTEXT_SAMPLES:]
+    )

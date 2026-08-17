@@ -59,6 +59,11 @@ CANDIDATE_ID = "silero-vad"
 #: and calibrated for exactly this configuration.
 SILERO_SAMPLE_RATE = 16000
 SILERO_WINDOW_SAMPLES = 512
+#: silero v5/v6 prepends 64 samples of the previous window as context to every
+#: 16 kHz frame (the model input is ``context + window`` = 576 samples). The model
+#: accepts a bare 512-sample input without erroring but scores near-zero on real
+#: speech, so the context is mandatory, not optional.
+SILERO_CONTEXT_SAMPLES = 64
 #: The width of silero's recurrent hidden state (the ``state`` input/output).
 SILERO_STATE_DIM = 128
 
@@ -328,21 +333,27 @@ def read_wav_samples(wav_path: Path) -> NDArray[np.float32]:
 def silero_frame_probabilities(session: Any, samples: NDArray[np.float32]) -> list[float]:
     """Run windowed silero inference, returning one speech probability per window.
 
-    Each 512-sample window (the last zero-padded) is scored with the recurrent
-    state carried forward, exactly as silero is designed to be driven at 16 kHz.
+    Each 512-sample window (the last zero-padded) is prepended with the previous
+    window's trailing 64 samples of context and scored with the recurrent state
+    carried forward, exactly as silero v5/v6 is designed to be driven at 16 kHz.
+    The context starts as silence and is refreshed from each raw window; omitting
+    it makes the model score real speech near zero (it accepts the shorter input
+    without complaint), so it is mandatory.
     """
 
     window = SILERO_WINDOW_SAMPLES
+    context_size = SILERO_CONTEXT_SAMPLES
     state = np.zeros((2, 1, SILERO_STATE_DIM), dtype=np.float32)
+    context = np.zeros(context_size, dtype=np.float32)
     sr = np.array(SILERO_SAMPLE_RATE, dtype=np.int64)
     probabilities: list[float] = []
     for start in range(0, len(samples), window):
         frame = samples[start : start + window]
         if len(frame) < window:
             frame = np.pad(frame, (0, window - len(frame)))
-        output, state = session.run(
-            None, {"input": frame.reshape(1, window), "state": state, "sr": sr}
-        )
+        model_input = np.concatenate((context, frame)).reshape(1, context_size + window)
+        output, state = session.run(None, {"input": model_input, "state": state, "sr": sr})
+        context = frame[-context_size:]
         probabilities.append(float(output[0, 0]))
     return probabilities
 
