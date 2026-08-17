@@ -2,7 +2,7 @@
   "schema_version": 1,
   "capability": "text_semantics",
   "candidate_id": "qwen3-4b-instruct-2507-8bit",
-  "calibration_version": "qwen3-4b-instruct-2507-8bit-first-device-baseline-2026-08-17",
+  "calibration_version": "qwen3-4b-instruct-2507-8bit-prompt-v2-real-sample-confirmed-2026-08-17",
   "model_identity": {
     "model_asset_sha256": "2a1b7ba81037c15882e233f7a1e40dd41251d51fb4afac48a164a3cc61e479e2",
     "backend": "mlx-lm",
@@ -11,13 +11,31 @@
     "device_class": "apple-m1",
     "rules_fingerprint": "text-analysis-rules-v1"
   },
-  "prompt_template_version": "phase-06-prompt-template-v1",
-  "qualification_scope": "first_device_baseline",
+  "prompt_template_version": "phase-06-prompt-template-v2",
+  "qualification_scope": "real_sample_confirmed",
+  "real_sample_qualification": {
+    "confirmed_at": "2026-08-17",
+    "confirmed_by": "maintainer",
+    "ticket": "phase-11-ticket-15",
+    "sources": [
+      "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
+      "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc"
+    ],
+    "prototype_records": [
+      "docs/phase-11-prototypes/text_semantics/f6fd0cd7-zh.record.json",
+      "docs/phase-11-prototypes/text_semantics/104eeec2-en.record.json"
+    ],
+    "note": "Confirmed on real zh+en Voice of America material under prompt-template v2 (Phase 11 ticket 15), which renders each cue's verbatim recognized text plus the exact output envelope. Both clips project into verified, cue-cited SemanticSegments in Chinese prose (zh: 9 finer cues -> one segment titled 江歌案的舆论引爆与法律争议, 6 cited details; en: 11 finer cues -> one segment titled 中国'皇亲国戚'的财富崛起与社会不平等, 8 cited details); the v1 prompt returned model_output_invalid (a cue-id echo) on both. Recorded observation for Phase 12: the model groups a single-topic clip into one segment; multi-segment behaviour is not yet exercised and remains to be tuned against human reference.",
+    "peak_memory_bytes": {
+      "f6fd0cd7-zh": 4972155456,
+      "104eeec2-en": 5051028740
+    }
+  },
   "decoding": {
     "temperature": 0.0,
     "seed": 0,
     "max_tokens": 4096,
     "max_kv_size": 8192
   },
-  "notes": "Model-specific text-semantics decoding calibration profile (ADR 0056) for the Qwen3-4B-Instruct-2507-8bit engine executed through the Model runtime subprocess (ADR 0055) with mlx-lm. model_identity binds the exact pinned model asset SHA-256, the mlx-lm backend and version, the 8-bit precision, the apple-m1 device class, and the text-analysis rules fingerprint; any bound-identity change invalidates the profile. prompt_template_version binds the versioned prompt template the profile was calibrated for, so a prompt revision invalidates the profile. decoding fixes the deterministic sampling controls: temperature 0.0 is decoded as greedy argmax and seed makes the (already deterministic) run reproducible, max_tokens bounds the generation length, and max_kv_size bounds the KV cache so peak memory stays within the 12 GiB envelope on this device. qualification_scope is 'first_device_baseline': these settings qualify the real engine only for offline engineering verification here; the Chinese/English semantic quality of the selection is confirmed only by the maintainer sample review in the Phase 11 prototype ticket, not by this record. Model-proposed boundaries and content are always validated against the revalidated cue evidence by the unchanged Text-model output projection and adjudication, so this profile never makes unproven model output authoritative."
+  "notes": "Model-specific text-semantics decoding calibration profile (ADR 0056) for the Qwen3-4B-Instruct-2507-8bit engine executed through the Model runtime subprocess (ADR 0055) with mlx-lm. model_identity binds the exact pinned model asset SHA-256, the mlx-lm backend and version, the 8-bit precision, the apple-m1 device class, and the text-analysis rules fingerprint; any bound-identity change invalidates the profile. prompt_template_version binds the versioned prompt template the profile was calibrated for, so a prompt revision invalidates the profile. This profile was recalibrated for prompt-template v2 (Phase 11 ticket 15), which renders each cue's verbatim recognized text and the exact output envelope into the prompt; the ticket-10 v1 prompt carried only cue identities and produced no segmentable content. decoding fixes the deterministic sampling controls: temperature 0.0 is decoded as greedy argmax and seed makes the (already deterministic) run reproducible, max_tokens bounds the generation length, and max_kv_size bounds the KV cache so peak memory stays within the 12 GiB envelope on this device. qualification_scope is 'real_sample_confirmed': the maintainer confirmed the Chinese/English semantic quality on real Voice of America zh+en material under prompt-template v2 (Phase 11 ticket 15); the real_sample_qualification block records that confirmation and its evidence. Model-proposed boundaries and content are always validated against the revalidated cue evidence by the unchanged Text-model output projection and adjudication, so this profile never makes unproven model output authoritative."
 }

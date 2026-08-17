@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "phase-06-prompt-template-v1",
+  "version": "phase-06-prompt-template-v2",
   "language_default": "zh",
   "citation_basis": "normalized_cue_id",
   "sections": [
@@ -17,12 +17,12 @@
     {
       "id": "evidence",
       "role": "input",
-      "text": "PresentationCues and NormalizedCue identities for one Part are provided verbatim. Do not use external knowledge, translation, unit conversion, or entity inference."
+      "text": "Each PresentationCue is provided verbatim as its NormalizedCue identity followed by its exact recognized text, in Part order. Do not use external knowledge, translation, unit conversion, or entity inference."
     },
     {
       "id": "output_contract",
       "role": "system",
-      "text": "Return a single JSON object matching the versioned output schema. Prose defaults to Chinese; cited source text retains its original language."
+      "text": "Return a single JSON object matching the versioned output schema exactly as specified in the output-contract section below, including the fixed schema_version, output_schema_version, and adapter_identity values. Every segment boundary and every cited claim must reference a NormalizedCue identity from the provided cues. Prose defaults to Chinese; cited source text retains its original language."
     }
   ]
 }

@@ -28,6 +28,16 @@ from video_content_pipeline.timecode import ExactTime, HalfOpenInterval, interva
 #: The forced aligner's hard window and the shared default chunk ceiling.
 FIVE_MINUTES = ExactTime(300)
 
+#: A finer speech-anchored window for sub-chunk cueing. The default five-minute
+#: window packs a short clip into a single chunk -- one ASR cue with nothing to
+#: segment and one alignment proposal spanning the clip. Deriving chunks at this
+#: finer ceiling instead yields many speech-anchored cues (still cut only in
+#: silence, so no speech is split), so semantic segmentation has boundaries to
+#: propose over and forced alignment has cue-scale proposals to adopt. It feeds
+#: the same :func:`derive_speech_chunks` and the unchanged ASR/gate contracts;
+#: only the window ceiling differs (Phase 11 ticket 15).
+SEMANTIC_CUE_WINDOW = ExactTime(30)
+
 
 class VadChunkingError(ValueError):
     """A rejected chunk-derivation input with a machine-readable reason."""

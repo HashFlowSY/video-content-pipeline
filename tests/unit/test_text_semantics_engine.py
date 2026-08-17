@@ -41,11 +41,12 @@ from video_content_pipeline.text_semantics_engine import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CANDIDATE_ID = "qwen3-4b-instruct-2507-8bit"
 CAPABILITY = "text_semantics"
-PROMPT_VERSION = "phase-06-prompt-template-v1"
+PROMPT_VERSION = "phase-06-prompt-template-v2"
 PART_ID = "part"
 TRACK_ID = "stream-0"
 CUE_A = f"{PART_ID}:{TRACK_ID}:0"
 CUE_B = f"{PART_ID}:{TRACK_ID}:1"
+CUE_TEXTS = {CUE_A: "第一条字幕文本", CUE_B: "第二条字幕文本"}
 
 
 # --- calibration record -------------------------------------------------------
@@ -226,11 +227,30 @@ def _parts() -> tuple[LoadedPart, ...]:
 def test_prompt_render_is_deterministic_and_carries_cue_identities() -> None:
     contracts = _contracts()
     parts = _parts()
-    first = render_text_semantics_prompt(contracts, parts)
-    second = render_text_semantics_prompt(contracts, parts)
+    first = render_text_semantics_prompt(contracts, parts, CUE_TEXTS)
+    second = render_text_semantics_prompt(contracts, parts, CUE_TEXTS)
     assert first == second
     assert PROMPT_VERSION in first
     assert CUE_A in first and CUE_B in first
+
+
+def test_prompt_render_carries_cue_text_and_output_schema() -> None:
+    # The v2 rendition gives the model both the verbatim cue text to segment and the
+    # exact output envelope to return -- the ticket-15 adapter-completeness fix.
+    prompt = render_text_semantics_prompt(_contracts(), _parts(), CUE_TEXTS)
+    assert CUE_TEXTS[CUE_A] in prompt and CUE_TEXTS[CUE_B] in prompt
+    # The exact fixed identity values the Text-model output projection enforces.
+    assert '"output_schema_version": "phase-06-output-schema-v1"' in prompt
+    assert '"adapter_identity": "phase-06-controlled-text-adapter-v1"' in prompt
+    assert "start_cue_id" in prompt and "end_cue_id" in prompt
+
+
+def test_prompt_render_omits_text_for_uncovered_cue() -> None:
+    # A cue with no provided text renders its identity with an empty text tail,
+    # never an exception -- the caller owns cue-text completeness.
+    prompt = render_text_semantics_prompt(_contracts(), _parts(), {CUE_A: "只有第一条"})
+    assert f"- {CUE_A}: 只有第一条\n" in prompt
+    assert f"- {CUE_B}: \n" in prompt
 
 
 # --- Model runtime subprocess seam (stub executable, no model) ----------------
@@ -406,6 +426,7 @@ def test_valid_output_composes_verified_segments(tmp_path: Path) -> None:
         source_id=PART_ID,
         stream_index=0,
         available=_parts(),
+        cue_texts=CUE_TEXTS,
         command=command,
         timeout_seconds=30,
     )
@@ -438,6 +459,7 @@ def test_malformed_model_output_is_retained_diagnostics_not_a_crash(tmp_path: Pa
         source_id=PART_ID,
         stream_index=0,
         available=_parts(),
+        cue_texts=CUE_TEXTS,
         command=command,
         timeout_seconds=30,
     )
@@ -465,6 +487,7 @@ def test_generate_requires_calibration(tmp_path: Path) -> None:
             source_id=PART_ID,
             stream_index=0,
             available=_parts(),
+            cue_texts=CUE_TEXTS,
             command=command,
             timeout_seconds=30,
         )

@@ -31,11 +31,34 @@ Make the real text adapter give the model what it needs to summarise:
   gap.
 
 **Blocked by:** 13
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent, follow-up
 
-- [ ] Prompt includes verbatim cue text + the output schema; `prompt_template_version` bumped
-- [ ] Qwen3 text-semantics calibration recalibrated to the new prompt version (ADR 0056)
-- [ ] Finer cue granularity available so segmentation/alignment are meaningfully exercised
-- [ ] text_semantics prototype re-run on real zh+en material; segment-summary sample maintainer-confirmed
-- [ ] Full pytest gate stays green and within budget; offline adapters unchanged in meaning
+- [x] Prompt includes verbatim cue text + the output schema; `prompt_template_version` bumped
+- [x] Qwen3 text-semantics calibration recalibrated to the new prompt version (ADR 0056)
+- [x] Finer cue granularity available so segmentation/alignment are meaningfully exercised
+- [x] text_semantics prototype re-run on real zh+en material; segment-summary sample maintainer-confirmed
+- [x] Full pytest gate stays green and within budget; offline adapters unchanged in meaning
+
+## Resolution (2026-08-17)
+
+- `render_text_semantics_prompt` now takes a `cue_texts` map and renders each cue as
+  its identity + verbatim recognized text, plus an `# output-contract` section giving
+  the exact envelope (fixed `schema_version`/`output_schema_version`/`adapter_identity`
+  from the bound contracts + the per-segment boundary/cited-content shape). Prompt
+  content changed → `prompt_template_version` bumped `v1`→`v2` across
+  `text-analysis-rules.json`, `prompt-template.json`, and `controlled-adapter.json`.
+- Qwen3 decoding profile recalibrated to prompt v2 (ADR 0056): calibration
+  `prompt_template_version` → v2, `qualification_scope` → `real_sample_confirmed` with a
+  `real_sample_qualification` provenance block. Decoding values (temp 0 / seed 0 /
+  max_tokens 4096 / max_kv_size 8192) unchanged — the recalibration is the prompt-version
+  rebind + real-sample confirmation. The Controlled offline text adapter (a hash-pinned
+  fixture, not prompt-driven) is unchanged in meaning; only its bound version string moved.
+- Finer cue granularity: `vad_chunking.SEMANTIC_CUE_WINDOW` (30 s) feeds the *unchanged*
+  `derive_speech_chunks` + real primary ASR; the prototype's alignment and text-semantics
+  prep now consume the finer cues (zh 9, en 11 vs one giant chunk cue). ASR/gate contracts
+  and the confirmed chunk-level asr_primary demonstration are unchanged.
+- Re-run on ticket-12 zh+en material: both project into verified cue-cited SemanticSegments
+  in Chinese prose (was `model_output_invalid` under v1). Maintainer-confirmed; evidence in
+  `docs/phase-11-prototypes/text_semantics/{f6fd0cd7-zh,104eeec2-en}.{md,record.json}` and
+  `docs/phase-11-prototypes/maintainer-review.md`.

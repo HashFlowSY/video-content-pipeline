@@ -23,7 +23,7 @@ Reviewed and decided 2026-08-17.
 | ocr_primary (RapidOCR) | ✅ | ✅ | **Confirmed** — on-screen zh text read verbatim (`VOA卫视`, `陈杰人（电话连线）`, `独立时评人`, `时事大家谈`). |
 | forced_alignment (Qwen3-ForcedAligner-0.6B-8bit) | ✅ | ✅ | **Confirmed**, with recorded granularity follow-up (see below). |
 | diarization (sherpa-onnx pyannote-seg + CAM++) | ✅ | ⚠️ | **Confirmed as-is**, with a recorded over-clustering note (see below). |
-| text_semantics (Qwen3-4B-Instruct-2507-8bit) | 🔴 | 🔴 | **Not confirmed** — diagnosed adapter gap; follow-up ticket (see below). |
+| text_semantics (Qwen3-4B-Instruct-2507-8bit) | ✅ | ✅ | **Confirmed** after the ticket-15 prompt-v2 adapter fix (see below); was 🔴 under the ticket-10 v1 prompt. |
 
 No sample was bounced to a fallback quant tier / candidate: the two issues below
 are adapter/calibration matters, not model-selection quality problems.
@@ -39,27 +39,49 @@ deferred to Phase 12 against human reference. Recorded in
 `config/audio-analysis/sherpa-diarization-calibration.json`
 (`qualification_scope: real_sample_confirmed_with_note`).
 
-### chunk granularity (recorded follow-up)
+### chunk granularity — addressed for the text pipeline by ticket 15
 The whole ~4-minute clip fits in a single ≤5-minute VAD chunk, and ticket-09
-asr_primary emits one cue per chunk, so these clips produce a single giant ASR
-cue. Alignment then has one proposal spanning the clip, and text_semantics has a
-single cue to "segment". Finer cue granularity (sub-chunk cueing) is needed
-before alignment adoption and semantic segmentation are meaningfully exercised in
-Phase 12.
+asr_primary emits one cue per chunk, so at chunk granularity these clips produce a
+single giant ASR cue — alignment then has one proposal spanning the clip, and
+text_semantics has a single cue to "segment". Ticket 15 added a finer
+speech-anchored window (`vad_chunking.SEMANTIC_CUE_WINDOW`, 30 s) that re-derives
+chunks (cut only in silence) and runs the *unchanged* real primary ASR over them,
+yielding many finer cues (9 on the zh clip, 11 on the en clip) on the authoritative
+source timeline through the unchanged `ProjectedAsrCue`/gate contracts. The
+prototype's alignment and text-semantics prep now consume these finer cues, so
+semantic segmentation has boundaries to propose over and forced alignment has
+cue-scale proposals. The confirmed chunk-level asr_primary demonstration is left
+unchanged. Real segment-count/alignment-adoption tuning against human reference
+stays a Phase 12 concern.
 
-### text_semantics adapter gap (follow-up ticket)
-text_semantics returned `model_output_invalid` (0 segments) on **both** languages.
-Root cause is **not** model quality: the versioned prompt rendered by
-`render_text_semantics_prompt` (ticket 10) carries only cue *identities* — no
-transcript text and no output schema — even though the template states
-"PresentationCues … provided verbatim". With no content and no schema, Qwen3-4B
-can only echo the cue id (`{"segments":[{"title":"part-1:0", …}]}`), which the
-unchanged Text-model output projection correctly rejects. Fixing it means
-including cue text + the output schema in the prompt, which bumps
-`prompt_template_version` and forces recalibration (ADR 0056), plus the finer-cue
-work above. Deferred to a follow-up ticket rather than rewriting the versioned
-Phase 6 contract under a prototype ticket. The Qwen3-4B selection itself is not
-rejected; its semantic quality remains unproven until the prompt is fixed.
+### text_semantics adapter gap — RESOLVED by ticket 15
+Under the ticket-10 v1 prompt, text_semantics returned `model_output_invalid`
+(0 segments) on **both** languages. Root cause was **not** model quality: the
+versioned prompt rendered by `render_text_semantics_prompt` carried only cue
+*identities* — no transcript text and no output schema — even though the template
+stated "PresentationCues … provided verbatim". With no content and no schema,
+Qwen3-4B could only echo the cue id (a 173-byte `{"title":"part-1:0"}`-style
+response), which the unchanged Text-model output projection correctly rejects.
+
+Ticket 15 fixed the adapter: `render_text_semantics_prompt` now renders each cue's
+verbatim recognized text plus the exact output envelope (fixed `schema_version`,
+`output_schema_version`, `adapter_identity`, and the per-segment boundary/cited-content
+shape). This changed the prompt content, so `prompt_template_version` was bumped to
+`phase-06-prompt-template-v2` and the Qwen3 decoding profile recalibrated to it
+(ADR 0056). The Controlled offline text adapter (a hash-pinned fixture, not a
+prompt-driven path) is unchanged in meaning; only its bound version string moved.
+
+Re-run 2026-08-17 on the same ticket-12 material, both clips now project into
+verified, cue-cited SemanticSegments in Chinese prose:
+- zh (`f6fd0cd7`): 9 finer cues → one segment "江歌案的舆论引爆与法律争议…" with 6 cited details.
+- en (`104eeec2`): 11 finer cues → one segment "中国'皇亲国戚'的财富崛起与社会不平等" with 8 cited details.
+
+Both peaks ~5 GiB (‹12 GiB), RTF ~3.0, offline, raw retained as restricted audit
+evidence. **Confirmed** by the maintainer; the calibration record moved to
+`qualification_scope: real_sample_confirmed` with a `real_sample_qualification`
+block. Recorded observation for Phase 12: the model groups a single-topic clip into
+one segment, so multi-segment behaviour is not yet exercised and remains to be tuned
+against human reference.
 
 ## Calibration provenance
 Real-sample qualification landed on the VAD, diarization, and forced-alignment

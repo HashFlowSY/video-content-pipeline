@@ -327,15 +327,23 @@ def load_text_semantics_asset(
 
 
 def render_text_semantics_prompt(
-    contracts: TextGenerationContracts, available: Sequence[LoadedPart]
+    contracts: TextGenerationContracts,
+    available: Sequence[LoadedPart],
+    cue_texts: Mapping[str, str],
 ) -> str:
     """Deterministically render the versioned prompt for the available Parts.
 
-    The rendition concatenates the versioned prompt-template sections and, for each
-    available Part, its authoritative ordered cue identities -- the only boundaries
-    the model may propose over. It is a stable function of the bound prompt-template
-    version and the revalidated cue inventory, so the same inputs always render the
-    same prompt (the subprocess request carries this exact text). Pure and
+    The rendition concatenates the versioned prompt-template sections, a concrete
+    output-contract section derived from the bound output-schema and controlled-adapter
+    identities (the exact JSON envelope the model must return), and, for each available
+    Part, its authoritative ordered cues -- each rendered as its NormalizedCue identity
+    followed by its exact recognized ``cue_texts`` text (verbatim; ADR-0037 offline
+    adapter parity), the only boundaries the model may propose over. Giving the model
+    both the cue text to segment and the exact output shape to return is what prompt
+    template v2 fixed over the ticket-10 v1 rendition, which carried only cue identities
+    (Phase 11 ticket 15). It is a stable function of the bound contract versions, the
+    revalidated cue inventory, and the provided cue text, so the same inputs always
+    render the same prompt (the subprocess request carries this exact text). Pure and
     deterministic; touches no model.
     """
 
@@ -349,12 +357,68 @@ def render_text_semantics_prompt(
             section_id = section.get("id")
             text = section.get("text")
             lines.append(f"[{role}:{section_id}] {text}")
+    lines.extend(_output_contract_lines(contracts, available))
     lines.append("# authoritative-cues")
     for part in available:
         lines.append(f"## part {part.part_id} track {part.track_id}")
         for cue_identity in part.cue_ids:
-            lines.append(f"- {cue_identity}")
+            lines.append(f"- {cue_identity}: {cue_texts.get(cue_identity, '')}")
     return "\n".join(lines) + "\n"
+
+
+def _output_contract_lines(
+    contracts: TextGenerationContracts, available: Sequence[LoadedPart]
+) -> list[str]:
+    """Render the exact JSON envelope the model must return as prompt instructions.
+
+    The required top-level constants (``schema_version``, ``output_schema_version``,
+    ``adapter_identity``) are taken from the bound output-schema and controlled-adapter
+    identities so the rendered instructions and the envelope the Text-model output
+    projection enforces can never drift. A compact skeleton over the first available
+    Part's own cue identities shows the per-segment ``boundary`` and cited-``content``
+    shape. Pure and deterministic.
+    """
+
+    envelope = contracts.output_schema.document.get("envelope")
+    expected_schema_version = (
+        envelope.get("expected_schema_version") if isinstance(envelope, Mapping) else None
+    )
+    example = available[0] if available else None
+    example_part = example.part_id if example is not None else "part-1"
+    example_cues = example.cue_ids if example is not None else ()
+    start_cue = example_cues[0] if example_cues else f"{example_part}:0"
+    end_cue = example_cues[-1] if example_cues else start_cue
+    skeleton = {
+        "schema_version": expected_schema_version,
+        "output_schema_version": contracts.output_schema.version,
+        "adapter_identity": contracts.controlled_adapter.version,
+        "result": {
+            "parts": [
+                {
+                    "part_id": example_part,
+                    "segments": [
+                        {
+                            "boundary": {"start_cue_id": start_cue, "end_cue_id": end_cue},
+                            "content": {
+                                "title": {"text": "<zh title>", "cue_ids": [start_cue]},
+                                "details": [{"text": "<zh detail>", "cue_ids": [start_cue]}],
+                            },
+                        }
+                    ],
+                    "chapters": [],
+                }
+            ],
+            "collection_summary": None,
+        },
+    }
+    return [
+        "# output-contract",
+        "Return exactly one JSON object with this shape and these fixed identity values:",
+        json.dumps(skeleton, ensure_ascii=False, indent=2, sort_keys=True),
+        "Rules: a segment boundary names an existing cue in the same Part as start_cue_id "
+        "and end_cue_id; every title and detail must cite one or more of the cue_ids inside "
+        "its own segment; emit no field you cannot cite from the provided cues.",
+    ]
 
 
 # --- subprocess round-trip ----------------------------------------------------
@@ -448,6 +512,7 @@ def generate_text_semantics(
     source_id: str,
     stream_index: int,
     available: Sequence[LoadedPart],
+    cue_texts: Mapping[str, str],
     unavailable: Sequence[UnavailablePartInfo] = (),
     command: Sequence[str] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -456,8 +521,9 @@ def generate_text_semantics(
 
     Verifies and loads the pinned asset, gate-checks the model-specific decoding
     calibration (ADR 0056) against that asset and the bound prompt-template version,
-    renders the versioned prompt over the authoritative cue identities, and runs one
-    Model runtime subprocess (ADR 0055) to generate the semantic analysis. The raw
+    renders the versioned prompt over the authoritative cues -- each cue's identity plus
+    its verbatim ``cue_texts`` recognized text and the exact output envelope -- and runs
+    one Model runtime subprocess (ADR 0055) to generate the semantic analysis. The raw
     output is retained as restricted local audit evidence, then projected through the
     unchanged Text-model output projection and composed through the unchanged
     adjudication: model-proposed boundaries and content are validated against the
@@ -474,7 +540,7 @@ def generate_text_semantics(
     )
     child_command = list(command) if command is not None else default_text_semantics_command()
 
-    prompt = render_text_semantics_prompt(contracts, available)
+    prompt = render_text_semantics_prompt(contracts, available, cue_texts)
     raw_text, peak = generate_semantics(
         model_path,
         prompt,

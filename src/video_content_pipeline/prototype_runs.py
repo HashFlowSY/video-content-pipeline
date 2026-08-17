@@ -158,6 +158,22 @@ def loaded_part_for_cues(part_id: str, track_id: str, cue_count: int) -> LoadedP
     )
 
 
+def loaded_part_with_texts(
+    part_id: str, track_id: str, cues: Sequence[ProjectedAsrCue]
+) -> tuple[LoadedPart, dict[str, str]]:
+    """Build a Part and its cue-id -> verbatim-text map from assembled ASR cues.
+
+    The Part carries the authoritative ordered cue identities (as
+    :func:`loaded_part_for_cues`); the returned map binds each identity to that cue's
+    exact recognized text, which the text-semantics prompt renders verbatim so the
+    model has content to segment (Phase 11 ticket 15).
+    """
+
+    part = loaded_part_for_cues(part_id, track_id, len(cues))
+    cue_texts = {cue_id: cue.text for cue_id, cue in zip(part.cue_ids, cues, strict=True)}
+    return part, cue_texts
+
+
 def sample_relpath(capability: str, source_id: str, language: str) -> str:
     """The tracked relative path of one capability sample for a source/language."""
 
@@ -222,6 +238,7 @@ class PrototypeContext:
         self._audio: tuple[Path, DerivativeTimeMapping, Fraction] | None = None
         self._vad: Measured[SileroVadResult] | None = None
         self._asr_primary: Measured[PrimaryTranscriptionResult] | None = None
+        self._fine_cues: tuple[ProjectedAsrCue, ...] | None = None
 
     @property
     def ffmpeg(self) -> PinnedExternalTool:
@@ -314,20 +331,50 @@ class PrototypeContext:
             chunks=chunks,
         )
         wall = _elapsed_fraction(time.monotonic() - start)
-        self._write_asr_cache(result.cues)
         self._asr_primary = Measured(result, wall, result.peak_memory_bytes)
         return self._asr_primary
 
+    def _fine_asr_cues(self) -> tuple[ProjectedAsrCue, ...]:
+        """Transcribe the derivative at the finer semantic-cue window and cache it.
+
+        The default five-minute VAD chunking packs a short clip into a single ASR
+        cue -- one giant cue that semantic segmentation cannot split and forced
+        alignment cannot adopt at cue scale. This re-derives speech-anchored chunks
+        at :data:`~video_content_pipeline.vad_chunking.SEMANTIC_CUE_WINDOW` and runs
+        the *unchanged* real primary ASR over them, yielding many finer cues on the
+        authoritative source timeline (Phase 11 ticket 15). The alignment and
+        text-semantics prep reuse these cues; each single-capability process is
+        self-contained, so the finer transcript is cached (untimed prep, not a
+        measured capability run) rather than re-run.
+        """
+
+        if self._fine_cues is not None:
+            return self._fine_cues
+        from video_content_pipeline.asr_engine import transcribe_derivative
+        from video_content_pipeline.vad_chunking import SEMANTIC_CUE_WINDOW, derive_speech_chunks
+
+        wav_path, mapping, _ = self.audio()
+        vad = self.measured_vad().result
+        fine_chunks = derive_speech_chunks(
+            vad.speech_runs_samples, mapping, max_chunk_duration=SEMANTIC_CUE_WINDOW
+        )
+        result = transcribe_derivative(
+            self.project_root,
+            wav_path,
+            source_id=self.source_id,
+            stream_index=0,
+            language=self.language,
+            chunks=fine_chunks,
+        )
+        self._write_asr_cache(result.cues)
+        self._fine_cues = result.cues
+        return result.cues
+
     def _asr_cache_path(self) -> Path:
-        return self.work_dir / "asr-primary-cues.json"
+        return self.work_dir / "asr-fine-cues.json"
 
     def _write_asr_cache(self, cues: Sequence[ProjectedAsrCue]) -> None:
-        """Cache the primary transcript so alignment/text_semantics prep reuses it.
-
-        Each single-capability process is self-contained; caching the cues lets a
-        later ``forced_alignment`` or ``text_semantics`` run reuse the real
-        transcript rather than re-running ASR as untimed prep.
-        """
+        """Persist the finer transcript so alignment/text_semantics prep reuses it."""
 
         data = [
             {
@@ -343,7 +390,7 @@ class PrototypeContext:
     def _asr_cue_data(self) -> list[dict[str, object]]:
         cache = self._asr_cache_path()
         if not cache.exists():
-            self.measured_asr_primary()
+            self._fine_asr_cues()
         loaded = json.loads(cache.read_text(encoding="utf-8"))["cues"]
         return list(loaded)
 
@@ -451,7 +498,7 @@ class PrototypeContext:
         from video_content_pipeline.text_semantics_engine import generate_text_semantics
 
         contracts = revalidate_text_generation_contracts(self.project_root)
-        part = loaded_part_for_cues("part-1", "asr-primary", self.asr_cue_count())
+        part, cue_texts = loaded_part_with_texts("part-1", "asr-fine", self._fine_asr_cues())
         start = time.monotonic()
         result = generate_text_semantics(
             self.project_root,
@@ -460,6 +507,7 @@ class PrototypeContext:
             source_id=self.source_id,
             stream_index=0,
             available=(part,),
+            cue_texts=cue_texts,
         )
         return Measured(
             result, _elapsed_fraction(time.monotonic() - start), result.peak_memory_bytes

@@ -9,7 +9,7 @@
   "capability": "text_semantics",
   "checks": [
     {
-      "detail": "peak 4547280788 bytes vs 12884901888 byte envelope",
+      "detail": "peak 4972155456 bytes vs 12884901888 byte envelope",
       "name": "peak_within_envelope",
       "passed": true
     },
@@ -29,7 +29,7 @@
     "text_semantics",
     "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da"
   ],
-  "created_at": "2026-08-17T05:19:29Z",
+  "created_at": "2026-08-17T06:08:53Z",
   "device_class": "apple-m1",
   "envelope_bytes": 12884901888,
   "language": "zh",
@@ -39,7 +39,7 @@
     "HF_HUB_OFFLINE",
     "TRANSFORMERS_OFFLINE"
   ],
-  "peak_memory_bytes": 4547280788,
+  "peak_memory_bytes": 4972155456,
   "peak_within_envelope": true,
   "sample_relpath": "docs/phase-11-prototypes/text_semantics/f6fd0cd7-zh.md",
   "source_id": "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
@@ -50,13 +50,13 @@
       "numerator": 1937659
     },
     "real_time_factor": {
-      "denominator": 96152,
+      "denominator": 642152,
       "numerator": 1937659
     },
-    "real_time_factor_approx": 20.152,
+    "real_time_factor_approx": 3.0174,
     "wall_seconds": {
       "denominator": 1000,
-      "numerator": 12019
+      "numerator": 80269
     }
   }
 }

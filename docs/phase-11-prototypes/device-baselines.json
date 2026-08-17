@@ -136,12 +136,12 @@
       "capability": "text_semantics",
       "confidence": "measured",
       "device_class": "apple-m1",
-      "peak_memory_bytes": 4547280788,
+      "peak_memory_bytes": 5051028740,
       "real_time_factor": {
-        "denominator": 47816,
+        "denominator": 388552,
         "numerator": 1170193
       },
-      "real_time_factor_approx": 24.4728
+      "real_time_factor_approx": 3.0117
     },
     {
       "basis": "prototype:f6fd0cd7:zh",
@@ -149,12 +149,12 @@
       "capability": "text_semantics",
       "confidence": "measured",
       "device_class": "apple-m1",
-      "peak_memory_bytes": 4547280788,
+      "peak_memory_bytes": 4972155456,
       "real_time_factor": {
-        "denominator": 96152,
+        "denominator": 642152,
         "numerator": 1937659
       },
-      "real_time_factor_approx": 20.152
+      "real_time_factor_approx": 3.0174
     },
     {
       "basis": "prototype:104eeec2:en",

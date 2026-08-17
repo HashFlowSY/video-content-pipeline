@@ -57,13 +57,10 @@ def test_real_text_semantics_asset_verifies_from_disk() -> None:
 
 def test_real_text_semantics_run_is_contract_valid_and_reports_peak(tmp_path: Path) -> None:
     contracts = revalidate_text_generation_contracts(REPO_ROOT)
-    parts = (
-        LoadedPart(
-            part_id=PART_ID,
-            track_id=TRACK_ID,
-            cue_ids=(f"{PART_ID}:{TRACK_ID}:0", f"{PART_ID}:{TRACK_ID}:1"),
-        ),
-    )
+    cue_a = f"{PART_ID}:{TRACK_ID}:0"
+    cue_b = f"{PART_ID}:{TRACK_ID}:1"
+    parts = (LoadedPart(part_id=PART_ID, track_id=TRACK_ID, cue_ids=(cue_a, cue_b)),)
+    cue_texts = {cue_a: "第一条示例字幕。", cue_b: "第二条示例字幕。"}
 
     result = generate_text_semantics(
         REPO_ROOT,
@@ -72,6 +69,7 @@ def test_real_text_semantics_run_is_contract_valid_and_reports_peak(tmp_path: Pa
         source_id=PART_ID,
         stream_index=0,
         available=parts,
+        cue_texts=cue_texts,
     )
 
     # Provenance: the pinned asset ran in its own subprocess under the committed
