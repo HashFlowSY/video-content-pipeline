@@ -14,9 +14,9 @@ this is an acquisition-contract change, not a binary upgrade.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Canned multicomponent (bilibili-shaped) yt-dlp metadata yields a correct summed byte count and an unblocked plan
-- [ ] Canned metadata with a missing component size fails closed with a typed reason (no guessing)
-- [ ] Canned single-file metadata behaves unchanged
-- [ ] Tests live at the acquisition metadata seam (canned downloader JSON), no live network in the suite
+- [x] Canned multicomponent (bilibili-shaped) yt-dlp metadata yields a correct summed byte count and an unblocked plan
+- [x] Canned metadata with a missing component size fails closed with a typed reason (no guessing)
+- [x] Canned single-file metadata behaves unchanged
+- [x] Tests live at the acquisition metadata seam (canned downloader JSON), no live network in the suite

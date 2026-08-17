@@ -193,6 +193,105 @@ def test_duplicate_acquired_bytes_reuse_one_source_artifact(
     assert first_artifact.origin_kind == "public_url"
 
 
+def test_multicomponent_source_sums_component_sizes_and_unblocks_the_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    authorization = authorize_public_url("https://example.test/watch/1", URLAccessMode.DIRECT)
+    downloader = _downloader(tmp_path)
+    commands: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(acquisition, "revalidate_external_tool", lambda _tool: None)
+
+    def dash_media(arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        commands.append(arguments)
+        if "--dump-single-json" in arguments:
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                stdout=(
+                    '{"url": "https://example.test/media", "requested_formats": ['
+                    '{"url": "https://example.test/video", "filesize": 10}, '
+                    '{"url": "https://example.test/audio", "filesize": 5}]}\n'
+                ),
+                stderr="",
+            )
+        staged_media = _staging_root(arguments) / "media.mp4"
+        staged_media.parent.mkdir(parents=True, exist_ok=True)
+        staged_media.write_bytes(b"public-dash-vid")  # exactly 15 bytes = 10 + 5
+        return subprocess.CompletedProcess(arguments, 0, stdout=f"{staged_media}\n", stderr="")
+
+    monkeypatch.setattr(acquisition, "run_tool", dash_media)
+
+    artifact = acquisition.acquire_public_source(authorization, downloader, tmp_path)
+
+    assert artifact.origin_kind == "public_url"
+    assert commands[1][commands[1].index("--max-filesize") + 1] == "15"
+
+
+def test_multicomponent_source_with_an_indeterminable_component_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    authorization = authorize_public_url("https://example.test/watch/1", URLAccessMode.DIRECT)
+    downloader = _downloader(tmp_path)
+    commands: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(acquisition, "revalidate_external_tool", lambda _tool: None)
+
+    def partial_dash_media(arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        commands.append(arguments)
+        if "--dump-single-json" in arguments:
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                stdout=(
+                    '{"url": "https://example.test/media", "requested_formats": ['
+                    '{"url": "https://example.test/video", "filesize": 10}, '
+                    '{"url": "https://example.test/audio", "filesize_approx": 5}]}\n'
+                ),
+                stderr="",
+            )
+        raise AssertionError("download must not start when a component size is indeterminable")
+
+    monkeypatch.setattr(acquisition, "run_tool", partial_dash_media)
+
+    with pytest.raises(acquisition.URLAcquisitionError) as error:
+        acquisition.acquire_public_source(authorization, downloader, tmp_path)
+
+    assert error.value.reason == "url_size_unknown"
+    assert len(commands) == 1
+
+
+def test_single_file_source_sizing_is_unchanged_by_multicomponent_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    authorization = authorize_public_url("https://example.test/watch/1", URLAccessMode.DIRECT)
+    downloader = _downloader(tmp_path)
+    commands: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(acquisition, "revalidate_external_tool", lambda _tool: None)
+
+    def single_file(arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        commands.append(arguments)
+        if "--dump-single-json" in arguments:
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                stdout='{"url": "https://example.test/media.mp4", "filesize": 7}\n',
+                stderr="",
+            )
+        staged_media = _staging_root(arguments) / "media.mp4"
+        staged_media.parent.mkdir(parents=True, exist_ok=True)
+        staged_media.write_bytes(b"public!")
+        return subprocess.CompletedProcess(arguments, 0, stdout=f"{staged_media}\n", stderr="")
+
+    monkeypatch.setattr(acquisition, "run_tool", single_file)
+
+    artifact = acquisition.acquire_public_source(authorization, downloader, tmp_path)
+
+    assert artifact.origin_kind == "public_url"
+    assert commands[1][commands[1].index("--max-filesize") + 1] == "7"
+
+
 def _staging_root(arguments: tuple[str, ...]) -> Path:
     return Path(
         next(value.removeprefix("home:") for value in arguments if value.startswith("home:"))

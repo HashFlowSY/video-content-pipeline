@@ -10,6 +10,7 @@ import stat
 import threading
 import uuid
 from pathlib import Path
+from typing import TypeGuard
 from urllib.parse import urlsplit
 
 from video_content_pipeline.external_tools import (
@@ -202,16 +203,37 @@ def _metadata_destinations(metadata: dict[str, object]) -> tuple[str, ...]:
 def _metadata_byte_count(metadata: dict[str, object]) -> int:
     requested_formats = metadata.get("requested_formats")
     if isinstance(requested_formats, list) and requested_formats:
-        raise URLAcquisitionError(
-            "url_multicomponent_unsupported",
-            "Public acquisition requires one media file with an exact byte count.",
-        )
+        return _multicomponent_byte_count(requested_formats)
     value = metadata.get("filesize")
-    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+    if _is_positive_size(value):
         return value
     raise URLAcquisitionError(
         "url_size_unknown", "The downloader did not provide a positive source byte count."
     )
+
+
+def _multicomponent_byte_count(components: list[object]) -> int:
+    """Sum the exact byte counts of a split-stream (DASH) source's components.
+
+    Every component must declare a positive integer ``filesize``; a missing or
+    approximate size fails closed rather than being guessed, so disk-headroom
+    planning is never based on an unknown total.
+    """
+
+    total = 0
+    for component in components:
+        value = component.get("filesize") if isinstance(component, dict) else None
+        if not _is_positive_size(value):
+            raise URLAcquisitionError(
+                "url_size_unknown",
+                "The downloader did not provide a positive source byte count.",
+            )
+        total += value
+    return total
+
+
+def _is_positive_size(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def _downloaded_media_path(result: object, staging_root: Path, maximum_byte_count: int) -> Path:
