@@ -7,7 +7,7 @@
   "next_phase": 11,
   "real_world_testing": true,
   "production_validated": false,
-  "updated_at": "2026-08-16T11:00:00Z",
+  "updated_at": "2026-08-17T06:00:00Z",
   "phase_history": [
     {
       "phase": 0,
@@ -99,10 +99,26 @@
   ],
   "constraints": {
     "models_downloaded": true,
-    "media_processed": false,
+    "media_processed": true,
     "paid_apis_used": false,
     "runtime_auto_downloads_allowed": false,
     "dependency_auto_upgrades_allowed": false,
     "models_registry_entries": 8
-  }
+  },
+  "constraint_events": [
+    {
+      "constraint": "models_downloaded",
+      "value": true,
+      "at": "2026-08-16",
+      "object": "seven pinned model assets (registry.json)",
+      "purpose": "Phase 11 ticket 04 acquisition of the credential-free model stack"
+    },
+    {
+      "constraint": "media_processed",
+      "value": true,
+      "at": "2026-08-17",
+      "object": "two Public-Domain VOA prototype clips (input/f6fd0cd7…, input/104eeec2…)",
+      "purpose": "Phase 11 ticket 13 first real-media processing: the seven capability prototypes (VAD/diarization/ASR/alignment/OCR/text_semantics) ran on real zh+en audio and frames"
+    }
+  ]
 }

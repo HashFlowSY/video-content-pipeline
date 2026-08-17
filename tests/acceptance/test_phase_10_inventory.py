@@ -186,16 +186,17 @@ def test_project_state_constraints_remain_untouched() -> None:
 
     The name is frozen by the Phase 10 inventory's citation of this test. Phase
     10 closed with both ``media_processed`` and ``models_downloaded`` false;
-    Phase 11 ticket 04 then acquired the real model assets, so
-    ``models_downloaded`` is now true -- that flip is expected here and was
-    never done by Phase 10. The media boundary is what this gate still guards:
-    ``media_processed`` stays false until the first real-media processing in
-    Phase 12.
+    the two legitimate later flips both happened outside Phase 10 and are
+    expected here: Phase 11 ticket 04 acquired the real model assets
+    (``models_downloaded`` true), and Phase 11 ticket 13's first real-media
+    prototype runs processed the ticket-12 clips (``media_processed`` true).
+    ``paid_apis_used`` is the boundary that still holds.
     """
 
     state = json.loads(PROJECT_STATE_PATH.read_text(encoding="utf-8"))
     constraints = state["constraints"]
-    assert constraints["media_processed"] is False
+    # Flipped by Phase 11 ticket 13 (first real-media prototype processing).
+    assert constraints["media_processed"] is True
     # Flipped by Phase 11 ticket 04 (model acquisition), never by Phase 10.
     assert constraints["models_downloaded"] is True
     assert constraints["paid_apis_used"] is False

@@ -12,7 +12,21 @@
     "rules_fingerprint": "alignment-rules-v1"
   },
   "sample_rate": 16000,
-  "qualification_scope": "first_device_baseline",
+  "qualification_scope": "real_sample_confirmed",
+  "real_sample_qualification": {
+    "confirmed_at": "2026-08-17",
+    "confirmed_by": "maintainer",
+    "ticket": "phase-11-ticket-13",
+    "sources": [
+      "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
+      "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc"
+    ],
+    "prototype_records": [
+      "docs/phase-11-prototypes/forced_alignment/f6fd0cd7-zh.record.json",
+      "docs/phase-11-prototypes/forced_alignment/104eeec2-en.record.json"
+    ],
+    "note": "Confirmed on real zh+en material: one AlignmentProposal per source cue over the real VAD chunks. Recorded follow-up: the coarse chunk-level ASR (one cue per <=5-minute VAD chunk) yields a single cue on these single-chunk clips, so finer cue granularity is needed before alignment adoption is meaningfully exercised in Phase 12."
+  },
   "window": {
     "window_pad_samples": 8000
   },

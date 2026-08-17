@@ -602,15 +602,19 @@ def run_diarization(ctx: PrototypeContext) -> RunOutput:
     result = measured.result
     partition = result.partition
     turns = partition.published if partition is not None else ()
-    entries = format_speaker_turn_entries(
-        tuple((turn.interval, turn.speaker_label) for turn in turns), limit=SAMPLE_ENTRY_LIMIT
-    ) or [f"{len(result.raw_turns)} raw candidate turns, no formal partition"]
+    summary = f"{len(turns)} formal turns / {len(result.raw_turns)} raw candidates"
+    entries = [
+        summary,
+        *format_speaker_turn_entries(
+            tuple((turn.interval, turn.speaker_label) for turn in turns), limit=SAMPLE_ENTRY_LIMIT
+        ),
+    ]
     checks = (
         EngineeringCheck("calibrated", bool(result.calibrated), "both assets matched calibration"),
         EngineeringCheck(
             "labels_anonymous",
-            all(turn.speaker_label.startswith("speaker-") for turn in turns),
-            "Part-local anonymous labels only (ADR 0030)",
+            all(":speaker-" in turn.speaker_label for turn in turns),
+            "anonymous part-local labels (ADR 0030 'part-NN:speaker-MM')",
         ),
     )
     return _build(
@@ -656,10 +660,14 @@ def run_asr_primary(ctx: PrototypeContext) -> RunOutput:
 
 
 def run_asr_review(ctx: PrototypeContext) -> RunOutput:
+    from video_content_pipeline.asr_engine import load_primary_asset
+
     measured = ctx.measured_asr_review()
     result = measured.result
     reviews = result.reviews
-    primary_sha = ctx.measured_asr_primary().result.model_asset_sha256
+    # The Independent-model contract compares asset identities, not runs, so read
+    # the primary asset hash from the registry rather than re-running primary ASR.
+    _, primary_sha = load_primary_asset(ctx.project_root)
     entries = format_transcript_entries(
         tuple((review.interval.start, review.text or "(silence)") for review in reviews),
         limit=SAMPLE_ENTRY_LIMIT,

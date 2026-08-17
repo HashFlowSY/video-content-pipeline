@@ -15,16 +15,29 @@ prototype runs are retained evidence, not pytest; the pytest gate stays
 within budget.
 
 **Blocked by:** 06, 07, 08, 09, 10, 11, 12
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
-- [ ] Seven prototype records retained (command, asset identities,
-      timings, peak memory, sample paths)
-- [ ] Every measured peak ≤ 12 GiB; every run offline (no hub access —
-      guards proven in the records)
-- [ ] Device baselines recorded where plan estimation reads them;
-      `estimate_confidence` upgraded from `low` where measured
-- [ ] Maintainer confirmation recorded per capability sample (zh and en
-      both represented); rejections and fallback decisions recorded
-- [ ] Real-sample calibration records landed for alignment/VAD/
-      diarization per ADRs 0027/0029/0031
+- [x] Seven prototype records retained (command, asset identities,
+      timings, peak memory, sample paths) — `docs/phase-11-prototypes/<cap>/<src>-<lang>.record.json`
+      + `.md`, zh + en, 14 runs
+- [x] Every measured peak ≤ 12 GiB (max 5.09 GiB); every run offline
+      (HUB_OFFLINE guards proven in each record)
+- [x] Device baselines recorded where plan estimation reads them
+      (`docs/phase-11-prototypes/device-baselines.json`, `confidence: measured`);
+      `estimate_confidence` upgraded from the profile's `low`. Measured peaks are
+      NOT written to the registry `resource_estimate` (that would flip every
+      candidate `unsupported→eligible`, ADR 0037) — see `prototype.py` docstring.
+- [x] Maintainer confirmation recorded per capability sample (zh + en),
+      `docs/phase-11-prototypes/maintainer-review.md`: 6 confirmed; text_semantics
+      recorded as a diagnosed adapter gap → follow-up ticket 15; diarization
+      over-clustering accepted-as-is with a recorded note.
+- [x] Real-sample calibration landed for alignment/VAD/diarization
+      (`qualification_scope` off `first_device_baseline`; `real_sample_qualification`
+      provenance) per ADRs 0027/0029/0031.
+
+**Outcome (2026-08-17):** All seven capabilities prototyped on real zh+en VOA
+material. VAD (after a silero 64-sample-context bug fix), asr_primary, asr_review,
+ocr_primary, forced_alignment, and diarization confirmed; text_semantics produced
+`model_output_invalid` due to a diagnosed prompt-content gap (not model quality) →
+follow-up ticket 15. `media_processed` flipped true (first real-media processing).

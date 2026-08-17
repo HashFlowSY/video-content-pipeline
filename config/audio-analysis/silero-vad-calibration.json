@@ -6,7 +6,21 @@
   "model_asset_sha256": "0898f9226ecd53bbc80e54b9511c9047ae66c9e5ec13c7dc822195e7fc1dc1d6",
   "sample_rate": 16000,
   "window_samples": 512,
-  "qualification_scope": "first_device_baseline",
+  "qualification_scope": "real_sample_confirmed",
+  "real_sample_qualification": {
+    "confirmed_at": "2026-08-17",
+    "confirmed_by": "maintainer",
+    "ticket": "phase-11-ticket-13",
+    "sources": [
+      "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
+      "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc"
+    ],
+    "prototype_records": [
+      "docs/phase-11-prototypes/vad/f6fd0cd7-zh.record.json",
+      "docs/phase-11-prototypes/vad/104eeec2-en.record.json"
+    ],
+    "note": "Confirmed on real zh+en Voice of America material: a clean, gap-free Complete VAD partition (53 speech-likely intervals on the zh clip) after the ticket-13 silero 64-sample-context fix."
+  },
   "classification": {
     "speech_probability_threshold": 0.5,
     "min_speech_samples": 4000,

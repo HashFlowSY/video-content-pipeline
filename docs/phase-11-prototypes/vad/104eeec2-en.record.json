@@ -1,0 +1,62 @@
+{
+  "asset_identities": [
+    {
+      "name": "silero_vad.onnx",
+      "sha256": "0898f9226ecd53bbc80e54b9511c9047ae66c9e5ec13c7dc822195e7fc1dc1d6"
+    }
+  ],
+  "candidate_id": "silero-vad",
+  "capability": "vad",
+  "checks": [
+    {
+      "detail": "peak 124551168 bytes vs 12884901888 byte envelope",
+      "name": "peak_within_envelope",
+      "passed": true
+    },
+    {
+      "detail": "gap-free coverage tiling",
+      "name": "partition_complete",
+      "passed": true
+    },
+    {
+      "detail": "calibration record matched",
+      "name": "calibrated",
+      "passed": true
+    }
+  ],
+  "command": [
+    "vcp-prototype",
+    "vad",
+    "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc"
+  ],
+  "created_at": "2026-08-17T05:19:31Z",
+  "device_class": "apple-m1",
+  "envelope_bytes": 12884901888,
+  "language": "en",
+  "offline_guards": [
+    "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+    "HF_HUB_DISABLE_TELEMETRY",
+    "HF_HUB_OFFLINE",
+    "TRANSFORMERS_OFFLINE"
+  ],
+  "peak_memory_bytes": 124551168,
+  "peak_within_envelope": true,
+  "sample_relpath": "docs/phase-11-prototypes/vad/104eeec2-en.md",
+  "source_id": "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc",
+  "status": "engineering_pass",
+  "timing": {
+    "media_seconds": {
+      "denominator": 4000,
+      "numerator": 1170193
+    },
+    "real_time_factor": {
+      "denominator": 4104,
+      "numerator": 1170193
+    },
+    "real_time_factor_approx": 285.1347,
+    "wall_seconds": {
+      "denominator": 500,
+      "numerator": 513
+    }
+  }
+}

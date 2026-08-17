@@ -1,0 +1,62 @@
+{
+  "asset_identities": [
+    {
+      "name": "whisper-large-v3",
+      "sha256": "89198670bba2b71b9ddc8563e1fc4a4d3a6698e8ea525950ed1724a474f07784"
+    }
+  ],
+  "candidate_id": "whisper-large-v3",
+  "capability": "asr_review",
+  "checks": [
+    {
+      "detail": "peak 3785541174 bytes vs 12884901888 byte envelope",
+      "name": "peak_within_envelope",
+      "passed": true
+    },
+    {
+      "detail": "review asset differs from primary (Independent-model contract)",
+      "name": "independent_model",
+      "passed": true
+    },
+    {
+      "detail": "at least one interval reviewed",
+      "name": "reviews_present",
+      "passed": true
+    }
+  ],
+  "command": [
+    "vcp-prototype",
+    "asr_review",
+    "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da"
+  ],
+  "created_at": "2026-08-17T05:18:58Z",
+  "device_class": "apple-m1",
+  "envelope_bytes": 12884901888,
+  "language": "zh",
+  "offline_guards": [
+    "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+    "HF_HUB_DISABLE_TELEMETRY",
+    "HF_HUB_OFFLINE",
+    "TRANSFORMERS_OFFLINE"
+  ],
+  "peak_memory_bytes": 3785541174,
+  "peak_within_envelope": true,
+  "sample_relpath": "docs/phase-11-prototypes/asr_review/f6fd0cd7-zh.md",
+  "source_id": "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
+  "status": "engineering_pass",
+  "timing": {
+    "media_seconds": {
+      "denominator": 8000,
+      "numerator": 1937659
+    },
+    "real_time_factor": {
+      "denominator": 715232,
+      "numerator": 1937659
+    },
+    "real_time_factor_approx": 2.7091,
+    "wall_seconds": {
+      "denominator": 250,
+      "numerator": 22351
+    }
+  }
+}

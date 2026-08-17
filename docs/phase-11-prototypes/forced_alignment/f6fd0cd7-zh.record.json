@@ -1,0 +1,62 @@
+{
+  "asset_identities": [
+    {
+      "name": "qwen3-forced-aligner",
+      "sha256": "f567e26b47881fd6603826964517afd35f1a404fd8202eceb1d27169d7f50c36"
+    }
+  ],
+  "candidate_id": "qwen3-forced-aligner-0-6b",
+  "capability": "forced_alignment",
+  "checks": [
+    {
+      "detail": "peak 3920115635 bytes vs 12884901888 byte envelope",
+      "name": "peak_within_envelope",
+      "passed": true
+    },
+    {
+      "detail": "one alignment proposal per source cue",
+      "name": "proposal_per_cue",
+      "passed": true
+    },
+    {
+      "detail": "at least one proposal",
+      "name": "proposals_present",
+      "passed": true
+    }
+  ],
+  "command": [
+    "vcp-prototype",
+    "forced_alignment",
+    "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da"
+  ],
+  "created_at": "2026-08-17T05:19:17Z",
+  "device_class": "apple-m1",
+  "envelope_bytes": 12884901888,
+  "language": "zh",
+  "offline_guards": [
+    "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+    "HF_HUB_DISABLE_TELEMETRY",
+    "HF_HUB_OFFLINE",
+    "TRANSFORMERS_OFFLINE"
+  ],
+  "peak_memory_bytes": 3920115635,
+  "peak_within_envelope": true,
+  "sample_relpath": "docs/phase-11-prototypes/forced_alignment/f6fd0cd7-zh.md",
+  "source_id": "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
+  "status": "engineering_pass",
+  "timing": {
+    "media_seconds": {
+      "denominator": 8000,
+      "numerator": 1937659
+    },
+    "real_time_factor": {
+      "denominator": 128104,
+      "numerator": 1937659
+    },
+    "real_time_factor_approx": 15.1257,
+    "wall_seconds": {
+      "denominator": 1000,
+      "numerator": 16013
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "asset_identities": [
+    {
+      "name": "qwen3-asr",
+      "sha256": "aa010c938dbd1722034a0d0bb315f92202488bfbfe6ef4b48f3f5207b8e299ee"
+    }
+  ],
+  "candidate_id": "qwen3-asr-1-7b",
+  "capability": "asr_primary",
+  "checks": [
+    {
+      "detail": "peak 5089948376 bytes vs 12884901888 byte envelope",
+      "name": "peak_within_envelope",
+      "passed": true
+    },
+    {
+      "detail": "cues non-overlapping and ordered",
+      "name": "transcript_monotonic",
+      "passed": true
+    },
+    {
+      "detail": "at least one transcript cue",
+      "name": "cues_present",
+      "passed": true
+    }
+  ],
+  "command": [
+    "vcp-prototype",
+    "asr_primary",
+    "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da"
+  ],
+  "created_at": "2026-08-17T05:15:45Z",
+  "device_class": "apple-m1",
+  "envelope_bytes": 12884901888,
+  "language": "zh",
+  "offline_guards": [
+    "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+    "HF_HUB_DISABLE_TELEMETRY",
+    "HF_HUB_OFFLINE",
+    "TRANSFORMERS_OFFLINE"
+  ],
+  "peak_memory_bytes": 5089948376,
+  "peak_within_envelope": true,
+  "sample_relpath": "docs/phase-11-prototypes/asr_primary/f6fd0cd7-zh.md",
+  "source_id": "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
+  "status": "engineering_pass",
+  "timing": {
+    "media_seconds": {
+      "denominator": 8000,
+      "numerator": 1937659
+    },
+    "real_time_factor": {
+      "denominator": 411848,
+      "numerator": 1937659
+    },
+    "real_time_factor_approx": 4.7048,
+    "wall_seconds": {
+      "denominator": 1000,
+      "numerator": 51481
+    }
+  }
+}

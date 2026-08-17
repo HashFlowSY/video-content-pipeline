@@ -1,0 +1,62 @@
+{
+  "asset_identities": [
+    {
+      "name": "rapidocr-bundled",
+      "sha256": "b074b483b736e064d9d09805e395e64da3abde87a27d7deb3fc127f1b5026ce3"
+    }
+  ],
+  "candidate_id": "rapidocr",
+  "capability": "ocr_primary",
+  "checks": [
+    {
+      "detail": "peak 534708224 bytes vs 12884901888 byte envelope",
+      "name": "peak_within_envelope",
+      "passed": true
+    },
+    {
+      "detail": "every item confidence within the schema range",
+      "name": "confidence_in_range",
+      "passed": true
+    },
+    {
+      "detail": "frames were decoded and read",
+      "name": "frames_processed",
+      "passed": true
+    }
+  ],
+  "command": [
+    "vcp-prototype",
+    "ocr_primary",
+    "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc"
+  ],
+  "created_at": "2026-08-17T05:25:33Z",
+  "device_class": "apple-m1",
+  "envelope_bytes": 12884901888,
+  "language": "en",
+  "offline_guards": [
+    "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+    "HF_HUB_DISABLE_TELEMETRY",
+    "HF_HUB_OFFLINE",
+    "TRANSFORMERS_OFFLINE"
+  ],
+  "peak_memory_bytes": 534708224,
+  "peak_within_envelope": true,
+  "sample_relpath": "docs/phase-11-prototypes/ocr_primary/104eeec2-en.md",
+  "source_id": "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc",
+  "status": "engineering_pass",
+  "timing": {
+    "media_seconds": {
+      "denominator": 4000,
+      "numerator": 1170193
+    },
+    "real_time_factor": {
+      "denominator": 6272,
+      "numerator": 1170193
+    },
+    "real_time_factor_approx": 186.5741,
+    "wall_seconds": {
+      "denominator": 125,
+      "numerator": 196
+    }
+  }
+}

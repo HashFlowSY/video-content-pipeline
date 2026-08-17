@@ -1,0 +1,66 @@
+{
+  "asset_identities": [
+    {
+      "name": "segmentation",
+      "sha256": "6f071d8c3ca7a66185e751a95efc0fde645b73d0844b36e686552e0280ddecc0"
+    },
+    {
+      "name": "embedding",
+      "sha256": "6149b3fa977ff2befe157ce009a03b2b37fb2258fe5032b3e2ccdc37d0067db8"
+    }
+  ],
+  "candidate_id": "sherpa-onnx-pyannote-segmentation-3-0",
+  "capability": "diarization",
+  "checks": [
+    {
+      "detail": "peak 306446336 bytes vs 12884901888 byte envelope",
+      "name": "peak_within_envelope",
+      "passed": true
+    },
+    {
+      "detail": "both assets matched calibration",
+      "name": "calibrated",
+      "passed": true
+    },
+    {
+      "detail": "anonymous part-local labels (ADR 0030 'part-NN:speaker-MM')",
+      "name": "labels_anonymous",
+      "passed": true
+    }
+  ],
+  "command": [
+    "vcp-prototype",
+    "diarization",
+    "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da"
+  ],
+  "created_at": "2026-08-17T05:32:00Z",
+  "device_class": "apple-m1",
+  "envelope_bytes": 12884901888,
+  "language": "zh",
+  "offline_guards": [
+    "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+    "HF_HUB_DISABLE_TELEMETRY",
+    "HF_HUB_OFFLINE",
+    "TRANSFORMERS_OFFLINE"
+  ],
+  "peak_memory_bytes": 306446336,
+  "peak_within_envelope": true,
+  "sample_relpath": "docs/phase-11-prototypes/diarization/f6fd0cd7-zh.md",
+  "source_id": "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
+  "status": "engineering_pass",
+  "timing": {
+    "media_seconds": {
+      "denominator": 8000,
+      "numerator": 1937659
+    },
+    "real_time_factor": {
+      "denominator": 395040,
+      "numerator": 1937659
+    },
+    "real_time_factor_approx": 4.905,
+    "wall_seconds": {
+      "denominator": 50,
+      "numerator": 2469
+    }
+  }
+}

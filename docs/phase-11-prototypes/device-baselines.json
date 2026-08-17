@@ -1,0 +1,188 @@
+{
+  "baselines": [
+    {
+      "basis": "prototype:104eeec2:en",
+      "candidate_id": "qwen3-asr-1-7b",
+      "capability": "asr_primary",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 5462840040,
+      "real_time_factor": {
+        "denominator": 251800,
+        "numerator": 1170193
+      },
+      "real_time_factor_approx": 4.6473
+    },
+    {
+      "basis": "prototype:f6fd0cd7:zh",
+      "candidate_id": "qwen3-asr-1-7b",
+      "capability": "asr_primary",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 5089948376,
+      "real_time_factor": {
+        "denominator": 411848,
+        "numerator": 1937659
+      },
+      "real_time_factor_approx": 4.7048
+    },
+    {
+      "basis": "prototype:104eeec2:en",
+      "candidate_id": "whisper-large-v3",
+      "capability": "asr_review",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 3756779566,
+      "real_time_factor": {
+        "denominator": 686372,
+        "numerator": 1170193
+      },
+      "real_time_factor_approx": 1.7049
+    },
+    {
+      "basis": "prototype:f6fd0cd7:zh",
+      "candidate_id": "whisper-large-v3",
+      "capability": "asr_review",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 3785541174,
+      "real_time_factor": {
+        "denominator": 715232,
+        "numerator": 1937659
+      },
+      "real_time_factor_approx": 2.7091
+    },
+    {
+      "basis": "prototype:104eeec2:en",
+      "candidate_id": "sherpa-onnx-pyannote-segmentation-3-0",
+      "capability": "diarization",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 348241920,
+      "real_time_factor": {
+        "denominator": 238464,
+        "numerator": 1170193
+      },
+      "real_time_factor_approx": 4.9072
+    },
+    {
+      "basis": "prototype:f6fd0cd7:zh",
+      "candidate_id": "sherpa-onnx-pyannote-segmentation-3-0",
+      "capability": "diarization",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 306446336,
+      "real_time_factor": {
+        "denominator": 395040,
+        "numerator": 1937659
+      },
+      "real_time_factor_approx": 4.905
+    },
+    {
+      "basis": "prototype:104eeec2:en",
+      "candidate_id": "qwen3-forced-aligner-0-6b",
+      "capability": "forced_alignment",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 4289933349,
+      "real_time_factor": {
+        "denominator": 66016,
+        "numerator": 1170193
+      },
+      "real_time_factor_approx": 17.7259
+    },
+    {
+      "basis": "prototype:f6fd0cd7:zh",
+      "candidate_id": "qwen3-forced-aligner-0-6b",
+      "capability": "forced_alignment",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 3920115635,
+      "real_time_factor": {
+        "denominator": 128104,
+        "numerator": 1937659
+      },
+      "real_time_factor_approx": 15.1257
+    },
+    {
+      "basis": "prototype:104eeec2:en",
+      "candidate_id": "rapidocr",
+      "capability": "ocr_primary",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 534708224,
+      "real_time_factor": {
+        "denominator": 6272,
+        "numerator": 1170193
+      },
+      "real_time_factor_approx": 186.5741
+    },
+    {
+      "basis": "prototype:f6fd0cd7:zh",
+      "candidate_id": "rapidocr",
+      "capability": "ocr_primary",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 535003136,
+      "real_time_factor": {
+        "denominator": 14008,
+        "numerator": 1937659
+      },
+      "real_time_factor_approx": 138.3252
+    },
+    {
+      "basis": "prototype:104eeec2:en",
+      "candidate_id": "qwen3-4b-instruct-2507-8bit",
+      "capability": "text_semantics",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 4547280788,
+      "real_time_factor": {
+        "denominator": 47816,
+        "numerator": 1170193
+      },
+      "real_time_factor_approx": 24.4728
+    },
+    {
+      "basis": "prototype:f6fd0cd7:zh",
+      "candidate_id": "qwen3-4b-instruct-2507-8bit",
+      "capability": "text_semantics",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 4547280788,
+      "real_time_factor": {
+        "denominator": 96152,
+        "numerator": 1937659
+      },
+      "real_time_factor_approx": 20.152
+    },
+    {
+      "basis": "prototype:104eeec2:en",
+      "candidate_id": "silero-vad",
+      "capability": "vad",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 124551168,
+      "real_time_factor": {
+        "denominator": 4104,
+        "numerator": 1170193
+      },
+      "real_time_factor_approx": 285.1347
+    },
+    {
+      "basis": "prototype:f6fd0cd7:zh",
+      "candidate_id": "silero-vad",
+      "capability": "vad",
+      "confidence": "measured",
+      "device_class": "apple-m1",
+      "peak_memory_bytes": 116097024,
+      "real_time_factor": {
+        "denominator": 6336,
+        "numerator": 1937659
+      },
+      "real_time_factor_approx": 305.8174
+    }
+  ],
+  "device_class": "apple-m1",
+  "schema_version": 1
+}

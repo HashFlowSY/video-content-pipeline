@@ -13,7 +13,21 @@
     "rules_fingerprint": "diarization-rules-v1"
   },
   "sample_rate": 16000,
-  "qualification_scope": "first_device_baseline",
+  "qualification_scope": "real_sample_confirmed_with_note",
+  "real_sample_qualification": {
+    "confirmed_at": "2026-08-17",
+    "confirmed_by": "maintainer",
+    "ticket": "phase-11-ticket-13",
+    "sources": [
+      "f6fd0cd7157b3d13502de534ed1d4930cb27f48192b57ce4f3ebcbefa26fd9da",
+      "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc"
+    ],
+    "prototype_records": [
+      "docs/phase-11-prototypes/diarization/f6fd0cd7-zh.record.json",
+      "docs/phase-11-prototypes/diarization/104eeec2-en.record.json"
+    ],
+    "note": "Confirmed on real zh+en material with a recorded quality note: formal anonymous Part-local SpeakerTurns are produced (zh 2 turns / 10 raw candidates; en 11 turns / 42 raw candidates), but the en clip over-clusters (~15 clusters for ~3 speakers). Maintainer accepted the current cluster_threshold (0.5) as-is; real cluster_threshold tuning is deferred to Phase 12 against human reference."
+  },
   "pipeline": {
     "num_clusters": -1,
     "cluster_threshold": 0.5,

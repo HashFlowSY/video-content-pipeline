@@ -1,0 +1,62 @@
+{
+  "asset_identities": [
+    {
+      "name": "qwen3-4b-instruct",
+      "sha256": "2a1b7ba81037c15882e233f7a1e40dd41251d51fb4afac48a164a3cc61e479e2"
+    }
+  ],
+  "candidate_id": "qwen3-4b-instruct-2507-8bit",
+  "capability": "text_semantics",
+  "checks": [
+    {
+      "detail": "peak 4547280788 bytes vs 12884901888 byte envelope",
+      "name": "peak_within_envelope",
+      "passed": true
+    },
+    {
+      "detail": "engine concluded a valid status, never crashed",
+      "name": "status_valid",
+      "passed": true
+    },
+    {
+      "detail": "raw output retained as restricted audit evidence",
+      "name": "raw_retained",
+      "passed": true
+    }
+  ],
+  "command": [
+    "vcp-prototype",
+    "text_semantics",
+    "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc"
+  ],
+  "created_at": "2026-08-17T05:26:03Z",
+  "device_class": "apple-m1",
+  "envelope_bytes": 12884901888,
+  "language": "en",
+  "offline_guards": [
+    "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+    "HF_HUB_DISABLE_TELEMETRY",
+    "HF_HUB_OFFLINE",
+    "TRANSFORMERS_OFFLINE"
+  ],
+  "peak_memory_bytes": 4547280788,
+  "peak_within_envelope": true,
+  "sample_relpath": "docs/phase-11-prototypes/text_semantics/104eeec2-en.md",
+  "source_id": "104eeec2d832d272ad36f9659aeddd5ba8c34ac35bc89f06ec672f3b3d2902fc",
+  "status": "engineering_pass",
+  "timing": {
+    "media_seconds": {
+      "denominator": 4000,
+      "numerator": 1170193
+    },
+    "real_time_factor": {
+      "denominator": 47816,
+      "numerator": 1170193
+    },
+    "real_time_factor_approx": 24.4728,
+    "wall_seconds": {
+      "denominator": 500,
+      "numerator": 5977
+    }
+  }
+}
