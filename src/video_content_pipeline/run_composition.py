@@ -38,11 +38,17 @@ floor plus whatever plainly-exposed content the workspaces carry.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Callable, Mapping
+import os
+import platform
+import sys
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
+from video_content_pipeline import environment
 from video_content_pipeline.audio_analysis import analyze_audio
 from video_content_pipeline.enhancement import enhance
 from video_content_pipeline.orchestration import RunLayout
@@ -62,6 +68,7 @@ from video_content_pipeline.publication_projection import (
     transcript_basis,
 )
 from video_content_pipeline.run_choices import (
+    COLLECTION_SCOPE,
     AsrMode,
     audio_analysis_stage_parameters,
     enhancement_stage_parameters,
@@ -70,6 +77,14 @@ from video_content_pipeline.run_choices import (
     visual_text_stage_parameters,
 )
 from video_content_pipeline.run_loop import RunComposition, RunReportInputs
+from video_content_pipeline.run_reports import (
+    EnvironmentInfo,
+    ModelRecord,
+    ParameterRecord,
+    ResourceUsage,
+    ToolRecord,
+)
+from video_content_pipeline.run_state import RunStateError, read_journal
 from video_content_pipeline.stage_dag import (
     StageInvalidationKey,
     StageName,
@@ -688,16 +703,355 @@ def _read_enhancement_artifact(state: _CompositionState, key: str) -> str | None
         return None
 
 
+#: The stage report each model-bearing stage writes, relative to
+#: ``work/`` and keyed by the report id the executor chained. Only stages that
+#: can name a model appear here; the deterministic subtitle stage never does.
+#: The map is the single place the provenance gatherer looks, so a stage that did
+#: not complete (no chained report id) contributes nothing — an honest omission,
+#: never a padded placeholder (ticket 05).
+_STAGE_REPORT_FILES: Mapping[StageName, tuple[str, str]] = {
+    StageName.AUDIO_ANALYSIS: ("audio-analysis-reports", "audio-analysis-report.json"),
+    StageName.TRANSCRIPTION: ("transcription-reports", "transcription-report.json"),
+    StageName.ENHANCEMENT: ("enhancement-reports", "enhancement-report.json"),
+    StageName.TEXT_ANALYSIS: ("text-analysis-reports", "text-analysis-report.json"),
+    StageName.VISUAL_TEXT: ("visual-text-reports", "visual-report.json"),
+}
+
+#: A readable purpose per approved external tool, so the processing report's tool
+#: section says what each binary was for. Unknown ids fall back to a neutral
+#: label rather than inventing a specific one.
+_TOOL_PURPOSES: Mapping[str, str] = {
+    "ffmpeg": "音频/视频解码与派生提取",
+    "ffprobe": "媒体结构与覆盖探测",
+    "yt-dlp": "URL 素材获取",
+}
+
+
+def _read_stage_reports(state: _CompositionState) -> list[Mapping[str, object]]:
+    """Read back every completed stage's own report document, defensively.
+
+    Only stages the executor chained a report id for (``state.reports``) and that
+    can name a model are read; a missing or unparsable report is skipped so the
+    audit floor is always produced. This is the sole seam the provenance
+    gatherers read a stage's recorded model identity and resource evidence from.
+    """
+
+    documents: list[Mapping[str, object]] = []
+    for stage, report_id in state.reports.items():
+        located = _STAGE_REPORT_FILES.get(stage)
+        if located is None:
+            continue
+        directory, filename = located
+        report_path = state.layout.project_root / "work" / directory / report_id / filename
+        try:
+            document = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(document, Mapping):
+            documents.append(document)
+    return documents
+
+
+def _completed_executions(
+    reports: Sequence[Mapping[str, object]],
+) -> Iterator[Mapping[str, object]]:
+    """Yield every ``stage_execution`` entry a stage recorded as ``completed``.
+
+    A stage records one ``stage_execution`` entry per model it actually ran; a
+    ``completed`` entry names the registry candidate whose engine produced output
+    and references that engine's measured resource use. Reading this — rather than
+    a capability *assessment* list, which grades eligible-but-unused candidates
+    too — is what keeps the report to the engines the run actually selected
+    (ticket 05: "no padding").
+
+    Today only audio analysis records ``stage_execution`` (the offline path runs
+    no other model); transcription, text, and visual-text gain their executed-model
+    and subprocess-peak evidence when the orchestrated run invokes the real engines
+    (Phase 12 ticket 06). This one seam is where that evidence flows in, so both the
+    models section and the peak-memory measurement extend the moment those stages
+    record it — no other change needed here.
+    """
+
+    for report in reports:
+        executions = report.get("stage_execution")
+        if not isinstance(executions, list):
+            continue
+        for execution in executions:
+            if isinstance(execution, Mapping) and execution.get("state") == "completed":
+                yield execution
+
+
+def _executed_candidate_ids(reports: Sequence[Mapping[str, object]]) -> list[str]:
+    """Collect the registry candidate ids the stages recorded as executed."""
+
+    return [
+        str(execution["candidate_id"])
+        for execution in _completed_executions(reports)
+        if isinstance(execution.get("candidate_id"), str)
+    ]
+
+
+def _load_registry_candidates(project_root: Path) -> dict[str, Mapping[str, object]]:
+    """Index the model registry's candidates by id, tolerating any read failure.
+
+    The gatherer never invents model facts: a candidate the run executed is
+    described from its own registry entry, so a missing or malformed registry
+    simply yields no model records rather than an error.
+    """
+
+    registry_path = project_root / "models" / "registry.json"
+    try:
+        decoded = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    candidates = decoded.get("candidates") if isinstance(decoded, Mapping) else None
+    if not isinstance(candidates, list):
+        return {}
+    indexed: dict[str, Mapping[str, object]] = {}
+    for candidate in candidates:
+        candidate_id = candidate.get("candidate_id") if isinstance(candidate, Mapping) else None
+        if isinstance(candidate_id, str):
+            indexed[candidate_id] = candidate
+    return indexed
+
+
+def _candidate_size_bytes(candidate: Mapping[str, object]) -> int:
+    """Return the model's on-disk size from the registry entry, or 0 if absent.
+
+    Prefers the recorded ``total_size_bytes``; falls back to summing the pinned
+    file manifest so a registry that only carries the manifest still reports a
+    real size.
+    """
+
+    total = candidate.get("total_size_bytes")
+    if isinstance(total, int) and not isinstance(total, bool) and total >= 0:
+        return total
+    manifest = candidate.get("file_manifest")
+    if isinstance(manifest, list):
+        summed = 0
+        for entry in manifest:
+            size = entry.get("size") if isinstance(entry, Mapping) else None
+            if isinstance(size, int) and not isinstance(size, bool) and size >= 0:
+                summed += size
+        return summed
+    return 0
+
+
+def _str_field(candidate: Mapping[str, object], key: str, default: str = "") -> str:
+    """Read a string registry field, falling back to ``default`` when absent."""
+
+    value = candidate.get(key)
+    return value if isinstance(value, str) else default
+
+
+def _model_record(candidate: Mapping[str, object]) -> ModelRecord:
+    """Summarise one executed registry candidate for the readable report."""
+
+    return ModelRecord(
+        name=_str_field(candidate, "model_id", _str_field(candidate, "candidate_id")),
+        revision=_str_field(candidate, "revision"),
+        sha256=_str_field(candidate, "asset_sha256"),
+        path=_str_field(candidate, "local_path"),
+        size_bytes=_candidate_size_bytes(candidate),
+        purpose=_str_field(candidate, "purpose"),
+    )
+
+
+def _gather_models(
+    state: _CompositionState, reports: Sequence[Mapping[str, object]]
+) -> tuple[ModelRecord, ...]:
+    """Describe every model the run executed from its registry entry.
+
+    The engines the run selected are read from the completed stages' execution
+    records (:func:`_completed_executions`) and described from
+    ``models/registry.json``; a candidate the registry does not carry, or a run
+    that executed no model, yields no record. Deduplicated and name-sorted for a
+    byte-stable report.
+    """
+
+    registry = _load_registry_candidates(state.layout.project_root)
+    seen: set[str] = set()
+    records: list[ModelRecord] = []
+    for candidate_id in _executed_candidate_ids(reports):
+        if candidate_id in seen:
+            continue
+        candidate = registry.get(candidate_id)
+        if candidate is None:
+            continue
+        seen.add(candidate_id)
+        records.append(_model_record(candidate))
+    return tuple(sorted(records, key=lambda record: (record.name, record.sha256)))
+
+
+def _gather_tools(plan: RunPlan) -> tuple[ToolRecord, ...]:
+    """Describe the external tools the confirmed plan pinned for the run."""
+
+    return tuple(
+        ToolRecord(
+            name=tool.tool_id,
+            path=tool.path.as_posix(),
+            version=tool.version,
+            purpose=_TOOL_PURPOSES.get(tool.tool_id, "外部工具"),
+        )
+        for tool in plan.tools
+    )
+
+
+def _gather_environment() -> EnvironmentInfo:
+    """Capture the interpreter identity that actually executed the run.
+
+    Python version and virtual-environment come from the running interpreter, and
+    the lockfile digest from the repository ``uv.lock`` — the environment the run
+    used, independent of where its ``work/`` tree happened to live. An unreadable
+    lockfile records an empty digest rather than failing the audit floor.
+    """
+
+    lockfile_path = environment.project_root() / "uv.lock"
+    try:
+        lockfile_sha256 = hashlib.sha256(lockfile_path.read_bytes()).hexdigest()
+    except OSError:
+        lockfile_sha256 = ""
+    return EnvironmentInfo(
+        python_version=platform.python_version(),
+        virtualenv_path=os.environ.get("VIRTUAL_ENV") or sys.prefix,
+        lockfile_sha256=lockfile_sha256,
+    )
+
+
+def _gather_parameters(plan: RunPlan) -> tuple[ParameterRecord, ...]:
+    """Record the run-affecting parameters fixed at plan confirmation.
+
+    Every front-loaded run choice becomes one parameter line, plus the plan's
+    configuration fingerprint, so the readable report states exactly what shaped
+    the run. Collection-scoped choices drop the redundant scope suffix.
+    """
+
+    parameters = [
+        ParameterRecord(name="configuration_fingerprint", value=plan.configuration_fingerprint)
+    ]
+    for choice in plan.run_choices.choices:
+        scope = "" if choice.scope == COLLECTION_SCOPE else f" [{choice.scope}]"
+        parameters.append(
+            ParameterRecord(name=f"{choice.stage}.{choice.key}{scope}", value=choice.value)
+        )
+    return tuple(parameters)
+
+
+def _measured_peak_memory_bytes(reports: Sequence[Mapping[str, object]]) -> int | None:
+    """Return the largest recorded model-runtime peak across executed stages.
+
+    Each completed ``stage_execution`` entry references a resource-measurement
+    document whose ``peak_bytes`` is the subprocess (or controlled-adapter) peak
+    for that model; the run's peak is the largest recorded, since stages load one
+    model at a time. This reads the same executed-stage seam as the models
+    section, so it covers exactly the stages that recorded a measurement — audio
+    today, and the remaining engines once ticket 06 records theirs (see
+    :func:`_completed_executions`). ``None`` when no stage recorded a measurement.
+    """
+
+    peaks = [
+        peak
+        for execution in _completed_executions(reports)
+        if (peak := _read_peak_bytes(execution.get("resource_measurement"))) is not None
+    ]
+    return max(peaks) if peaks else None
+
+
+def _read_peak_bytes(measurement: object) -> int | None:
+    """Read ``peak_bytes`` from a resource-measurement evidence reference."""
+
+    if not isinstance(measurement, Mapping):
+        return None
+    path = measurement.get("path")
+    if not isinstance(path, str):
+        return None
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    peak = document.get("peak_bytes") if isinstance(document, Mapping) else None
+    if isinstance(peak, int) and not isinstance(peak, bool) and peak >= 0:
+        return peak
+    return None
+
+
+def _elapsed_seconds(state: _CompositionState) -> float | None:
+    """Measure the run's wall-clock span from its own append-only journal.
+
+    The first and last recorded event bracket the run; their timestamp delta is
+    the elapsed time. ``None`` when fewer than two events exist or a timestamp
+    cannot be parsed, so a placeholder is never fabricated.
+    """
+
+    try:
+        events = read_journal(state.layout.journal_path)
+    except RunStateError:
+        return None
+    if len(events) < 2:
+        return None
+    ordered = sorted(events, key=lambda event: event.sequence)
+    try:
+        first = datetime.fromisoformat(ordered[0].at)
+        last = datetime.fromisoformat(ordered[-1].at)
+    except ValueError:
+        return None
+    return max(0.0, (last - first).total_seconds())
+
+
+def _disk_delta_bytes(state: _CompositionState) -> int | None:
+    """Sum the bytes the run wrote into its own ``work/`` subtree.
+
+    A run creates its work directory from scratch, so the total size of that
+    subtree is the disk the run itself added. ``None`` when the directory is
+    absent (a run that failed before creating it).
+    """
+
+    work_dir = state.layout.work_dir
+    if not work_dir.is_dir():
+        return None
+    total = 0
+    for path in work_dir.rglob("*"):
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _gather_resource_usage(
+    state: _CompositionState, reports: Sequence[Mapping[str, object]]
+) -> ResourceUsage:
+    """Measure the run's elapsed time, peak model memory, and disk footprint."""
+
+    return ResourceUsage(
+        elapsed_seconds=_elapsed_seconds(state),
+        peak_memory_bytes=_measured_peak_memory_bytes(reports),
+        disk_delta_bytes=_disk_delta_bytes(state),
+    )
+
+
 def _gather_report_inputs(state: _CompositionState) -> RunReportInputs:
     """Gather the audit report inputs from what the stages recorded.
 
-    Conservative (ticket 10 option 1): the published content entries the run loop
-    derives from the projection are the run's inventory floor. Deeper per-stage
-    gate aggregation and workspace inventory records are the deferred follow-up,
-    so this returns an empty set of recorded inputs rather than fabricated ones.
+    Reads the completed stages' own reports for the models they executed and the
+    resource evidence they measured, the confirmed plan for tools and parameters,
+    and the running interpreter for the environment identity — the full RunBundle
+    provenance (ticket 05). Every read is defensive: a missing or malformed source
+    contributes nothing rather than failing the always-published audit floor, and
+    the published-content inventory floor still comes from the run loop's
+    projection. Gate aggregation and workspace inventory records remain the
+    deferred follow-up.
     """
 
-    return RunReportInputs()
+    reports = _read_stage_reports(state)
+    return RunReportInputs(
+        models=_gather_models(state, reports),
+        tools=_gather_tools(state.plan),
+        environment=_gather_environment(),
+        parameters=_gather_parameters(state.plan),
+        resource_usage=_gather_resource_usage(state, reports),
+    )
 
 
 def build_run_composition(

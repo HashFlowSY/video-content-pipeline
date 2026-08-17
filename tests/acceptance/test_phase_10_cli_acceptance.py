@@ -414,6 +414,136 @@ def _assert_branch_content(
         assert pointer is None or pointer.run_id != output_dir.name
 
 
+# --- RunBundle processing-report provenance (Phase 12 ticket 05) -------------
+
+
+def _section(report: str, header: str) -> str:
+    """Return the lines of one processing-report section, header exclusive.
+
+    Slices from ``header`` to the next ``## `` heading, so an assertion reads a
+    single section's body without matching a value that happens to recur
+    elsewhere in the report.
+    """
+
+    assert header in report, f"missing section {header!r}"
+    tail = report.split(header, 1)[1]
+    return tail.split("\n## ", 1)[0]
+
+
+def test_processing_report_carries_full_provenance(
+    tmp_path: Path,
+    toolchain: FixtureToolchain,
+    fixture_cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A completed offline golden run publishes a fully-provenanced report.
+
+    Phase 12 ticket 05: the ``subtitle-first`` branch runs the controlled audio
+    and text adapters to ``complete`` through the real CLI, and its published
+    ``processing-report.md`` must carry non-empty models, tools, environment,
+    parameters, and measured resource-usage sections — the provenance that binds a
+    Coverage-ledger entry to the model stack that produced the outputs. Model
+    entries are consistent with the (seeded) registry, and the resource figures
+    are the run's own measurements, not placeholders.
+    """
+
+    plan = _prepare(
+        tmp_path,
+        ("subtitle-first",),
+        _subtitle_first_choices(),
+        subtitled=True,
+        toolchain=toolchain,
+        cache=fixture_cache,
+    )
+    _configure_cli(tmp_path, monkeypatch)
+
+    code, run_doc = _invoke(["run", "--plan", plan.plan_id, "--json"], capsys)
+    assert code == 0, run_doc
+    assert run_doc["run_status"] == RunStatus.COMPLETE.value, run_doc
+    output_dir = Path(str(run_doc["output_dir"]))
+    report = (output_dir / "processing-report.md").read_text(encoding="utf-8")
+
+    # Models: every controlled audio engine the run executed, described from the
+    # registry (name/revision/sha256/size/purpose). The registry is the seeded
+    # fixture registry, so the values assert consistency with it.
+    models = _section(report, "## 模型")
+    assert "未使用模型" not in models
+    for candidate_id, asset in (
+        ("controlled-vad", "a" * 64),
+        ("controlled-alignment", "b" * 64),
+        ("controlled-diarization", "c" * 64),
+    ):
+        assert f"offline/{candidate_id}" in models, models
+        assert asset in models, models
+    assert "revision `phase-10-fixture-r1`" in models
+    assert "4096 字节" in models
+    assert "Controlled offline" in models
+
+    # Tools: the plan's pinned ffmpeg/ffprobe identities.
+    tools = _section(report, "## 工具")
+    assert "ffmpeg" in tools and "ffprobe" in tools
+
+    # Environment: the interpreter identity that ran the pipeline.
+    env = _section(report, "## 运行环境")
+    assert "Python 版本：" in env
+    assert "锁文件哈希：" in env
+    assert "运行环境未记录" not in env
+
+    # Parameters: the front-loaded run choices plus the configuration fingerprint.
+    parameters = _section(report, "## 关键参数、提示词、语言与质量配置")
+    assert "configuration_fingerprint：" in parameters
+    assert f"{STAGE_RUN}.{KEY_ASR_MODE}：{AsrMode.SUBTITLE_FIRST.value}" in parameters
+    assert "无关键参数记录" not in parameters
+
+    # Resource usage: real measurements. Peak memory is the controlled adapter's
+    # recorded 512-byte model-runtime peak; disk delta and elapsed are measured,
+    # never the "未测量" placeholder.
+    resources = _section(report, "## 实际耗时、峰值内存与磁盘变化")
+    assert "峰值内存：512 字节" in resources
+    assert "峰值内存：未测量" not in resources
+    assert "磁盘变化：未测量" not in resources
+    assert "实际耗时：未测量" not in resources
+
+
+def test_processing_report_omits_models_when_none_executed(
+    tmp_path: Path,
+    toolchain: FixtureToolchain,
+    fixture_cache: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A run that executed no model honestly omits it — no padding (ticket 05).
+
+    The ``full-asr`` branch decision-pauses at audio analysis (its model is not
+    acquired offline), so no capability stage ever executed a model. The published
+    report's models section must say so rather than listing a registry model the
+    run did not actually run.
+    """
+
+    plan = _prepare(
+        tmp_path,
+        ("full-asr",),
+        _branch_choices("full-asr"),
+        subtitled=False,
+        toolchain=toolchain,
+        cache=fixture_cache,
+    )
+    _configure_cli(tmp_path, monkeypatch)
+
+    code, run_doc = _invoke(["run", "--plan", plan.plan_id, "--json"], capsys)
+    assert code == 0, run_doc
+    assert run_doc["run_status"] == RunStatus.INCOMPLETE.value, run_doc
+    output_dir = Path(str(run_doc["output_dir"]))
+    report = (output_dir / "processing-report.md").read_text(encoding="utf-8")
+
+    assert "未使用模型。" in _section(report, "## 模型")
+    # Tools and environment are still recorded — they are properties of the run,
+    # not of a model that executed.
+    assert "ffmpeg" in _section(report, "## 工具")
+    assert "Python 版本：" in _section(report, "## 运行环境")
+
+
 # --- vcp plan: the plan command surface -------------------------------------
 
 

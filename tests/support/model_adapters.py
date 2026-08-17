@@ -431,6 +431,13 @@ def _audio_candidate(
     return {
         "candidate_id": candidate_id,
         "capability": capability,
+        # Descriptive fields the real registry carries too, so the RunBundle
+        # provenance gatherer (ticket 05) resolves the same model shape offline as
+        # it will in a real run. None of these affect the eligibility gate.
+        "model_id": f"offline/{candidate_id}",
+        "purpose": f"Controlled offline {capability} adapter (Phase 10 fixture).",
+        "local_path": f"models/offline/{candidate_id}/phase-10-fixture-r1/",
+        "total_size_bytes": 4096,
         "official_source": {
             "url": f"https://offline.invalid/{candidate_id}",
             "approved": True,
