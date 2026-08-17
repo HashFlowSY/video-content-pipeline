@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "config_version": "phase-11-rapidocr-engine-config-v1",
+  "model_identity": {
+    "asset_sha256": "b074b483b736e064d9d09805e395e64da3abde87a27d7deb3fc127f1b5026ce3",
+    "backend": "rapidocr",
+    "backend_version": "3.9.2",
+    "runtime_extra": "onnxruntime==1.28.0",
+    "device_class": "apple-m1"
+  },
+  "detection": {
+    "limit_side_len": 736,
+    "high_resolution_limit_side_len": 1280,
+    "high_resolution_min_side": 1080
+  },
+  "classification": {
+    "use_cls": false
+  },
+  "qualification_scope": "first_device_baseline"
+}

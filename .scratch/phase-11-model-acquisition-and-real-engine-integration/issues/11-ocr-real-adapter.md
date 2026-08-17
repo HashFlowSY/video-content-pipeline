@@ -11,7 +11,7 @@ consumers. The registry entry's model manifest (bundled det/rec/cls
 files + hashes from the wheel) is asserted against the installed reality.
 
 **Blocked by:** 03, 04
-**Status:** open
+**Status:** done
 **Labels:** ready-for-agent
 
 - [ ] Real OCR over the Phase 10 text-bearing fixture frames yields

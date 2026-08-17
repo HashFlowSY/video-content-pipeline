@@ -119,3 +119,10 @@ ignore_missing_imports = true
 module = ["mlx_lm", "mlx_lm.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
+
+# rapidocr and opencv (cv2) ship no py.typed; the real OCR engine (Phase 11
+# ticket 11) runs the bundled PP-OCRv6 pipeline in-process via rapidocr /
+# onnxruntime. The heavy imports are confined to the engine's inference helpers.
+[[tool.mypy.overrides]]
+module = ["rapidocr", "rapidocr.*", "cv2", "cv2.*"]
+ignore_missing_imports = true
