@@ -57,10 +57,27 @@ from video_content_pipeline.model_acquisition import (
     AssetVerificationError,
     verify_acquired_asset,
 )
+from video_content_pipeline.model_runtime import EngineRequest, run_engine_subprocess
+from video_content_pipeline.timecode import ExactTime, HalfOpenInterval, interval_as_json
 
 CAPABILITY = "diarization"
 SEGMENTATION_CANDIDATE_ID = "sherpa-onnx-pyannote-segmentation-3-0"
 EMBEDDING_CANDIDATE_ID = "3dspeaker-campplus-zh-en-advanced"
+
+#: The production diarization child argv and its per-derivative subprocess budget.
+#: The whole ``analyze_derivative_diarization`` sequence runs in the child so its
+#: peak is an honest fresh-process figure comparable to the device baselines.
+DIARIZATION_CHILD_MODULE = "video_content_pipeline.diarization_child"
+DEFAULT_DIARIZATION_TIMEOUT_SECONDS = 600.0
+
+
+def default_diarization_command() -> list[str]:
+    """The production child argv: this interpreter running the diarization child."""
+
+    import sys
+
+    return [sys.executable, "-m", DIARIZATION_CHILD_MODULE]
+
 
 #: The sherpa-onnx diarization pipeline is configured for 16 kHz mono audio.
 DIARIZATION_SAMPLE_RATE = 16000
@@ -648,3 +665,131 @@ def _unit_float(value: Mapping[str, object], key: str) -> float:
             "diarization_calibration_invalid", f"'{key}' must lie in [0, 1]."
         )
     return float(item)
+
+
+# --- isolated (subprocess) analysis -------------------------------------------
+
+
+def _speaker_turn_candidate_as_json(candidate: SpeakerTurnCandidate) -> dict[str, object]:
+    return {
+        "cluster_id": candidate.cluster_id,
+        "interval": interval_as_json(candidate.interval),
+        "confidence": candidate.confidence,
+    }
+
+
+def _speaker_turn_candidate_from_json(payload: object) -> SpeakerTurnCandidate:
+    if not isinstance(payload, Mapping):
+        raise DiarizationEngineError(
+            "diarization_output_invalid", "A diarization turn candidate must be an object."
+        )
+    cluster_id = payload.get("cluster_id")
+    interval = payload.get("interval")
+    confidence = payload.get("confidence")
+    if (
+        not isinstance(cluster_id, str)
+        or not cluster_id
+        or not isinstance(interval, Mapping)
+        or isinstance(confidence, bool)
+        or not isinstance(confidence, int | float)
+    ):
+        raise DiarizationEngineError(
+            "diarization_output_invalid", "A diarization turn candidate is malformed."
+        )
+    start = interval.get("start")
+    end = interval.get("end")
+    if not isinstance(start, Mapping) or not isinstance(end, Mapping):
+        raise DiarizationEngineError(
+            "diarization_output_invalid", "A diarization turn interval is malformed."
+        )
+    try:
+        bounds = HalfOpenInterval(
+            ExactTime(int(start["numerator"]), int(start["denominator"])),
+            ExactTime(int(end["numerator"]), int(end["denominator"])),
+        )
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as error:
+        raise DiarizationEngineError(
+            "diarization_output_invalid", "A diarization turn interval is malformed."
+        ) from error
+    return SpeakerTurnCandidate(cluster_id, bounds, float(confidence))
+
+
+@dataclass(frozen=True)
+class IsolatedDiarizationResult:
+    """One derivative's real anonymous diarization candidates, measured in a child.
+
+    ``raw_turns`` are the anonymous cluster candidates before the ADR 0030/0031
+    gate; the parent applies that gate in-process (no model) against the real VAD
+    partition and the run's role evidence. ``peak_memory_bytes`` is the child's
+    fresh-process high-water mark, comparable to the device baselines.
+    """
+
+    raw_turns: tuple[SpeakerTurnCandidate, ...]
+    segmentation_asset_sha256: str
+    embedding_asset_sha256: str
+    calibrated: bool
+    peak_memory_bytes: int
+
+
+def run_isolated_diarization(
+    project_root: Path,
+    wav_path: Path,
+    mapping: DerivativeTimeMapping,
+    *,
+    source_id: str,
+    stream_index: int,
+    part_label: str,
+    command: Sequence[str] | None = None,
+    timeout_seconds: float = DEFAULT_DIARIZATION_TIMEOUT_SECONDS,
+) -> IsolatedDiarizationResult:
+    """Run the real sherpa-onnx diarization in its own child and return candidates.
+
+    The whole ``analyze_derivative_diarization`` sequence runs in the child
+    (:mod:`video_content_pipeline.diarization_child`) so both pinned assets load in
+    a fresh process whose peak is honest. Only the anonymous ``raw_turns`` are
+    returned; the parent re-applies the shared ADR 0030 gate against the real VAD
+    partition. A malformed child response is a typed ``diarization_output_invalid``
+    failure; subprocess crashes/timeouts surface as ``ModelRuntimeError``.
+    """
+
+    request = EngineRequest(
+        model_path=str(project_root),
+        task={
+            "wav_path": str(wav_path),
+            "mapping": mapping.as_json(),
+            "source_id": source_id,
+            "stream_index": stream_index,
+            "part_label": part_label,
+        },
+    )
+    result = run_engine_subprocess(
+        list(command) if command is not None else default_diarization_command(),
+        request,
+        timeout_seconds=timeout_seconds,
+    )
+    return _parse_isolated_diarization_result(result.result, result.peak_memory_bytes)
+
+
+def _parse_isolated_diarization_result(
+    result: Mapping[str, object], peak_memory_bytes: int
+) -> IsolatedDiarizationResult:
+    raw_turns = result.get("raw_turns")
+    segmentation_sha256 = result.get("segmentation_asset_sha256")
+    embedding_sha256 = result.get("embedding_asset_sha256")
+    calibrated = result.get("calibrated")
+    if (
+        not isinstance(raw_turns, list)
+        or not isinstance(segmentation_sha256, str)
+        or not isinstance(embedding_sha256, str)
+        or not isinstance(calibrated, bool)
+    ):
+        raise DiarizationEngineError(
+            "diarization_output_invalid", "The diarization child response is missing fields."
+        )
+    return IsolatedDiarizationResult(
+        raw_turns=tuple(_speaker_turn_candidate_from_json(turn) for turn in raw_turns),
+        segmentation_asset_sha256=segmentation_sha256,
+        embedding_asset_sha256=embedding_sha256,
+        calibrated=calibrated,
+        peak_memory_bytes=peak_memory_bytes,
+    )
