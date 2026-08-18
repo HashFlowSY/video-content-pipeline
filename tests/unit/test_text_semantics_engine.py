@@ -552,7 +552,7 @@ def test_real_run_remaps_short_aliases_back_to_full_cue_ids(
                         "boundary": {"start_cue_id": "P0:0", "end_cue_id": "P0:1"},
                         "content": {
                             "title": {"text": "标题", "cue_ids": ["P0:0"]},
-                            "details": [{"text": "细节", "cue_ids": ["P0:1"]}],
+                            "detailed_content": [{"text": "细节", "cue_ids": ["P0:1"]}],
                         },
                     }
                 ]
@@ -633,7 +633,7 @@ def test_context_budget_gate_proceeds_when_the_prompt_fits(
                         "boundary": {"start_cue_id": "P0:0", "end_cue_id": "P0:1"},
                         "content": {
                             "title": {"text": "标题", "cue_ids": ["P0:0"]},
-                            "details": [{"text": "细节", "cue_ids": ["P0:0"]}],
+                            "detailed_content": [{"text": "细节", "cue_ids": ["P0:0"]}],
                         },
                     }
                 ]

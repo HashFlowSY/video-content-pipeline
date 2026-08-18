@@ -410,7 +410,9 @@ def _output_contract_lines(
                             "boundary": {"start_cue_id": start_cue, "end_cue_id": end_cue},
                             "content": {
                                 "title": {"text": "<zh title>", "cue_ids": [start_cue]},
-                                "details": [{"text": "<zh detail>", "cue_ids": [start_cue]}],
+                                "detailed_content": [
+                                    {"text": "<zh detail>", "cue_ids": [start_cue]}
+                                ],
                             },
                         }
                     ],
@@ -427,7 +429,11 @@ def _output_contract_lines(
         "Rules: use the exact cue ids shown below in the authoritative-cues block (the "
         "token-efficient Part-local form P{index}:{position}, e.g. P0:0); a segment "
         "boundary names an existing cue in the same Part as start_cue_id and end_cue_id; "
-        "part_id is that Part's alias (e.g. P0); every title and detail must cite one or "
+        "part_id is that Part's alias (e.g. P0). Put each segment's detailed points in the "
+        "content field named exactly \"detailed_content\" (a list of {text, cue_ids}); "
+        "optional structured fields, when supported by the cues, are \"numeric_values\", "
+        "\"entities\", \"examples\", \"conditions\", \"caveats\", \"people\", and "
+        "\"questions_and_answers\". Every title and every content item must cite one or "
         "more of the cue_ids inside its own segment; emit no field you cannot cite from "
         "the provided cues.",
     ]
