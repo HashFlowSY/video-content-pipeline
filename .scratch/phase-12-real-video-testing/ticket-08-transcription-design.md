@@ -83,6 +83,14 @@ Decide whether run #1 transcribes at the coarse or semantic-cue window.
   re-chunks at SEMANTIC_CUE_WINDOW, runs transcribe_derivative, publishes candidate,
   asr_primary stage_execution w/ envelope gate. Unit-tested (engine monkeypatched).
 
+## TRANSCRIPTION COMPLETED PATH DONE (`73bf34c`)
+transcribe() real path wired: shares all gates, then runs build_asr_transcript ->
+status=complete + transcript + stage_execution. Offline byte-identical (full suite
+1696 green). Integration test in test_phase_7_transcription_cli_contract.py.
+asr_review deferred to enhancement (D3). Downstream transcript CONSUMPTION (Option-A
+threading + full-ASR cue resolution) folded into task 4 (each downstream stage's
+real bridge), since that's where the transcript is read.
+
 ## NEXT (transcription wiring — fresh context, edits to transcribe())
 1. Remove top short-circuit `if real_engines is not None: return dispatch_real_stage`
    (transcription.py ~483). Remove the now-unused dispatch_real_stage import.
