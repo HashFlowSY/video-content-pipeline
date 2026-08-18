@@ -8,10 +8,12 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from video_content_pipeline.audio_derivation import (
     AnalysisAudioDerivationError,
     AnalysisAudioDerivative,
+    DerivativeTimeMapping,
     PreprocessingProfile,
     prepare_analysis_audio,
 )
@@ -41,10 +43,7 @@ from video_content_pipeline.planning import (
     load_run_plan,
     revalidate_confirmed_inspection_evidence,
 )
-from video_content_pipeline.real_engine_adapter import (
-    RealEngineSelection,
-    dispatch_real_stage,
-)
+from video_content_pipeline.real_engine_adapter import RealEngineSelection
 from video_content_pipeline.source import SourceArtifact, sha256_file
 from video_content_pipeline.subtitle_pipeline import (
     CandidateReportState,
@@ -55,6 +54,9 @@ from video_content_pipeline.subtitle_pipeline import (
     subtitle_rules_fingerprint,
 )
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
+
+if TYPE_CHECKING:
+    from video_content_pipeline.vad_engine import IsolatedVadResult
 
 
 class AudioAnalysisReportState(StrEnum):
@@ -489,12 +491,13 @@ def analyze_audio(
     ``real_engines`` is the composition's real-adapter selection (Phase 12 ticket
     06). When ``None`` — every automated-test run — this runs the controlled
     offline adapters without real model or media access, exactly as before. When
-    set, the acquired real engines for the selected capabilities are reached
-    through :func:`~video_content_pipeline.real_engine_adapter.dispatch_real_stage`.
+    set, each capability the profile graded real runs its acquired engine in its own
+    Model runtime subprocess (Phase 12 ticket 08), sharing this function's
+    revalidation, derivative preparation, report assembly, and ``stage_execution``
+    contract; the offline and real paths differ only in each capability's evidence
+    derivation and its measured resource controls.
     """
 
-    if real_engines is not None:
-        return dispatch_real_stage(real_engines, stage="audio_analysis")
     report_id = uuid.uuid4().hex
     workspace_path = project_root / "work" / "audio-analysis-reports" / report_id
     report_path = workspace_path / "audio-analysis-report.json"
@@ -579,7 +582,17 @@ def analyze_audio(
         resumed_by_capability = {
             evidence["capability"]: evidence for evidence in resumed_formal_evidence
         }
-        vad_candidate = _qualified_vad_candidate(capabilities)
+        # The real engines consume the same pinned derivative the offline path
+        # prepared: recover each Part's wav path and source-clock mapping once, keyed
+        # by (source_id, stream_index), so every real capability reuses it.
+        derivatives_by_key: dict[tuple[str, int], tuple[Path, DerivativeTimeMapping]] = {}
+        vad_results_by_key: dict[tuple[str, int], IsolatedVadResult] = {}
+        vad_peak = 0
+        alignment_peak = 0
+        diarization_peak = 0
+        if real_engines is not None:
+            derivatives_by_key = _real_derivatives_by_key(analysis_audio_derivatives)
+        vad_candidate = _qualified_vad_candidate(capabilities, real_engines)
         if vad_candidate is None:
             resource_pause = _resource_pause(capabilities, "vad")
             if resource_pause is not None:
@@ -595,6 +608,14 @@ def analyze_audio(
             if resumed_vad is not None:
                 _validate_resumed_candidate(resumed_vad, vad_candidate)
                 vad_evidence = resumed_vad
+            elif _capability_is_real(real_engines, "vad"):
+                vad_evidence, vad_results_by_key, vad_peak = _derive_vad_evidence_real(
+                    vad_candidate,
+                    analysis_audio_streams,
+                    subtitle_report,
+                    project_root,
+                    derivatives_by_key,
+                )
             else:
                 vad_evidence = _derive_vad_evidence(
                     vad_candidate,
@@ -613,7 +634,14 @@ def analyze_audio(
                 else "vad_revalidated",
             }
             if resumed_vad is None:
-                vad_stage = _record_stage_execution(vad_candidate, vad_evidence, workspace_path)
+                vad_stage = _record_stage_execution(
+                    vad_candidate,
+                    vad_evidence,
+                    workspace_path,
+                    runtime_controls=_real_runtime_controls(vad_peak)
+                    if _capability_is_real(real_engines, "vad")
+                    else None,
+                )
                 stage_execution.append(vad_stage)
                 if vad_stage["state"] != "completed":
                     partial_analysis = _partial_analysis(
@@ -623,7 +651,7 @@ def analyze_audio(
                         "model_release_unverified",
                         "VAD unload evidence is required before the next controlled model stage.",
                     )
-            alignment_candidate = _qualified_alignment_candidate(capabilities)
+            alignment_candidate = _qualified_alignment_candidate(capabilities, real_engines)
             if alignment_candidate is None:
                 resource_pause = _resource_pause(capabilities, "forced_alignment")
                 if resource_pause is not None:
@@ -640,6 +668,19 @@ def analyze_audio(
                 if resumed_alignment is not None:
                     _validate_resumed_candidate(resumed_alignment, alignment_candidate)
                     alignment_evidence = resumed_alignment
+                elif _capability_is_real(real_engines, "forced_alignment"):
+                    alignment_evidence, alignment_peak = _derive_alignment_evidence_real(
+                        alignment_candidate,
+                        analysis_audio_streams,
+                        confirmed_report.inspection_evidence,
+                        subtitle_report,
+                        plan,
+                        vad_evidence,
+                        project_root,
+                        workspace_path,
+                        derivatives_by_key,
+                        vad_results_by_key,
+                    )
                 else:
                     alignment_evidence = _derive_alignment_evidence(
                         alignment_candidate,
@@ -656,7 +697,12 @@ def analyze_audio(
                 formal_evidence = tuple(evidence)
                 if resumed_alignment is None:
                     alignment_stage = _record_stage_execution(
-                        alignment_candidate, alignment_evidence, workspace_path
+                        alignment_candidate,
+                        alignment_evidence,
+                        workspace_path,
+                        runtime_controls=_real_runtime_controls(alignment_peak)
+                        if _capability_is_real(real_engines, "forced_alignment")
+                        else None,
                     )
                     stage_execution.append(alignment_stage)
                     if alignment_stage["state"] != "completed":
@@ -677,13 +723,26 @@ def analyze_audio(
                     "Diarization resource estimate exceeds the 12 GiB envelope.",
                 )
             diarization_candidate = _qualified_diarization_candidate(
-                capabilities, requested_diarization_candidate
+                capabilities, requested_diarization_candidate, real_engines
             )
             if diarization_candidate is not None:
                 resumed_diarization = resumed_by_capability.get("diarization")
                 if resumed_diarization is not None:
                     _validate_resumed_candidate(resumed_diarization, diarization_candidate)
                     diarization_evidence = resumed_diarization
+                elif _capability_is_real(real_engines, "diarization"):
+                    diarization_evidence, diarization_peak = _derive_diarization_evidence_real(
+                        diarization_candidate,
+                        analysis_audio_streams,
+                        confirmed_report.inspection_evidence,
+                        subtitle_report,
+                        plan,
+                        vad_evidence,
+                        project_root,
+                        workspace_path,
+                        _parse_role_metadata_requests(requested_role_metadata),
+                        derivatives_by_key,
+                    )
                 else:
                     diarization_evidence = _derive_diarization_evidence(
                         diarization_candidate,
@@ -701,7 +760,12 @@ def analyze_audio(
                 formal_evidence = tuple(evidence)
                 if resumed_diarization is None:
                     diarization_stage = _record_stage_execution(
-                        diarization_candidate, diarization_evidence, workspace_path
+                        diarization_candidate,
+                        diarization_evidence,
+                        workspace_path,
+                        runtime_controls=_real_runtime_controls(diarization_peak)
+                        if _capability_is_real(real_engines, "diarization")
+                        else None,
                     )
                     stage_execution.append(diarization_stage)
                     if diarization_stage["state"] != "completed":
@@ -1735,8 +1799,31 @@ def _subtract_intervals(
     return tuple(remaining)
 
 
+def _capability_is_real(real_engines: RealEngineSelection | None, capability: str) -> bool:
+    return real_engines is not None and capability in real_engines.capabilities
+
+
+def _candidate_qualifies(
+    candidate: Mapping[str, object],
+    capability: str,
+    real_engines: RealEngineSelection | None,
+) -> bool:
+    """Whether a candidate is usable for this capability.
+
+    A real capability qualifies its acquired candidate by eligibility alone: the
+    real engine loads its own model-matched calibration (ADR 0029/0027/0031) and
+    re-verifies its pinned asset at run time, so the controlled adapter's projected/
+    qualified fixture gate does not apply. Every other run keeps the offline gate.
+    """
+
+    if _capability_is_real(real_engines, capability):
+        return candidate.get("state") == "eligible"
+    return _candidate_is_qualified(candidate)
+
+
 def _qualified_vad_candidate(
     capabilities: tuple[CapabilityAvailability, ...],
+    real_engines: RealEngineSelection | None = None,
 ) -> dict[str, object] | None:
     vad_capability = next(
         (capability for capability in capabilities if capability.capability == "vad"), None
@@ -1745,7 +1832,7 @@ def _qualified_vad_candidate(
         return None
     qualified: list[dict[str, object]] = []
     for candidate in vad_capability.candidates:
-        if _candidate_is_qualified(candidate):
+        if _candidate_qualifies(candidate, "vad", real_engines):
             qualified.append(candidate)
     if len(qualified) > 1:
         raise AudioAnalysisError(
@@ -1757,6 +1844,7 @@ def _qualified_vad_candidate(
 
 def _qualified_alignment_candidate(
     capabilities: tuple[CapabilityAvailability, ...],
+    real_engines: RealEngineSelection | None = None,
 ) -> dict[str, object] | None:
     alignment_capability = next(
         (capability for capability in capabilities if capability.capability == "forced_alignment"),
@@ -1766,7 +1854,7 @@ def _qualified_alignment_candidate(
         return None
     qualified: list[dict[str, object]] = []
     for candidate in alignment_capability.candidates:
-        if _candidate_is_qualified(candidate):
+        if _candidate_qualifies(candidate, "forced_alignment", real_engines):
             qualified.append(candidate)
     if len(qualified) > 1:
         raise AudioAnalysisError(
@@ -1779,6 +1867,7 @@ def _qualified_alignment_candidate(
 def _qualified_diarization_candidate(
     capabilities: tuple[CapabilityAvailability, ...],
     requested_candidate_id: str | None,
+    real_engines: RealEngineSelection | None = None,
 ) -> dict[str, object] | None:
     diarization_capability = next(
         (capability for capability in capabilities if capability.capability == "diarization"),
@@ -1789,7 +1878,7 @@ def _qualified_diarization_candidate(
     qualified = [
         candidate
         for candidate in diarization_capability.candidates
-        if _candidate_is_qualified(candidate)
+        if _candidate_qualifies(candidate, "diarization", real_engines)
     ]
     if not qualified:
         return None
@@ -2460,52 +2549,83 @@ def _derive_alignment_evidence(
             minimum_confidence=minimum_confidence,
             duration_rules=duration_rules,
         )
-        view_document = _alignment_view_as_json(view, source_evidence)
-        if view.state == "alignment_untrusted":
-            fingerprint = _alignment_failure_fingerprint(
-                plan, source_id, source_evidence, candidate_id, calibration, view
-            )
-            view_document["failure_fingerprint"] = fingerprint
-            prior_reports = _matching_alignment_failure_reports(project_root, fingerprint)
-            if prior_reports:
-                _write_json_once(view_path, view_document)
-                diagnosis_path = view_path.with_name("alignment-diagnosis.json")
-                _write_json_once(
-                    diagnosis_path,
-                    {
-                        "schema_version": 1,
-                        "state": "alignment_diagnosis_required",
-                        "failure_fingerprint": fingerprint,
-                        "evidence_reports": [path.as_posix() for path in prior_reports],
-                        "current_timing_view": _input_evidence(view_path).as_json(),
-                        "diagnosis": "root_cause_inconclusive",
-                    },
-                )
-                parts.append(
-                    {
-                        "source_id": source_id,
-                        "audio_stream_index": selection.stream_index,
-                        "timing_view": _input_evidence(view_path).as_json(),
-                        "state": "alignment_diagnosis_required",
-                        "diagnostic": _input_evidence(diagnosis_path).as_json(),
-                    }
-                )
-                continue
-        _write_json_once(view_path, view_document)
         parts.append(
-            {
-                "source_id": source_id,
-                "audio_stream_index": selection.stream_index,
-                "timing_view": _input_evidence(view_path).as_json(),
-                "state": view.state,
-                "diagnostic": view.diagnostic,
-            }
+            _alignment_part_from_view(
+                view,
+                source_evidence,
+                source_id,
+                selection.stream_index,
+                plan,
+                candidate_id,
+                calibration,
+                view_path,
+                project_root,
+            )
         )
     return {
         "capability": "forced_alignment",
         "candidate_id": candidate_id,
         "calibration_profile": calibration.get("profile"),
         "parts": parts,
+    }
+
+
+def _alignment_part_from_view(
+    view: AdoptedAlignmentTimingView,
+    source_evidence: InputEvidence,
+    source_id: str,
+    stream_index: int,
+    plan: RunPlan,
+    candidate_id: str,
+    calibration: Mapping[str, object],
+    view_path: Path,
+    project_root: Path,
+) -> dict[str, object]:
+    """Write one adopted timing view and shape its Part evidence.
+
+    The shared tail of both the controlled-adapter and real alignment paths: it
+    records the immutable timing view, and when the view is ``alignment_untrusted``
+    and a matching prior failure recurs it emits the ``alignment_diagnosis_required``
+    diagnosis record instead. Keeping it in one place means the real engine's
+    output flows through exactly the offline path's diagnosis and view-recording
+    contract.
+    """
+
+    view_document = _alignment_view_as_json(view, source_evidence)
+    if view.state == "alignment_untrusted":
+        fingerprint = _alignment_failure_fingerprint(
+            plan, source_id, source_evidence, candidate_id, calibration, view
+        )
+        view_document["failure_fingerprint"] = fingerprint
+        prior_reports = _matching_alignment_failure_reports(project_root, fingerprint)
+        if prior_reports:
+            _write_json_once(view_path, view_document)
+            diagnosis_path = view_path.with_name("alignment-diagnosis.json")
+            _write_json_once(
+                diagnosis_path,
+                {
+                    "schema_version": 1,
+                    "state": "alignment_diagnosis_required",
+                    "failure_fingerprint": fingerprint,
+                    "evidence_reports": [path.as_posix() for path in prior_reports],
+                    "current_timing_view": _input_evidence(view_path).as_json(),
+                    "diagnosis": "root_cause_inconclusive",
+                },
+            )
+            return {
+                "source_id": source_id,
+                "audio_stream_index": stream_index,
+                "timing_view": _input_evidence(view_path).as_json(),
+                "state": "alignment_diagnosis_required",
+                "diagnostic": _input_evidence(diagnosis_path).as_json(),
+            }
+    _write_json_once(view_path, view_document)
+    return {
+        "source_id": source_id,
+        "audio_stream_index": stream_index,
+        "timing_view": _input_evidence(view_path).as_json(),
+        "state": view.state,
+        "diagnostic": view.diagnostic,
     }
 
 
@@ -2585,6 +2705,381 @@ def _derive_diarization_evidence(
         "calibration_profile": calibration.get("profile"),
         "parts": parts,
     }
+
+
+#: The real (real-sample-confirmed) model-specific calibration configs the real
+#: engines read (ADR 0029/0027/0031). Their evidence is the ``calibration_profile``
+#: the real formal-evidence carries, replacing the controlled adapter's synthetic
+#: profile.
+_REAL_CALIBRATION_CONFIG = {
+    "vad": Path("config") / "audio-analysis" / "silero-vad-calibration.json",
+    "forced_alignment": Path("config") / "audio-analysis" / "qwen3-aligner-calibration.json",
+    "diarization": Path("config") / "audio-analysis" / "sherpa-diarization-calibration.json",
+}
+
+
+def _real_calibration_profile(project_root: Path, capability: str) -> dict[str, object]:
+    """Retain the real model-specific calibration config as profile evidence.
+
+    A real run publishes evidence only against a ``real_sample_confirmed`` profile
+    (its exact scope may carry a suffix, e.g. ``real_sample_confirmed_with_note``);
+    a ``synthetic_verification_only`` profile is rejected so the synthetic-scope
+    guard the offline path enforces also holds for the real path.
+    """
+
+    path = project_root / _REAL_CALIBRATION_CONFIG[capability]
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "calibration_failed", f"Real {capability} calibration profile cannot be read."
+        ) from error
+    scope = document.get("qualification_scope") if isinstance(document, Mapping) else None
+    if not isinstance(scope, str) or not scope.startswith("real_sample_confirmed"):
+        raise AudioAnalysisError(
+            "calibration_scope_insufficient",
+            f"A real {capability} run requires a real-sample-confirmed calibration profile.",
+        )
+    return _input_evidence(path).as_json()
+
+
+def _real_diarization_minimum_confidence(project_root: Path) -> float:
+    """The formal-turn confidence gate from the real sherpa calibration config."""
+
+    path = project_root / _REAL_CALIBRATION_CONFIG["diarization"]
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        thresholds = document.get("thresholds") if isinstance(document, Mapping) else None
+        confidence = (
+            thresholds.get("minimum_confidence") if isinstance(thresholds, Mapping) else None
+        )
+        if (
+            not isinstance(confidence, float | int)
+            or isinstance(confidence, bool)
+            or not 0 <= confidence <= 1
+        ):
+            raise ValueError
+        return float(confidence)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        raise AudioAnalysisError(
+            "diarization_calibration_required",
+            "Real diarization calibration thresholds are invalid.",
+        ) from error
+
+
+def _real_derivatives_by_key(
+    derivatives: tuple[dict[str, object], ...],
+) -> dict[tuple[str, int], tuple[Path, DerivativeTimeMapping]]:
+    """Recover each prepared derivative's wav path + mapping, keyed by Part.
+
+    The real engines are fed the exact pinned derivative the offline path prepared;
+    this reconstructs the ``(wav_path, DerivativeTimeMapping)`` from each retained
+    derivative record so no re-decode happens.
+    """
+
+    result: dict[tuple[str, int], tuple[Path, DerivativeTimeMapping]] = {}
+    for derivative in derivatives:
+        source_id = derivative.get("source_id")
+        stream_index = derivative.get("stream_index")
+        path = derivative.get("path")
+        mapping = derivative.get("mapping")
+        if (
+            not isinstance(source_id, str)
+            or not isinstance(stream_index, int)
+            or isinstance(stream_index, bool)
+            or not isinstance(path, str)
+            or not isinstance(mapping, Mapping)
+        ):
+            raise AudioAnalysisError(
+                "analysis_audio_derivative_invalid",
+                "A prepared Analysis audio derivative record is invalid.",
+            )
+        try:
+            result[(source_id, stream_index)] = (
+                Path(path),
+                DerivativeTimeMapping.from_json(mapping),
+            )
+        except AnalysisAudioDerivationError as error:
+            raise AudioAnalysisError("analysis_audio_derivative_invalid", str(error)) from error
+    return result
+
+
+def _real_runtime_controls(peak_memory_bytes: int) -> dict[str, object]:
+    """The measured stage-execution controls for a real capability's own child.
+
+    The child exits before the parent records the stage, so its unified memory has
+    returned to the OS: ``resident_bytes`` is truthfully ``0`` and the peak is the
+    child's own high-water mark. :func:`_record_stage_execution` validates the peak
+    against the candidate's resource envelope exactly as it does a fixture's.
+    """
+
+    return {
+        "resource_measurement": {"peak_bytes": peak_memory_bytes},
+        "unload_evidence": {"state": "released", "resident_bytes": 0},
+    }
+
+
+def _real_derivative(
+    derivatives_by_key: Mapping[tuple[str, int], tuple[Path, DerivativeTimeMapping]],
+    source_id: str,
+    stream_index: int,
+) -> tuple[Path, DerivativeTimeMapping]:
+    entry = derivatives_by_key.get((source_id, stream_index))
+    if entry is None:
+        raise AudioAnalysisError(
+            "analysis_audio_derivative_changed",
+            "A selected Part lacks a prepared Analysis audio derivative for the real engines.",
+        )
+    return entry
+
+
+def _derive_vad_evidence_real(
+    candidate: Mapping[str, object],
+    selections: tuple[AnalysisAudioStreamSelection, ...],
+    subtitle_report: SubtitleCandidateReport,
+    project_root: Path,
+    derivatives_by_key: Mapping[tuple[str, int], tuple[Path, DerivativeTimeMapping]],
+) -> tuple[dict[str, object], dict[tuple[str, int], IsolatedVadResult], int]:
+    """Real VAD: run the isolated silero child per Part; map to offline evidence.
+
+    Returns the ``formal_evidence`` dict (identical shape to
+    :func:`_derive_vad_evidence`), the per-Part :class:`IsolatedVadResult`
+    (retained so the alignment step re-derives its chunks), and the peak memory of
+    the heaviest Part's child for the stage-execution record.
+    """
+
+    from video_content_pipeline.vad_engine import run_isolated_vad
+
+    candidate_id = candidate.get("candidate_id")
+    if not isinstance(candidate_id, str):
+        raise AudioAnalysisError("model_output_invalid", "VAD candidate identity is missing.")
+    profile = _real_calibration_profile(project_root, "vad")
+    parts: list[dict[str, object]] = []
+    results: dict[tuple[str, int], IsolatedVadResult] = {}
+    peak = 0
+    for selection in selections:
+        wav_path, mapping = _real_derivative(
+            derivatives_by_key, selection.source_id, selection.stream_index
+        )
+        result = run_isolated_vad(
+            project_root,
+            wav_path,
+            mapping,
+            source_id=selection.source_id,
+            stream_index=selection.stream_index,
+            caption_intervals=_primary_caption_intervals(subtitle_report, selection.source_id),
+        )
+        parts.append(dict(result.part_evidence))
+        results[(selection.source_id, selection.stream_index)] = result
+        peak = max(peak, result.peak_memory_bytes)
+    evidence: dict[str, object] = {
+        "capability": "vad",
+        "candidate_id": candidate_id,
+        "calibration_profile": profile,
+        "parts": parts,
+    }
+    return evidence, results, peak
+
+
+def _derive_alignment_evidence_real(
+    candidate: Mapping[str, object],
+    selections: tuple[AnalysisAudioStreamSelection, ...],
+    inspection_evidence: tuple[PlanInspectionEvidence, ...],
+    subtitle_report: SubtitleCandidateReport,
+    plan: RunPlan,
+    vad_evidence: Mapping[str, object],
+    project_root: Path,
+    workspace_path: Path,
+    derivatives_by_key: Mapping[tuple[str, int], tuple[Path, DerivativeTimeMapping]],
+    vad_results: Mapping[tuple[str, int], IsolatedVadResult],
+) -> tuple[dict[str, object], int]:
+    """Real forced alignment: run the aligner (self-isolated per chunk) per Part.
+
+    Aligns only Parts carrying a Primary subtitle track -- in the full-ASR branch
+    there are none, so no aligner subprocess runs and the evidence has empty parts.
+    Reuses the shared :func:`_alignment_part_from_view` tail so the adopted timing
+    view and diagnosis contract match the offline path exactly.
+    """
+
+    from video_content_pipeline.alignment_engine import analyze_derivative_alignment
+    from video_content_pipeline.vad_chunking import derive_speech_chunks
+
+    candidate_id = candidate.get("candidate_id")
+    if not isinstance(candidate_id, str):
+        raise AudioAnalysisError("model_output_invalid", "Alignment candidate identity is missing.")
+    profile = _real_calibration_profile(project_root, "forced_alignment")
+    real_calibration = {"profile": profile}
+    expected_sources = _primary_alignment_source_ids(subtitle_report, selections)
+    vad_by_source = _vad_intervals_by_source(vad_evidence)
+    coverage_by_source = {
+        evidence.source_id: dict(evidence.coverage_by_stream) for evidence in inspection_evidence
+    }
+    selection_by_source = {selection.source_id: selection for selection in selections}
+    parts: list[dict[str, object]] = []
+    peak = 0
+    for source_id in sorted(expected_sources):
+        selection = selection_by_source[source_id]
+        audio_coverage = coverage_by_source.get(source_id, {}).get(selection.stream_index)
+        if audio_coverage is None:
+            raise AudioAnalysisError(
+                "audio_coverage_indeterminate",
+                "Selected audio stream lacks retained coverage evidence.",
+            )
+        if selection.language is None:
+            raise AudioAnalysisError(
+                "alignment_input_invalid",
+                "A real alignment Part requires a known audio-stream language.",
+            )
+        source_cues, source_evidence = _primary_alignment_cues(
+            subtitle_report, source_id, project_root
+        )
+        wav_path, mapping = _real_derivative(derivatives_by_key, source_id, selection.stream_index)
+        vad_result = vad_results.get((source_id, selection.stream_index))
+        chunks = (
+            derive_speech_chunks(vad_result.speech_runs_samples, mapping)
+            if vad_result is not None
+            else ()
+        )
+        result = analyze_derivative_alignment(
+            project_root,
+            wav_path,
+            mapping,
+            source_id=source_id,
+            stream_index=selection.stream_index,
+            language=selection.language,
+            source_cues=source_cues,
+            chunks=chunks,
+            usable_audio_intervals=_usable_audio_intervals(audio_coverage),
+            voice_activity_intervals=vad_by_source[source_id],
+        )
+        peak = max(peak, result.peak_memory_bytes)
+        if result.adopted_view is None:
+            raise AudioAnalysisError(
+                "alignment_calibration_required",
+                "The real aligner produced no adopted timing view for the subtitle language.",
+            )
+        view_path = (
+            workspace_path
+            / "alignment"
+            / candidate_id
+            / source_id
+            / "adopted-alignment-timing-view.json"
+        )
+        parts.append(
+            _alignment_part_from_view(
+                result.adopted_view,
+                source_evidence,
+                source_id,
+                selection.stream_index,
+                plan,
+                candidate_id,
+                real_calibration,
+                view_path,
+                project_root,
+            )
+        )
+    evidence: dict[str, object] = {
+        "capability": "forced_alignment",
+        "candidate_id": candidate_id,
+        "calibration_profile": profile,
+        "parts": parts,
+    }
+    return evidence, peak
+
+
+def _derive_diarization_evidence_real(
+    candidate: Mapping[str, object],
+    selections: tuple[AnalysisAudioStreamSelection, ...],
+    inspection_evidence: tuple[PlanInspectionEvidence, ...],
+    subtitle_report: SubtitleCandidateReport,
+    plan: RunPlan,
+    vad_evidence: Mapping[str, object],
+    project_root: Path,
+    workspace_path: Path,
+    user_role_metadata: tuple[UserRoleMetadata, ...],
+    derivatives_by_key: Mapping[tuple[str, int], tuple[Path, DerivativeTimeMapping]],
+) -> tuple[dict[str, object], int]:
+    """Real diarization: run the isolated sherpa child per Part; apply the shared gate.
+
+    The child returns anonymous cluster candidates; this re-applies the ADR 0030/
+    0031 gate in-process through the same :func:`_speaker_turn_part_evidence_as_json`
+    the offline path uses, against the real VAD partition and the run's role
+    evidence. The real engine proposes no subtitle-cited roles, so only user role
+    metadata survives.
+    """
+
+    from video_content_pipeline.diarization_engine import run_isolated_diarization
+
+    candidate_id = candidate.get("candidate_id")
+    if not isinstance(candidate_id, str):
+        raise AudioAnalysisError(
+            "model_output_invalid", "Diarization candidate identity is missing."
+        )
+    profile = _real_calibration_profile(project_root, "diarization")
+    minimum_confidence = _real_diarization_minimum_confidence(project_root)
+    vad_by_source = _vad_intervals_by_source(vad_evidence)
+    coverage_by_source = {
+        evidence.source_id: dict(evidence.coverage_by_stream) for evidence in inspection_evidence
+    }
+    selection_by_source = {selection.source_id: selection for selection in selections}
+    selected_source_ids = set(selection_by_source)
+    if any(item.source_id not in selected_source_ids for item in user_role_metadata):
+        raise AudioAnalysisError(
+            "role_metadata_invalid", "Role metadata references a Part without selected audio."
+        )
+    metadata_evidence = _retain_user_role_metadata(
+        plan, candidate_id, user_role_metadata, workspace_path
+    )
+    metadata_by_source: dict[str, tuple[UserRoleMetadata, ...]] = {
+        source_id: tuple(item for item in user_role_metadata if item.source_id == source_id)
+        for source_id in selected_source_ids
+    }
+    part_labels = {
+        selection.source_id: f"part-{part_number:02d}"
+        for part_number, selection in enumerate(selections, start=1)
+    }
+    parts: list[dict[str, object]] = []
+    peak = 0
+    for selection in selections:
+        source_id = selection.source_id
+        audio_coverage = coverage_by_source.get(source_id, {}).get(selection.stream_index)
+        if audio_coverage is None:
+            raise AudioAnalysisError(
+                "audio_coverage_indeterminate",
+                "Selected audio stream lacks retained coverage evidence.",
+            )
+        wav_path, mapping = _real_derivative(derivatives_by_key, source_id, selection.stream_index)
+        result = run_isolated_diarization(
+            project_root,
+            wav_path,
+            mapping,
+            source_id=source_id,
+            stream_index=selection.stream_index,
+            part_label=part_labels[source_id],
+        )
+        peak = max(peak, result.peak_memory_bytes)
+        projected_part = ProjectedDiarizationPart(turns=result.raw_turns, role_candidates=())
+        parts.append(
+            _speaker_turn_part_evidence_as_json(
+                source_id,
+                part_labels[source_id],
+                selection.stream_index,
+                projected_part,
+                _usable_audio_intervals(audio_coverage),
+                vad_by_source[source_id],
+                minimum_confidence,
+                _speaker_role_cues(subtitle_report, source_id, project_root),
+                metadata_by_source[source_id],
+                metadata_evidence,
+            )
+        )
+    evidence: dict[str, object] = {
+        "capability": "diarization",
+        "candidate_id": candidate_id,
+        "calibration_profile": profile,
+        "parts": parts,
+    }
+    return evidence, peak
 
 
 def _retain_user_role_metadata(

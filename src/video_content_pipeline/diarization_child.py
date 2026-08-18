@@ -1,8 +1,8 @@
 """Model runtime child for the real sherpa-onnx diarization engine (ticket 08).
 
 The model-touching end of the Model runtime subprocess for diarization. The
-diarization assets are ONNX-scale and ran in-process historically (ADR 0055); the
-Phase 12 ticket-08 ADR extends the boundary to them so the orchestrated ``vcp run``
+diarization assets are ONNX-scale and ran in-process historically (ADR 0055);
+ADR 0058 extends the boundary to them so the orchestrated ``vcp run``
 records an honest, baseline-comparable per-capability peak -- both pinned assets
 load in this fresh child and its ``ru_maxrss`` high-water mark is measured exactly
 as the Phase 11 device baselines were (one capability per process).

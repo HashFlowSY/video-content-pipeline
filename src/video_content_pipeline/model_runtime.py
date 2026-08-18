@@ -24,9 +24,12 @@ retains the child's exit code, stderr, and stdout as evidence. There is no
 automatic retry and the parent writes nothing to disk, so a failed stage leaves
 the parent's state clean for its caller to decide what to do.
 
-ONNX-scale models (vad, diarization, ocr) are small enough to run in-process;
-only MLX-scale engines cross this boundary. The size rationale is recorded in
-the ADR.
+ONNX-scale models (vad, diarization, ocr) are small enough to return their memory
+in-process, so ADR 0055 originally kept them off this boundary. ADR 0058 then
+extends the boundary to them for the orchestrated real run: crossing it there is
+what gives each ONNX capability an honest fresh-process peak comparable to the
+device baselines and the resource envelope. Both rationales are recorded in the
+ADRs.
 """
 
 from __future__ import annotations

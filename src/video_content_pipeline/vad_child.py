@@ -1,9 +1,9 @@
 """Model runtime child for the real silero VAD engine (Phase 12 ticket 08).
 
 The model-touching end of the Model runtime subprocess for VAD. ADR 0055 crosses
-this boundary for MLX-scale engines so unified memory returns to the OS; Phase 12
-ticket 08 extends the boundary to the ONNX-scale VAD engine as well (see the
-ticket-08 ADR) so the orchestrated ``vcp run`` records an **honest, baseline-
+this boundary for MLX-scale engines so unified memory returns to the OS; ADR 0058
+extends the boundary to the ONNX-scale VAD engine as well so the orchestrated
+``vcp run`` records an **honest, baseline-
 comparable** per-capability peak: the silero session is loaded in this fresh child
 and its ``ru_maxrss`` high-water mark is measured exactly as the Phase 11 device
 baselines were (one capability per process), instead of the process-cumulative

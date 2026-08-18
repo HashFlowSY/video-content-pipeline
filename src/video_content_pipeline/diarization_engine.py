@@ -4,9 +4,12 @@ Phase 11 ticket 07 fills the recorded *Diarization capability vacancy* with the
 credential-free sherpa-onnx offline pipeline (decision D5): pyannote-segmentation
 -3.0 ONNX (MIT) for overlap-aware speaker segmentation, the 3D-Speaker CAM++
 zh-en advanced embedding (Apache-2.0), and agglomerative clustering. Both assets
-are ONNX-scale, so per ADR 0055 the pipeline runs *in-process* through sherpa
--onnx's ``OfflineSpeakerDiarization`` (no Model runtime subprocess), over the two
-vendored, hash-pinned assets resolved from the model registry. The engine:
+are ONNX-scale, so the pipeline itself runs through sherpa-onnx's
+``OfflineSpeakerDiarization`` over the two vendored, hash-pinned assets resolved
+from the model registry. Per ADR 0055 that ran in-process; ADR 0058 wraps it in a
+Model runtime subprocess for the orchestrated real run (see
+:mod:`video_content_pipeline.diarization_child`) so its peak is measured honestly
+in a fresh process. The engine:
 
 * verifies each pinned asset from disk before loading it
   (:func:`load_segmentation_asset`, :func:`load_embedding_asset`) -- a missing or
