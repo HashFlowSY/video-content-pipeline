@@ -599,9 +599,9 @@
       "local_path": "models/mlx-community/Qwen3-4B-Instruct-2507-8bit/0e42af58449718de7931ee04f28191fbe6c43a56/",
       "acquisition_method": "hf download --revision",
       "resource_estimate": {
-        "high_bytes": 6124770564,
-        "basis": "device-baselines:apple-m1 measured 4.70 GiB on a 4-5min prototype clip + 1 GiB run-1 full-length headroom (analysis-audio buffer scales with duration); the run records the observed peak; stays under the 12 GiB envelope",
-        "confidence": "estimated"
+        "high_bytes": 7516192768,
+        "basis": "run-1 measured full-length child peak 5.94 GiB (device baseline 4.70 GiB on a 4-5min clip understated it) + headroom to 7 GiB; text-semantics windows each block through a fresh child so the peak does not grow with source length; stays under the 12 GiB envelope",
+        "confidence": "measured"
       }
     }
   ],

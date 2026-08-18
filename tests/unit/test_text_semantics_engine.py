@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+import video_content_pipeline.text_semantics_engine as text_semantics_engine
 from video_content_pipeline.model_acquisition import build_file_manifest, manifest_asset_sha256
 from video_content_pipeline.model_runtime import ModelRuntimeError
 from video_content_pipeline.text_contracts import (
@@ -30,6 +31,8 @@ from video_content_pipeline.text_generation import LoadedPart
 from video_content_pipeline.text_semantics_engine import (
     Qwen3TextSemanticsCalibration,
     TextSemanticsEngineError,
+    _decode_generation_output,
+    _technical_blocks,
     generate_semantics,
     generate_text_semantics,
     load_text_semantics_asset,
@@ -492,3 +495,133 @@ def test_generate_requires_calibration(tmp_path: Path) -> None:
             timeout_seconds=30,
         )
     assert error.value.reason == "text_semantics_calibration_required"
+
+
+# --- technical-block windowing (Phase 12 ticket 08) ---------------------------
+
+
+def test_technical_blocks_keeps_a_short_part_as_one_block() -> None:
+    # A Part whose whole inventory fits the budget renders as exactly one block, so
+    # short sources make one model call and behave as the pre-blocking path did.
+    cue_ids = (CUE_A, CUE_B)
+    blocks = _technical_blocks(cue_ids, CUE_TEXTS, max_chars=3500, overlap=1)
+    assert blocks == (cue_ids,)
+    assert _technical_blocks((), CUE_TEXTS) == ()
+
+
+def test_technical_blocks_splits_a_long_part_into_overlapping_windows() -> None:
+    cue_ids = tuple(f"{PART_ID}:{TRACK_ID}:{i}" for i in range(4))
+    texts = {cue_id: "字" * 1500 for cue_id in cue_ids}
+    blocks = _technical_blocks(cue_ids, texts, max_chars=3500, overlap=1)
+    # 1500-char cues, 3500 budget -> 2 cues per block; overlap 1 shares a boundary.
+    assert blocks == (
+        (cue_ids[0], cue_ids[1]),
+        (cue_ids[1], cue_ids[2]),
+        (cue_ids[2], cue_ids[3]),
+    )
+    # Every cue appears in at least one block; consecutive blocks overlap by one.
+    covered = {cue for block in blocks for cue in block}
+    assert covered == set(cue_ids)
+
+
+def test_technical_blocks_never_drops_a_cue_larger_than_the_budget() -> None:
+    cue_ids = (CUE_A, CUE_B)
+    texts = {CUE_A: "字" * 9000, CUE_B: "短"}
+    blocks = _technical_blocks(cue_ids, texts, max_chars=3500, overlap=1)
+    # The over-budget cue forms its own block rather than being dropped or looping.
+    assert blocks[0] == (CUE_A,)
+    assert CUE_B in {cue for block in blocks for cue in block}
+
+
+def test_long_part_is_windowed_into_valid_segments_not_model_output_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The regression run #1 surfaced: a long transcript rendered in one call
+    # overflows the model window and returns free prose (model_output_invalid).
+    # Windowed into technical blocks, each block's prompt fits and projects, and the
+    # merged proposals adjudicate into formal segments instead.
+    asset_sha256 = _install_valid_asset(tmp_path)
+    _write_calibration(tmp_path, _calibration_document(asset_sha256))
+    cue_ids = tuple(f"{PART_ID}:{TRACK_ID}:{i}" for i in range(4))
+    cue_texts = {cue_id: "字" * 1500 for cue_id in cue_ids}
+    part = (LoadedPart(part_id=PART_ID, track_id=TRACK_ID, cue_ids=cue_ids),)
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_generate_semantics(model_path, prompt, calibration, prompt_version, **kwargs):
+        # Each rendered cue line is "- <cue_id>: <text>"; the cue id has no spaces.
+        block_cues = tuple(
+            line[2:].split(": ", 1)[0]
+            for line in prompt.splitlines()
+            if line.startswith(f"- {PART_ID}:{TRACK_ID}:")
+        )
+        calls.append(block_cues)
+        envelope = {
+            "schema_version": 1,
+            "output_schema_version": "phase-06-output-schema-v1",
+            "adapter_identity": "phase-06-controlled-text-adapter-v1",
+            "result": {
+                "parts": [
+                    {
+                        "part_id": PART_ID,
+                        "segments": [
+                            {
+                                "boundary": {
+                                    "start_cue_id": block_cues[0],
+                                    "end_cue_id": block_cues[-1],
+                                },
+                                "content": {
+                                    "title": {"text": "标题", "cue_ids": [block_cues[0]]},
+                                    "details": [{"text": "细节", "cue_ids": [block_cues[0]]}],
+                                },
+                            }
+                        ],
+                        "chapters": [],
+                    }
+                ],
+                "collection_summary": None,
+            },
+        }
+        return json.dumps(envelope), 4242
+
+    monkeypatch.setattr(text_semantics_engine, "generate_semantics", fake_generate_semantics)
+
+    result = generate_text_semantics(
+        tmp_path,
+        tmp_path / "work",
+        _contracts(),
+        source_id=PART_ID,
+        stream_index=0,
+        available=part,
+        cue_texts=cue_texts,
+        command=["unused"],
+        timeout_seconds=30,
+    )
+
+    # Blocking engaged: more than one model call, each over a bounded cue window.
+    assert len(calls) > 1
+    assert all(len(block) <= 2 for block in calls)
+    # The long Part projected and adjudicated -- never the run-#1 prose failure.
+    assert result.status != "model_output_invalid"
+    assert result.segments != ()
+    # Every cue is owned exactly once across the adjudicated segments.
+    owned = [cue for segment in result.segments for cue in segment.cue_ids]
+    assert sorted(owned) == sorted(cue_ids)
+    # Peak is the heaviest block's measured peak.
+    assert result.peak_memory_bytes == 4242
+
+
+def test_decode_generation_output_strips_markdown_code_fence() -> None:
+    # The instruction-tuned model reliably emits the JSON envelope but often wraps
+    # it in a Markdown code fence; the decoder strips the fence so a fenced-but-valid
+    # envelope projects instead of being rejected (observed on real run #1 blocks).
+    envelope = {"schema_version": 1, "result": {"parts": []}}
+    fenced_json = "```json\n" + json.dumps(envelope) + "\n```"
+    fenced_bare = "```\n" + json.dumps(envelope) + "\n```"
+    assert _decode_generation_output(fenced_json) == envelope
+    assert _decode_generation_output(fenced_bare) == envelope
+    # Bare JSON (no fence) still parses; genuine prose still rejects to the sentinel.
+    assert _decode_generation_output(json.dumps(envelope)) == envelope
+    assert _decode_generation_output("这是一段散文，不是 JSON。") is None
+    # A truncated (unterminated) fenced envelope rejects rather than half-parsing.
+    assert _decode_generation_output('```json\n{"result": {"parts": [') is None

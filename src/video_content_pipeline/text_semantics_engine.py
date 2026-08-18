@@ -60,6 +60,7 @@ from video_content_pipeline.text_generation import (
     LoadedPart,
     UnavailablePartInfo,
     generate_analysis,
+    index_result_parts,
 )
 
 #: The provider-neutral capability and its acquired candidate.
@@ -504,6 +505,77 @@ class Qwen3TextSemanticsResult:
     peak_memory_bytes: int
 
 
+#: Per-block cue-text budget in characters. The engine renders each Part's cues
+#: into overlapping technical blocks (Phase 6 spec: blocks overlap only as context
+#: transport; the boundary adjudicator dedups cross-block spans) so no single model
+#: call exceeds the bounded KV window (``calibration.max_kv_size``, 8192 tokens).
+#: Rendering a whole long source in one call overflows that window and the output
+#: degrades below the JSON envelope into free prose (observed on real 30-minute
+#: material). ~3500 characters of cue text sits well under half the token window
+#: once the instructions and the output envelope are accounted for.
+_MAX_BLOCK_CUE_CHARS = 3500
+#: Cues shared between consecutive blocks so a real segment boundary between two
+#: cues is visible inside at least one block that also holds the JSON envelope.
+_BLOCK_CUE_OVERLAP = 1
+
+
+def _technical_blocks(
+    cue_ids: Sequence[str],
+    cue_texts: Mapping[str, str],
+    *,
+    max_chars: int = _MAX_BLOCK_CUE_CHARS,
+    overlap: int = _BLOCK_CUE_OVERLAP,
+) -> tuple[tuple[str, ...], ...]:
+    """Split a Part's ordered cues into overlapping technical blocks that fit the window.
+
+    Each block is a contiguous run of cues whose rendered text stays within
+    ``max_chars``; consecutive blocks share ``overlap`` trailing cues so a real
+    segment boundary between two cues is visible inside at least one block. A Part
+    whose whole inventory already fits is returned as a single block, so short
+    sources render and behave exactly as the pre-blocking single call did. A lone
+    cue longer than ``max_chars`` still forms its own block (never dropped).
+    """
+
+    ids = tuple(cue_ids)
+    if not ids:
+        return ()
+    blocks: list[tuple[str, ...]] = []
+    start = 0
+    total = len(ids)
+    while start < total:
+        chars = 0
+        end = start
+        while end < total:
+            length = len(cue_texts.get(ids[end], ""))
+            if end > start and chars + length > max_chars:
+                break
+            chars += length
+            end += 1
+        blocks.append(ids[start:end])
+        if end >= total:
+            break
+        following = end - overlap
+        start = following if following > start else end
+    return tuple(blocks)
+
+
+def _tag_block_segment(segment: Mapping[str, object], block_id: str) -> dict[str, object]:
+    """Return a copy of a proposed segment whose boundary carries this block's id.
+
+    The per-block model call cannot know the global block structure, so the engine
+    stamps the authoritative ``technical_block_id`` the boundary adjudicator uses to
+    deduplicate identical cue spans surfaced by two overlapping blocks.
+    """
+
+    tagged = dict(segment)
+    boundary = tagged.get("boundary")
+    if isinstance(boundary, Mapping):
+        stamped = dict(boundary)
+        stamped["technical_block_id"] = block_id
+        tagged["boundary"] = stamped
+    return tagged
+
+
 def generate_text_semantics(
     project_root: Path,
     workspace_path: Path,
@@ -540,23 +612,81 @@ def generate_text_semantics(
     )
     child_command = list(command) if command is not None else default_text_semantics_command()
 
-    prompt = render_text_semantics_prompt(contracts, available, cue_texts)
-    raw_text, peak = generate_semantics(
-        model_path,
-        prompt,
-        calibration,
-        contracts.prompt_template.version,
-        command=child_command,
-        timeout_seconds=timeout_seconds,
-    )
-    raw_pointer = record_restricted_raw_output(
-        workspace_path, "text-semantics-generation", raw_text.encode("utf-8")
-    )
+    # Render and run each Part's cues in overlapping technical blocks that fit the
+    # bounded KV window, then merge every block's proposed segments (each stamped
+    # with its block id) into one result the unchanged adjudication tiles. A Part
+    # whose whole inventory fits is a single block, so short sources make exactly one
+    # call and behave as before; chapters and the collection summary are taken only
+    # from a single-block Part and are conservatively omitted when a Part was split.
+    raw_chunks: list[str] = []
+    peaks: list[int] = []
+    merged_parts: list[dict[str, object]] = []
+    block_diagnostics: list[PlanningDiagnostic] = []
+    collection_container: object | None = None
+    any_projected = False
 
-    projection = project_text_model_output(_decode_generation_output(raw_text), contracts)
-    if projection.projection is None:
-        diagnostic = projection.diagnostic or PlanningDiagnostic(
-            "model_output_invalid", "The text-semantics model output is invalid."
+    for part in available:
+        blocks = _technical_blocks(part.cue_ids, cue_texts)
+        part_segments: list[object] = []
+        part_chapters: list[object] = []
+        for block_index, block_cue_ids in enumerate(blocks):
+            block_part = LoadedPart(
+                part_id=part.part_id, track_id=part.track_id, cue_ids=block_cue_ids
+            )
+            prompt = render_text_semantics_prompt(contracts, (block_part,), cue_texts)
+            raw_text, peak = generate_semantics(
+                model_path,
+                prompt,
+                calibration,
+                contracts.prompt_template.version,
+                command=child_command,
+                timeout_seconds=timeout_seconds,
+            )
+            raw_chunks.append(raw_text)
+            peaks.append(peak)
+            projection = project_text_model_output(_decode_generation_output(raw_text), contracts)
+            if projection.projection is None:
+                block_diagnostics.append(
+                    projection.diagnostic
+                    or PlanningDiagnostic(
+                        "model_output_invalid",
+                        f"Text-model output for {part.part_id} block {block_index} is invalid.",
+                    )
+                )
+                continue
+            any_projected = True
+            result = projection.projection.get("result")
+            result = result if isinstance(result, Mapping) else {}
+            block_part_result = index_result_parts(result).get(part.part_id)
+            if block_part_result is None:
+                proposed = result.get("parts")
+                first = proposed[0] if isinstance(proposed, list) and proposed else None
+                block_part_result = first if isinstance(first, Mapping) else {}
+            block_id = f"{part.part_id}:block-{block_index}"
+            raw_segments = block_part_result.get("segments")
+            for segment in raw_segments if isinstance(raw_segments, list) else ():
+                if isinstance(segment, Mapping):
+                    part_segments.append(_tag_block_segment(segment, block_id))
+            if len(blocks) == 1:
+                chapters = block_part_result.get("chapters")
+                part_chapters = list(chapters) if isinstance(chapters, list) else []
+                candidate_collection = result.get("collection_summary")
+                if candidate_collection is not None:
+                    collection_container = candidate_collection
+        merged_parts.append(
+            {"part_id": part.part_id, "segments": part_segments, "chapters": part_chapters}
+        )
+
+    raw_pointer = record_restricted_raw_output(
+        workspace_path, "text-semantics-generation", "\n\n".join(raw_chunks).encode("utf-8")
+    )
+    peak = max(peaks) if peaks else 0
+
+    if not any_projected:
+        diagnostics = tuple(block_diagnostics) or (
+            PlanningDiagnostic(
+                "model_output_invalid", "The text-semantics model output is invalid."
+            ),
         )
         return Qwen3TextSemanticsResult(
             source_id=source_id,
@@ -566,20 +696,18 @@ def generate_text_semantics(
             chapters=(),
             collection_summary=None,
             unsupported_item_count=0,
-            diagnostics=(diagnostic,),
+            diagnostics=diagnostics,
             restricted_raw_output=raw_pointer,
-            projection_state={"state": projection.state},
+            projection_state={"state": "model_output_invalid"},
             model_asset_sha256=asset_sha256,
             calibration_version=calibration.calibration_version,
             peak_memory_bytes=peak,
         )
 
-    result_container = projection.projection.get("result")
-    analysis = generate_analysis(
-        available,
-        unavailable,
-        result_container if isinstance(result_container, Mapping) else {},
-    )
+    merged_result: dict[str, object] = {"parts": merged_parts}
+    if collection_container is not None:
+        merged_result["collection_summary"] = collection_container
+    analysis = generate_analysis(available, unavailable, merged_result)
     return Qwen3TextSemanticsResult(
         source_id=source_id,
         stream_index=stream_index,
@@ -588,7 +716,7 @@ def generate_text_semantics(
         chapters=analysis.chapters,
         collection_summary=analysis.collection_summary,
         unsupported_item_count=analysis.unsupported_item_count,
-        diagnostics=analysis.diagnostics,
+        diagnostics=(*block_diagnostics, *analysis.diagnostics),
         restricted_raw_output=raw_pointer,
         projection_state={
             "state": "projected",
@@ -601,12 +729,36 @@ def generate_text_semantics(
 
 
 def _decode_generation_output(raw_text: str) -> object:
-    """Decode raw model text for projection, or a rejecting sentinel on malformed JSON."""
+    """Decode raw model text for projection, or a rejecting sentinel on malformed JSON.
+
+    The instruction-tuned model reliably emits the JSON envelope but frequently
+    wraps it in a Markdown code fence (```json ... ```); the fence is stripped
+    before parsing so a fenced-but-otherwise-valid envelope projects instead of
+    being rejected as ``model_output_invalid``. Text that is not JSON after the
+    fence is removed still rejects.
+    """
 
     try:
-        return json.loads(raw_text)
+        return json.loads(_strip_code_fence(raw_text))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
+
+
+def _strip_code_fence(raw_text: str) -> str:
+    """Remove a leading/trailing Markdown code fence, leaving other text unchanged.
+
+    Handles the common ```json ... ``` and ``` ... ``` wrappers the model emits;
+    returns the input unchanged when it does not open with a fence, so bare JSON
+    and genuine non-JSON prose are both left for the parser to accept or reject.
+    """
+
+    stripped = raw_text.strip()
+    if not stripped.startswith("```"):
+        return raw_text
+    lines = stripped.splitlines()[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines)
 
 
 # --- small validators ---------------------------------------------------------
