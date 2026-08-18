@@ -173,6 +173,14 @@ def test_confirmation_fixes_front_loaded_run_choices(tmp_path: Path) -> None:
 
     assert plan.run_choices.asr_mode() is AsrMode.FULL_ASR
     assert plan.run_choices.visual_text_enabled() is False
+    # The plan and the report it revalidates against must agree on run_choices, or
+    # source revalidation fails the run with plan_confirmation_drift. Re-issuing the
+    # report with the choices is what keeps confirmed_plan_matches true.
+    reissued = load_plan_report(
+        tmp_path / "plans" / "reports" / plan.report_id / "plan-report.json"
+    )
+    assert reissued.run_choices == plan.run_choices
+    assert confirmed_plan_matches(reissued, plan)
 
 
 def test_confirmation_rejects_incomplete_run_choices(tmp_path: Path) -> None:

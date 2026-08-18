@@ -857,15 +857,33 @@ def confirm_run_plan(
         raise PlanningError(
             "report_not_ready", "Only a decode-validated report can create a RunPlan."
         )
-    effective_choices = run_choices if run_choices is not None else report.run_choices
     if run_choices is not None:
-        gaps = missing_required_choices(effective_choices)
+        gaps = missing_required_choices(run_choices)
         if gaps:
             raise PlanningError(
                 "run_choices_incomplete",
                 "The run choices omit a selection this mode requires: "
                 + "; ".join(gap.reason for gap in gaps),
             )
+        # Re-issue the ready report carrying the choices and persist it, so the
+        # confirmed plan and the report it revalidates against agree on run_choices
+        # (part of the confirmation identity). The decode-validated evidence is
+        # copied unchanged; only the front-loaded choices are added.
+        report = create_plan_report(
+            state=PlanState.READY_FOR_CONFIRMATION,
+            source_artifacts=report.source_artifacts,
+            tools=report.tools,
+            planned_increment_bytes=report.disk_headroom.increment_bytes,
+            configuration_fingerprint=report.configuration_fingerprint,
+            decode_estimate=report.decode_estimate,
+            diagnostics=report.diagnostics,
+            url_authorizations=report.url_authorizations,
+            inspection_evidence=report.inspection_evidence,
+            parent_report_id=report.report_id,
+            run_choices=run_choices,
+            project_root=project_root,
+        )
+        persist_plan_report(report, plans_root)
     if _has_stale_confirmation_child(report.report_id, plans_root):
         raise PlanningError(
             "report_superseded", "A stale confirmation already requires a new planning attempt."
@@ -904,7 +922,7 @@ def confirm_run_plan(
         inspection_evidence_fingerprints=inspection_evidence_fingerprints(
             report.inspection_evidence
         ),
-        run_choices=effective_choices,
+        run_choices=report.run_choices,
     )
     _write_json_once(plans_root / plan.plan_id / "run-plan.json", plan.as_json())
     return plan
