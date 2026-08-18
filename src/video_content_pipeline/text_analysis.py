@@ -74,10 +74,7 @@ from video_content_pipeline.planning import (
     load_run_plan,
     revalidate_confirmed_inspection_evidence,
 )
-from video_content_pipeline.real_engine_adapter import (
-    RealEngineSelection,
-    dispatch_real_stage,
-)
+from video_content_pipeline.real_engine_adapter import RealEngineSelection
 from video_content_pipeline.source import SourceArtifact, sha256_file
 from video_content_pipeline.subtitle_pipeline import (
     CandidateReportState,
@@ -680,12 +677,11 @@ def analyze_text(
 
     ``real_engines`` is run composition's real-adapter selection (Phase 12 ticket
     06): ``None`` on every automated-test run (the controlled offline path below),
-    and the acquired real text_semantics engine when set, reached through
-    :func:`~video_content_pipeline.real_engine_adapter.dispatch_real_stage`.
+    and the acquired real text_semantics engine when set, which shares every
+    revalidation and the resource gate before running the acquired engine over the
+    revalidated cues (the real branch below).
     """
 
-    if real_engines is not None:
-        return dispatch_real_stage(real_engines, stage="text_analysis")
     report_id = uuid.uuid4().hex
     workspace_path = project_root / "work" / "text-analysis-reports" / report_id
     report_path = workspace_path / "text-analysis-report.json"
