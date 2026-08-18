@@ -282,6 +282,35 @@ def load_cue_inventory(
     )
 
 
+def load_part_with_cue_texts(
+    source_candidate_path: Path, *, part_id: str, stream_index: int
+) -> tuple[LoadedPart, dict[str, str]]:
+    """Load a Part's cue inventory and its cue-id -> verbatim-text map.
+
+    The real text-semantics path needs both the authoritative ordered cue
+    identities (:func:`load_cue_inventory`) and each cue's recognized text to render
+    the prompt. Both the embedded-subtitle track and the full-ASR published
+    transcript are the same ``source-candidate.json`` shape, so this one loader
+    serves both branches. A cue missing its text is our own evidence gone wrong, so
+    it raises ``cue_inventory_invalid``.
+    """
+
+    part = load_cue_inventory(source_candidate_path, part_id=part_id, stream_index=stream_index)
+    decoded = json.loads(source_candidate_path.read_text(encoding="utf-8"))
+    raw_cues = decoded.get("cues") if isinstance(decoded, Mapping) else None
+    if not isinstance(raw_cues, list) or len(raw_cues) != len(part.cue_ids):
+        raise TextGenerationError(
+            "cue_inventory_invalid", "Subtitle source candidate cue list is inconsistent."
+        )
+    cue_texts: dict[str, str] = {}
+    for raw_cue, identity in zip(raw_cues, part.cue_ids, strict=True):
+        text = raw_cue.get("text") if isinstance(raw_cue, Mapping) else None
+        if not isinstance(text, str):
+            raise TextGenerationError("cue_inventory_invalid", "A subtitle cue omits its text.")
+        cue_texts[identity] = text
+    return part, cue_texts
+
+
 def load_controlled_generation(
     adapter_document: Mapping[str, object], project_root: Path, input_fixture_sha256: str
 ) -> ControlledGeneration | None:

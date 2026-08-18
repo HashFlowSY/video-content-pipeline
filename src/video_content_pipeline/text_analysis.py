@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from hashlib import sha256
@@ -538,6 +538,10 @@ class TextAnalysisReport:
     collection_summary: CollectionSummary | None
     unsupported_item_count: int
     diagnostics: tuple[PlanningDiagnostic, ...]
+    # Populated only by a real run (Phase 12 ticket 08): the text_semantics
+    # stage-execution record with its measured subprocess peak. Empty on the
+    # controlled-adapter path, so the offline document is unchanged.
+    stage_execution: tuple[dict[str, object], ...] = ()
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -593,6 +597,7 @@ class TextAnalysisReport:
             "unsupported_item_count": self.unsupported_item_count,
             "restricted_raw_output": [output.as_json() for output in self.restricted_raw_output],
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
+            "stage_execution": list(self.stage_execution),
             # A run that never enables visual-text records the OCR-not-requested
             # record so absence is explicit rather than implied.
             "visual_text": dict(_OCR_NOT_REQUESTED_RECORD),
@@ -997,6 +1002,140 @@ def _sampling_identity(adapter_document: Mapping[str, object]) -> dict[str, obje
         configuration = {}
     encoded = json.dumps(dict(configuration), sort_keys=True).encode("utf-8")
     return {"sha256": sha256(encoded).hexdigest(), "configuration": dict(configuration)}
+
+
+@dataclass(frozen=True)
+class _RealTextOutcome:
+    """The real text-semantics run's outcome, shaped for the report fields."""
+
+    status: TextAnalysisReportStatus
+    segments: tuple[GeneratedSegment, ...]
+    chapters: tuple[Chapter, ...]
+    collection_summary: CollectionSummary | None
+    unsupported_item_count: int
+    restricted_raw_output: tuple[RestrictedRawOutput, ...]
+    diagnostics: tuple[PlanningDiagnostic, ...]
+    stage_execution: tuple[dict[str, object], ...]
+
+
+def _text_semantics_stage_execution(
+    candidate_id: str,
+    resource_high_bytes: int | None,
+    peak_memory_bytes: int,
+    workspace_path: Path,
+) -> dict[str, object]:
+    """Record the text_semantics stage execution with its measured child peak.
+
+    The engine runs the model in its own Model runtime subprocess (ADR 0055), so the
+    peak is the honest child high-water mark and released/0 is truthful on exit. An
+    over-envelope peak fails closed to ``release_unverified`` as every stage does.
+    """
+
+    record: dict[str, object] = {
+        "capability": "text_semantics",
+        "candidate_id": candidate_id,
+        "state": "completed",
+        "resource_measurement": {"peak_bytes": peak_memory_bytes},
+        "unload_evidence": {"state": "released", "resident_bytes": 0},
+    }
+    if (
+        resource_high_bytes is None
+        or peak_memory_bytes < 0
+        or peak_memory_bytes > resource_high_bytes
+    ):
+        record["state"] = "release_unverified"
+        return record
+    measurement_path = (
+        workspace_path / "stage-execution" / "text_semantics" / candidate_id / "resource.json"
+    )
+    write_json_once(
+        measurement_path,
+        {"peak_bytes": peak_memory_bytes},
+        conflict_error=lambda message: TextAnalysisError("text_analysis_report_invalid", message),
+    )
+    record["resource_measurement"] = _input_evidence(measurement_path).as_json()
+    return record
+
+
+def build_text_semantics_analysis(
+    project_root: Path,
+    workspace_path: Path,
+    contracts: TextGenerationContracts,
+    parts: Sequence[tuple[str, int, Path]],
+    unavailable: Sequence[UnavailablePartInfo],
+    text_candidate: Mapping[str, object],
+    *,
+    command: Sequence[str] | None = None,
+) -> _RealTextOutcome:
+    """Run the real Qwen3-4B text-semantics engine over the revalidated cue inventories.
+
+    ``parts`` are ``(part_id, stream_index, source_candidate_path)`` for every Part
+    with recognized text -- the embedded Primary subtitle track, or, in the full-ASR
+    branch, the published transcript candidate (same schema). Loads each Part's cue
+    identities and verbatim texts, runs the self-isolated engine once, and maps its
+    result onto the report's segment/chapter/summary contract plus a measured
+    text_semantics stage-execution record.
+    """
+
+    from video_content_pipeline.text_generation import load_part_with_cue_texts
+    from video_content_pipeline.text_semantics_engine import generate_text_semantics
+
+    candidate_id = text_candidate.get("candidate_id")
+    if not isinstance(candidate_id, str):
+        raise TextAnalysisError("model_output_invalid", "text_semantics candidate id is missing.")
+    available: list[LoadedPart] = []
+    cue_texts: dict[str, str] = {}
+    representative: tuple[str, int] | None = None
+    for part_id, stream_index, candidate_path in parts:
+        part, texts = load_part_with_cue_texts(
+            candidate_path, part_id=part_id, stream_index=stream_index
+        )
+        available.append(part)
+        cue_texts.update(texts)
+        if representative is None:
+            representative = (part_id, stream_index)
+    if representative is None:
+        raise TextAnalysisError(
+            "text_analysis_input_invalid", "A real text-semantics run needs at least one Part."
+        )
+    result = generate_text_semantics(
+        project_root,
+        workspace_path,
+        contracts,
+        source_id=representative[0],
+        stream_index=representative[1],
+        available=tuple(available),
+        cue_texts=cue_texts,
+        unavailable=tuple(unavailable),
+        command=command,
+    )
+    status = (
+        TextAnalysisReportStatus.FAILED
+        if result.status not in {"complete", "partial", "failed"}
+        else TextAnalysisReportStatus(result.status)
+    )
+    high_bytes = _text_resource_high_bytes(text_candidate)
+    stage_execution = (
+        _text_semantics_stage_execution(
+            candidate_id, high_bytes, result.peak_memory_bytes, workspace_path
+        ),
+    )
+    return _RealTextOutcome(
+        status=status,
+        segments=result.segments,
+        chapters=result.chapters,
+        collection_summary=result.collection_summary,
+        unsupported_item_count=result.unsupported_item_count,
+        restricted_raw_output=(result.restricted_raw_output,),
+        diagnostics=result.diagnostics,
+        stage_execution=stage_execution,
+    )
+
+
+def _text_resource_high_bytes(candidate: Mapping[str, object]) -> int | None:
+    evidence = candidate.get("eligibility_evidence")
+    high_bytes = evidence.get("resource_high_bytes") if isinstance(evidence, Mapping) else None
+    return high_bytes if isinstance(high_bytes, int) and not isinstance(high_bytes, bool) else None
 
 
 def _run_controlled_generation(
