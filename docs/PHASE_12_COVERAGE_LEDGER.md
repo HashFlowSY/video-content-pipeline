@@ -38,7 +38,7 @@ run #1 lands.
 
 | Run id | Source | Date | Branch(es) claimed | Confirmation record |
 |---|---|---|---|---|
-| _(none yet)_ | — | — | — | — |
+| `20260818T074454Z-adff4a51f8b8e118` | maintainer local file `f10e8895…a48889` (34m58s) | 2026-08-18 | branch 2 (full ASR) — completed, verified, published | [run record](phase-12-runs/20260818T074454Z-adff4a51f8b8e118.md) — **D10 ratings PENDING maintainer review**; branch not yet flipped |
 
 ## Standing per-run procedure
 
