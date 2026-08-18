@@ -36,8 +36,8 @@ from video_content_pipeline.planning import (
     record_decode_measurement,
     revalidate_report,
 )
-from video_content_pipeline.prototype import DeviceBaseline
 from video_content_pipeline.probe import ProbeDocument
+from video_content_pipeline.prototype import DeviceBaseline
 from video_content_pipeline.run_choices import (
     COLLECTION_SCOPE,
     KEY_ASR_MODE,
@@ -141,6 +141,63 @@ def test_report_and_plan_are_persisted_under_separate_ids(tmp_path: Path) -> Non
     assert plan.disk_headroom == report.disk_headroom
     assert plan.inspection_evidence_fingerprints[0][0] == artifact.source_id
     assert len(plan.inspection_evidence_fingerprints[0][1]) == 64
+
+
+def test_confirmation_fixes_front_loaded_run_choices(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+    configuration_fingerprint = _write_planning_configuration(tmp_path)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=configuration_fingerprint,
+        inspection_evidence=(_inspection(artifact),),
+    )
+    choices = RunPlanChoices.build(
+        (
+            RunChoice(
+                STAGE_RUN, KEY_ASR_MODE, COLLECTION_SCOPE, "full_asr", ChoiceProvenance.USER_CHOSEN
+            ),
+            RunChoice(
+                STAGE_RUN,
+                KEY_VISUAL_TEXT_ENABLED,
+                COLLECTION_SCOPE,
+                "false",
+                ChoiceProvenance.USER_CHOSEN,
+            ),
+        )
+    )
+
+    plan = confirm_run_plan(report, tmp_path, tmp_path / "plans", run_choices=choices)
+
+    assert plan.run_choices.asr_mode() is AsrMode.FULL_ASR
+    assert plan.run_choices.visual_text_enabled() is False
+
+
+def test_confirmation_rejects_incomplete_run_choices(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+    configuration_fingerprint = _write_planning_configuration(tmp_path)
+    report = create_plan_report(
+        state=PlanState.READY_FOR_CONFIRMATION,
+        source_artifacts=(artifact,),
+        tools=(),
+        planned_increment_bytes=artifact.byte_count,
+        configuration_fingerprint=configuration_fingerprint,
+        inspection_evidence=(_inspection(artifact),),
+    )
+    # asr_mode without the required visual-text toggle is an incomplete selection.
+    incomplete = RunPlanChoices.build(
+        (
+            RunChoice(
+                STAGE_RUN, KEY_ASR_MODE, COLLECTION_SCOPE, "full_asr", ChoiceProvenance.USER_CHOSEN
+            ),
+        )
+    )
+
+    with pytest.raises(PlanningError) as error:
+        confirm_run_plan(report, tmp_path, tmp_path / "plans", run_choices=incomplete)
+    assert error.value.reason == "run_choices_incomplete"
 
 
 def test_confirmation_rejects_a_changed_planning_configuration(tmp_path: Path) -> None:

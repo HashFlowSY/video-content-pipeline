@@ -27,7 +27,7 @@ from video_content_pipeline.external_tools import (
 )
 from video_content_pipeline.inspection import PlanInspectionEvidence
 from video_content_pipeline.prototype import DeviceBaseline, load_device_baselines
-from video_content_pipeline.run_choices import RunPlanChoices
+from video_content_pipeline.run_choices import RunPlanChoices, missing_required_choices
 from video_content_pipeline.source import (
     DiskHeadroom,
     SourceArtifact,
@@ -836,13 +836,36 @@ def revalidate_report(report: PlanReport, project_root: Path) -> tuple[PlanningD
     return tuple(diagnostics)
 
 
-def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -> RunPlan:
-    """Create a RunPlan only from a ready report whose evidence still matches."""
+def confirm_run_plan(
+    report: PlanReport,
+    project_root: Path,
+    plans_root: Path,
+    *,
+    run_choices: RunPlanChoices | None = None,
+) -> RunPlan:
+    """Create a RunPlan only from a ready report whose evidence still matches.
+
+    ``run_choices`` front-loads the run's mode-level selections (``asr_mode``,
+    ``visual_text_enabled``, and any scope a chosen mode needs) at confirmation, the
+    one point they are fixed. When given, the choices must be complete for their mode
+    (:func:`missing_required_choices`); an incomplete set is rejected rather than
+    deferred to a mid-run pause. When omitted, the report's own choices are carried
+    through unchanged (backward compatible with a pre-fixed report).
+    """
 
     if report.state != PlanState.READY_FOR_CONFIRMATION:
         raise PlanningError(
             "report_not_ready", "Only a decode-validated report can create a RunPlan."
         )
+    effective_choices = run_choices if run_choices is not None else report.run_choices
+    if run_choices is not None:
+        gaps = missing_required_choices(effective_choices)
+        if gaps:
+            raise PlanningError(
+                "run_choices_incomplete",
+                "The run choices omit a selection this mode requires: "
+                + "; ".join(gap.reason for gap in gaps),
+            )
     if _has_stale_confirmation_child(report.report_id, plans_root):
         raise PlanningError(
             "report_superseded", "A stale confirmation already requires a new planning attempt."
@@ -881,7 +904,7 @@ def confirm_run_plan(report: PlanReport, project_root: Path, plans_root: Path) -
         inspection_evidence_fingerprints=inspection_evidence_fingerprints(
             report.inspection_evidence
         ),
-        run_choices=report.run_choices,
+        run_choices=effective_choices,
     )
     _write_json_once(plans_root / plan.plan_id / "run-plan.json", plan.as_json())
     return plan

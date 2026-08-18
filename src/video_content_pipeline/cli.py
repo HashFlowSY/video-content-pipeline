@@ -59,6 +59,16 @@ from video_content_pipeline.planning import (
     revalidate_report,
 )
 from video_content_pipeline.publication import PublicationError, verify_published_bundle
+from video_content_pipeline.run_choices import (
+    COLLECTION_SCOPE,
+    KEY_ASR_MODE,
+    KEY_VISUAL_TEXT_ENABLED,
+    STAGE_RUN,
+    AsrMode,
+    ChoiceProvenance,
+    RunChoice,
+    RunPlanChoices,
+)
 from video_content_pipeline.run_composition import build_run_composition
 from video_content_pipeline.run_control import ControlKind, ControlRequestError, request_control
 from video_content_pipeline.run_loop import (
@@ -116,6 +126,10 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--collect", action="store_true")
     plan.add_argument("--url-mode", choices=tuple(mode.value for mode in URLAccessMode))
     plan.add_argument("--allow-insecure-http", action="store_true")
+    # Front-loaded run choices fixed at `plan confirm`: the ASR mode and the
+    # visual-text toggle a fresh run needs before its stage DAG can be built.
+    plan.add_argument("--asr-mode", choices=tuple(mode.value for mode in AsrMode))
+    plan.add_argument("--visual-text", choices=("on", "off"))
     plan.add_argument("--json", action="store_true")
     subtitles = subcommands.add_parser("subtitles")
     subtitles.add_argument("plan_id")
@@ -427,6 +441,40 @@ def main(argv: Sequence[str] | None = None) -> int:
     raise AssertionError(f"Unhandled command: {arguments.command}")
 
 
+def _confirm_run_choices(arguments: argparse.Namespace) -> RunPlanChoices | None:
+    """Build the front-loaded run choices from ``plan confirm`` flags, if any.
+
+    Returns ``None`` when neither ``--asr-mode`` nor ``--visual-text`` is given, so a
+    report that already carries its choices confirms unchanged; otherwise the flags
+    become collection-scope run choices validated by ``confirm_run_plan``.
+    """
+
+    if arguments.asr_mode is None and arguments.visual_text is None:
+        return None
+    choices: list[RunChoice] = []
+    if arguments.asr_mode is not None:
+        choices.append(
+            RunChoice(
+                STAGE_RUN,
+                KEY_ASR_MODE,
+                COLLECTION_SCOPE,
+                arguments.asr_mode,
+                ChoiceProvenance.USER_CHOSEN,
+            )
+        )
+    if arguments.visual_text is not None:
+        choices.append(
+            RunChoice(
+                STAGE_RUN,
+                KEY_VISUAL_TEXT_ENABLED,
+                COLLECTION_SCOPE,
+                "true" if arguments.visual_text == "on" else "false",
+                ChoiceProvenance.USER_CHOSEN,
+            )
+        )
+    return RunPlanChoices.build(tuple(choices))
+
+
 def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
     project_root = _project_root()
     plans_root = project_root / "plans"
@@ -438,7 +486,9 @@ def _handle_plan(arguments: argparse.Namespace) -> dict[str, object]:
         if not arguments.report_id:
             raise PlanningError("report_id_missing", "vcp plan confirm requires a report ID.")
         report = load_plan_report(plans_root / "reports" / arguments.report_id / "plan-report.json")
-        plan = confirm_run_plan(report, project_root, plans_root)
+        plan = confirm_run_plan(
+            report, project_root, plans_root, run_choices=_confirm_run_choices(arguments)
+        )
         return {"status": "confirmed", "plan": plan.as_json()}
     if arguments.collect:
         if arguments.target:
@@ -522,7 +572,11 @@ def _plan_local_file(source_path: Path, project_root: Path, plans_root: Path) ->
         )
     except SourceIntakeError as error:
         return _blocked_local_report(
-            error, planned_increment, plans_root, configuration_fingerprint, project_root=project_root
+            error,
+            planned_increment,
+            plans_root,
+            configuration_fingerprint,
+            project_root=project_root,
         )
     return _plan_source_artifacts(
         (artifact,),
