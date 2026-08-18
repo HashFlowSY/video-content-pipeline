@@ -253,6 +253,31 @@ def test_executor_chains_report_ids_across_stages(tmp_path: Path) -> None:
     assert asr_call[1][2] == "aud-1"
 
 
+def test_full_asr_run_grants_the_resource_confirmation_up_front(tmp_path: Path) -> None:
+    # An orchestrated full-ASR run cannot resume a terminal transcription decision
+    # pause (INCOMPLETE has no outgoing transitions), so the composition grants the
+    # Full-ASR resource confirmation up front: launching a maintainer-confirmed plan
+    # whose asr_mode is explicitly full_asr is the before-execution confirmation the
+    # gate requires. A subtitle-first run grants nothing.
+    from video_content_pipeline.transcription import FULL_ASR_RESOURCE_CONFIRMATION_DECISION
+
+    full_asr = _plan(mode=AsrMode.FULL_ASR)
+    recorder = _Recorder()
+    composition = build_run_composition(_layout(tmp_path), full_asr, functions=recorder.functions())
+    _run_executor(composition, full_asr)
+    asr_call = next(c for c in recorder.calls if c[0] == "transcribe")
+    assert asr_call[2]["resumption_decision"] == FULL_ASR_RESOURCE_CONFIRMATION_DECISION
+
+    subtitle_first = _plan(mode=AsrMode.SUBTITLE_FIRST)
+    recorder2 = _Recorder()
+    composition2 = build_run_composition(
+        _layout(tmp_path / "b"), subtitle_first, functions=recorder2.functions()
+    )
+    _run_executor(composition2, subtitle_first)
+    asr_call2 = next(c for c in recorder2.calls if c[0] == "transcribe")
+    assert asr_call2[2]["resumption_decision"] is None
+
+
 def test_executor_translates_front_loaded_choices(tmp_path: Path) -> None:
     plan = _plan(
         extra=(

@@ -73,6 +73,7 @@ from video_content_pipeline.real_engine_adapter import RealEngineSelection
 from video_content_pipeline.run_choices import (
     COLLECTION_SCOPE,
     AsrMode,
+    RunPlanChoices,
     audio_analysis_stage_parameters,
     enhancement_stage_parameters,
     subtitle_stage_parameters,
@@ -104,7 +105,11 @@ from video_content_pipeline.subtitle_pipeline import (
     resume_subtitles,
 )
 from video_content_pipeline.text_analysis import analyze_text
-from video_content_pipeline.transcription import subtitle_unavailable_parts, transcribe
+from video_content_pipeline.transcription import (
+    FULL_ASR_RESOURCE_CONFIRMATION_DECISION,
+    subtitle_unavailable_parts,
+    transcribe,
+)
 from video_content_pipeline.visual_text_command import run_visual_text
 
 #: Stage return statuses that mean the stage produced usable output.
@@ -496,10 +501,30 @@ def _invoke_transcription(state: _CompositionState) -> StageResult:
         audio_id,
         state.layout.project_root,
         upgrade_all=params.upgrade_all,
+        resumption_decision=_full_asr_resource_confirmation(state.plan.run_choices),
         real_engines=_real_engines(state, StageName.TRANSCRIPTION),
     )
     status, report = _split(result)
     return _record(state, StageName.TRANSCRIPTION, map_stage_return(status, report))
+
+
+def _full_asr_resource_confirmation(run_choices: RunPlanChoices) -> str | None:
+    """The orchestrated run's Full-ASR resource confirmation, granted up front.
+
+    A subtitle-unavailable full-ASR attempt pauses transcription for a maintainer
+    resource confirmation. An orchestrated ``vcp run`` cannot resume that pause --
+    a decision pause parks the run at ``incomplete``, a terminal status with no
+    outgoing transitions -- so the confirmation must be given before execution. In
+    orchestration it already is: launching a maintainer-confirmed plan whose
+    ``asr_mode`` is explicitly ``full_asr`` (a front-loaded run choice acknowledged
+    against the plan's own resource evidence) is that confirmation, so the
+    composition passes it through rather than parking an unrecoverable run. The
+    independent 12 GiB resource-envelope gate still fails closed on its own.
+    """
+
+    if run_choices.asr_mode() is AsrMode.FULL_ASR:
+        return FULL_ASR_RESOURCE_CONFIRMATION_DECISION
+    return None
 
 
 def _invoke_enhancement(state: _CompositionState) -> StageResult:
