@@ -95,7 +95,12 @@
       "notes": "8-bit first per plan \u00a72.2; 4-bit is the recorded over-envelope fallback. A missing 8-bit variant resolves in this model's download-plan confirmation, never silently.",
       "total_size_bytes": 2467859030,
       "local_path": "models/mlx-community/Qwen3-ASR-1.7B-8bit/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/",
-      "acquisition_method": "hf download --revision"
+      "acquisition_method": "hf download --revision",
+      "resource_estimate": {
+        "high_bytes": 5462840040,
+        "basis": "device-baselines:apple-m1",
+        "confidence": "measured"
+      }
     },
     {
       "candidate_id": "whisper-large-v3",
@@ -244,7 +249,12 @@
       "notes": "Shares the mlx-audio runtime with asr_primary. Aligner has a hard input window; VAD-derived <=5-minute chunking (ticket 06) is the shared upstream.",
       "total_size_bytes": 1276475979,
       "local_path": "models/mlx-community/Qwen3-ForcedAligner-0.6B-8bit/0e1a68e91d815300c7c9754b2a7639378b23db15/",
-      "acquisition_method": "hf download --revision"
+      "acquisition_method": "hf download --revision",
+      "resource_estimate": {
+        "high_bytes": 4289933349,
+        "basis": "device-baselines:apple-m1",
+        "confidence": "measured"
+      }
     },
     {
       "candidate_id": "silero-vad",
@@ -287,7 +297,12 @@
       "notes": "Vendored .onnx carried directly (pinned by v6.2.1 git tag + file sha256), inferred through onnxruntime; the silero-vad pip package is NOT installed, keeping the whole torch stack out. onnxruntime is shared with diarization and ocr_primary.",
       "total_size_bytes": 2327524,
       "local_path": "models/snakers4/silero-vad/v6.2.1/",
-      "acquisition_method": "pinned raw.githubusercontent.com URL (git tag v6.2.1)"
+      "acquisition_method": "pinned raw.githubusercontent.com URL (git tag v6.2.1)",
+      "resource_estimate": {
+        "high_bytes": 124551168,
+        "basis": "device-baselines:apple-m1",
+        "confidence": "measured"
+      }
     },
     {
       "candidate_id": "sherpa-onnx-pyannote-segmentation-3-0",
@@ -379,7 +394,12 @@
       "notes": "First of two diarization assets that fill the recorded Diarization capability vacancy. Speaker labels stay anonymous and Part-local (no true names). Pairs with 3dspeaker-campplus-zh-en-advanced. Excludes credential-gated pyannote hub access; runs via onnxruntime under sherpa-onnx.",
       "total_size_bytes": 7566812,
       "local_path": "models/k2-fsa/sherpa-onnx-pyannote-segmentation-3-0/speaker-segmentation-models/",
-      "acquisition_method": "pinned GitHub release asset URL"
+      "acquisition_method": "pinned GitHub release asset URL",
+      "resource_estimate": {
+        "high_bytes": 348241920,
+        "basis": "device-baselines:apple-m1",
+        "confidence": "measured"
+      }
     },
     {
       "candidate_id": "3dspeaker-campplus-zh-en-advanced",
@@ -587,7 +607,12 @@
       "notes": "8-bit first per plan \u00a72.2; the research-recommended 4-bit (2.26 GB) is the recorded fallback. A missing 8-bit variant resolves in this model's download-plan confirmation, never silently. Runs with deterministic sampling (mlx-lm --temp/--seed) and bounded KV memory (ticket 10).",
       "total_size_bytes": 4290108772,
       "local_path": "models/mlx-community/Qwen3-4B-Instruct-2507-8bit/0e42af58449718de7931ee04f28191fbe6c43a56/",
-      "acquisition_method": "hf download --revision"
+      "acquisition_method": "hf download --revision",
+      "resource_estimate": {
+        "high_bytes": 5051028740,
+        "basis": "device-baselines:apple-m1",
+        "confidence": "measured"
+      }
     }
   ],
   "acquired_count": 8

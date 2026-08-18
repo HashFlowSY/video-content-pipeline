@@ -72,9 +72,17 @@ def test_diarization_vacancy_is_filled_with_two_acquired_candidates() -> None:
         "sherpa-onnx-pyannote-segmentation-3-0",
         "3dspeaker-campplus-zh-en-advanced",
     ]
+    states = {}
     for candidate in grouped["diarization"]:
         assert candidate["verification_status"] == "acquired"
-        assert assess_candidate(candidate, "diarization", REPO_ROOT).state != "eligible"
+        states[candidate["candidate_id"]] = assess_candidate(
+            candidate, "diarization", REPO_ROOT
+        ).state
+    # The segmentation candidate is promoted with its measured resource estimate
+    # (Phase 12 ticket 08); the embedding candidate has no device baseline and stays
+    # unsupported (its footprint is inside the segmentation candidate's measured peak).
+    assert states["sherpa-onnx-pyannote-segmentation-3-0"] == "eligible"
+    assert states["3dspeaker-campplus-zh-en-advanced"] != "eligible"
 
 
 def test_text_semantics_candidate_is_registered_and_acquired() -> None:
@@ -86,7 +94,8 @@ def test_text_semantics_candidate_is_registered_and_acquired() -> None:
     candidate = grouped["text_semantics"][0]
     assert candidate["quantization"] == "8bit"
     assert candidate["verification_status"] == "acquired"
-    assert assess_candidate(candidate, "text_semantics", REPO_ROOT).state != "eligible"
+    # Promoted with a measured resource estimate (Phase 12 ticket 08).
+    assert assess_candidate(candidate, "text_semantics", REPO_ROOT).state == "eligible"
 
 
 def test_rapidocr_is_acquired_from_the_pinned_wheel() -> None:
@@ -129,8 +138,16 @@ def test_every_candidate_is_acquired_and_carries_provenance() -> None:
         auth = candidate["first_download_authorization"]
         assert auth["scope"] == "model_download"
         assert auth["separate_from_media_authorization"] is True
-        # Acquisition does not, by itself, make a candidate runtime-eligible.
-        assert assess_candidate(candidate, capability, REPO_ROOT).state != "eligible"
+        # Acquisition does not, by itself, make a candidate runtime-eligible: the
+        # separate maintainer-authorized promotion (Phase 12 ticket 08) that adds a
+        # measured resource_estimate is what flips a candidate to eligible. The five
+        # wired, device-baselined capabilities carry it; asr_review, the diarization
+        # embedding, and OCR do not yet.
+        state = assess_candidate(candidate, capability, REPO_ROOT).state
+        if "resource_estimate" in candidate:
+            assert state == "eligible"
+        else:
+            assert state != "eligible"
 
 
 def test_no_candidate_is_credential_gated() -> None:
