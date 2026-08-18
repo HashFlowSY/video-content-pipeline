@@ -44,11 +44,27 @@ from typing import Any
 
 from video_content_pipeline.capabilities import load_registry_document
 from video_content_pipeline.model_acquisition import file_sha256, manifest_asset_sha256
+from video_content_pipeline.model_runtime import EngineRequest, run_engine_subprocess
 from video_content_pipeline.timecode import ExactTime
 from video_content_pipeline.visual_text_contracts import ProjectedOcrItem
 
 CAPABILITY = "ocr_primary"
 CANDIDATE_ID = "rapidocr"
+
+#: The production OCR child argv and its per-run subprocess budget. The whole
+#: analyze_frames_ocr sequence runs in the child so its peak is an honest
+#: fresh-process figure comparable to the device baselines.
+OCR_CHILD_MODULE = "video_content_pipeline.ocr_child"
+DEFAULT_OCR_TIMEOUT_SECONDS = 600.0
+
+
+def default_ocr_command() -> list[str]:
+    """The production child argv: this interpreter running the OCR child module."""
+
+    import sys
+
+    return [sys.executable, "-m", OCR_CHILD_MODULE]
+
 
 #: The three bundled model roles RapidOCR loads (detection, classification,
 #: recognition); their exact filenames come from the registry entry's
@@ -572,3 +588,67 @@ __all__ = [
     "resolve_ocr_candidate",
     "verify_bundled_models",
 ]
+
+
+# --- isolated (subprocess) analysis -------------------------------------------
+
+
+@dataclass(frozen=True)
+class IsolatedOcrResult:
+    """One OCR run's projected-item evidence measured in its own child process.
+
+    ``result`` is the engine's ``as_json`` output (projected items + bound
+    provenance) moved verbatim across the process boundary; the real visual-text
+    bridge reconstructs items where its gate needs them. ``peak_memory_bytes`` is the
+    child's fresh-process high-water mark, comparable to the device baselines.
+    """
+
+    result: Mapping[str, object]
+    peak_memory_bytes: int
+
+
+def run_isolated_ocr(
+    project_root: Path,
+    frames: Sequence[OcrFrame],
+    *,
+    command: Sequence[str] | None = None,
+    timeout_seconds: float = DEFAULT_OCR_TIMEOUT_SECONDS,
+) -> IsolatedOcrResult:
+    """Run the real RapidOCR in its own child and return item evidence + peak.
+
+    The whole ``analyze_frames_ocr`` sequence runs in the child
+    (:mod:`video_content_pipeline.ocr_child`) so the models load in a fresh process
+    whose peak is honest. A malformed child response is a typed ``ocr_output_invalid``
+    failure; subprocess crashes/timeouts surface as ``ModelRuntimeError``.
+    """
+
+    request = EngineRequest(
+        model_path=str(project_root),
+        task={
+            "frames": [
+                {
+                    "part_id": frame.part_id,
+                    "visual_page_id": frame.visual_page_id,
+                    "pts": {
+                        "numerator": frame.pts.numerator,
+                        "denominator": frame.pts.denominator,
+                    },
+                    "image_path": str(frame.image_path),
+                }
+                for frame in frames
+            ]
+        },
+    )
+    result = run_engine_subprocess(
+        list(command) if command is not None else default_ocr_command(),
+        request,
+        timeout_seconds=timeout_seconds,
+    )
+    payload = result.result
+    if not isinstance(payload.get("items"), list) or not isinstance(
+        payload.get("asset_sha256"), str
+    ):
+        raise OcrEngineError(
+            "ocr_output_invalid", "The OCR child response is missing required fields."
+        )
+    return IsolatedOcrResult(result=payload, peak_memory_bytes=result.peak_memory_bytes)
