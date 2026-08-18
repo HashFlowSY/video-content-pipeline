@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -59,7 +59,7 @@ from video_content_pipeline.subtitle_pipeline import (
 # The provider-neutral ASR capability pair is defined once in the lower-level
 # transcription-contracts module (its projection and fixture loaders validate
 # against it) and re-exported here for the ticket-01/02 capability evaluation.
-from video_content_pipeline.transcription_contracts import ASR_CAPABILITIES
+from video_content_pipeline.transcription_contracts import ASR_CAPABILITIES, ProjectedAsrCue
 
 
 class TranscriptionError(ValueError):
@@ -387,6 +387,12 @@ class TranscriptionReport:
     independent_review: IndependentReviewResolution | None
     required_decision: dict[str, object] | None
     diagnostics: tuple[PlanningDiagnostic, ...]
+    # Populated only by a ``complete`` real run (Phase 12 ticket 08): the per-Part
+    # published ASR subtitle candidates the downstream stages consume, and the
+    # asr_primary stage-execution record with its measured peak. Empty on every
+    # pre-execution recorded state, so the offline path is unchanged.
+    transcript: tuple[dict[str, object], ...] = ()
+    stage_execution: tuple[dict[str, object], ...] = ()
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -436,6 +442,8 @@ class TranscriptionReport:
             ),
             "required_decision": self.required_decision,
             "diagnostics": [diagnostic.as_json() for diagnostic in self.diagnostics],
+            "transcript": list(self.transcript),
+            "stage_execution": list(self.stage_execution),
             "guarantees": {
                 "model_acquisition": "not_attempted",
                 "model_execution": "not_attempted",
@@ -764,6 +772,48 @@ def transcription_resource_envelope_pause(
                     ),
                 }
     return None
+
+
+def publish_asr_subtitle_candidate(
+    candidate_path: Path, cues: Sequence[ProjectedAsrCue]
+) -> tuple[InputEvidence, int]:
+    """Publish a full-ASR transcript as the subtitle source-candidate downstream reads.
+
+    Writes the exact ``source-candidate.json`` shape the enhancement / text-analysis
+    / visual-text stages already consume (``schema_version`` 1; each cue a unique
+    ``source_ordinal``, ``text``, and ``raw_pts_interval``), tagged ``asr``
+    provenance so a downstream cue's origin is never confused with an embedded
+    subtitle track. The record is written once and returned as hash-pinned evidence
+    with its cue count.
+    """
+
+    document = {
+        "schema_version": 1,
+        "provenance": "asr",
+        "cues": [
+            {
+                "source_ordinal": cue.ordinal,
+                "text": cue.text,
+                "raw_pts_interval": {
+                    "start": {
+                        "numerator": cue.interval.start.numerator,
+                        "denominator": cue.interval.start.denominator,
+                    },
+                    "end": {
+                        "numerator": cue.interval.end.numerator,
+                        "denominator": cue.interval.end.denominator,
+                    },
+                },
+            }
+            for cue in cues
+        ],
+    }
+    write_json_once(
+        candidate_path,
+        document,
+        conflict_error=lambda message: TranscriptionError("transcription_report_invalid", message),
+    )
+    return input_evidence(candidate_path), len(cues)
 
 
 def _source_artifact_bindings(plan: RunPlan) -> tuple[SourceArtifactBinding, ...]:
