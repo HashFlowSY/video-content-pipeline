@@ -31,8 +31,8 @@ from video_content_pipeline.text_generation import LoadedPart
 from video_content_pipeline.text_semantics_engine import (
     Qwen3TextSemanticsCalibration,
     TextSemanticsEngineError,
+    _build_local_id_maps,
     _decode_generation_output,
-    _technical_blocks,
     generate_semantics,
     generate_text_semantics,
     load_text_semantics_asset,
@@ -234,7 +234,9 @@ def test_prompt_render_is_deterministic_and_carries_cue_identities() -> None:
     second = render_text_semantics_prompt(contracts, parts, CUE_TEXTS)
     assert first == second
     assert PROMPT_VERSION in first
-    assert CUE_A in first and CUE_B in first
+    # Cues render under the token-efficient Part-local alias, not the full cue id.
+    assert "P0:0" in first and "P0:1" in first
+    assert CUE_A not in first and CUE_B not in first
 
 
 def test_prompt_render_carries_cue_text_and_output_schema() -> None:
@@ -252,8 +254,8 @@ def test_prompt_render_omits_text_for_uncovered_cue() -> None:
     # A cue with no provided text renders its identity with an empty text tail,
     # never an exception -- the caller owns cue-text completeness.
     prompt = render_text_semantics_prompt(_contracts(), _parts(), {CUE_A: "只有第一条"})
-    assert f"- {CUE_A}: 只有第一条\n" in prompt
-    assert f"- {CUE_B}: \n" in prompt
+    assert "- P0:0: 只有第一条\n" in prompt
+    assert "- P0:1: \n" in prompt
 
 
 # --- Model runtime subprocess seam (stub executable, no model) ----------------
@@ -497,95 +499,68 @@ def test_generate_requires_calibration(tmp_path: Path) -> None:
     assert error.value.reason == "text_semantics_calibration_required"
 
 
-# --- technical-block windowing (Phase 12 ticket 08) ---------------------------
+# --- token-efficient cue ids + context-budget gate (Phase 12 ticket 08) -------
 
 
-def test_technical_blocks_keeps_a_short_part_as_one_block() -> None:
-    # A Part whose whole inventory fits the budget renders as exactly one block, so
-    # short sources make one model call and behave as the pre-blocking path did.
-    cue_ids = (CUE_A, CUE_B)
-    blocks = _technical_blocks(cue_ids, CUE_TEXTS, max_chars=3500, overlap=1)
-    assert blocks == (cue_ids,)
-    assert _technical_blocks((), CUE_TEXTS) == ()
-
-
-def test_technical_blocks_splits_a_long_part_into_overlapping_windows() -> None:
-    cue_ids = tuple(f"{PART_ID}:{TRACK_ID}:{i}" for i in range(4))
-    texts = {cue_id: "字" * 1500 for cue_id in cue_ids}
-    blocks = _technical_blocks(cue_ids, texts, max_chars=3500, overlap=1)
-    # 1500-char cues, 3500 budget -> 2 cues per block; overlap 1 shares a boundary.
-    assert blocks == (
-        (cue_ids[0], cue_ids[1]),
-        (cue_ids[1], cue_ids[2]),
-        (cue_ids[2], cue_ids[3]),
-    )
-    # Every cue appears in at least one block; consecutive blocks overlap by one.
-    covered = {cue for block in blocks for cue in block}
-    assert covered == set(cue_ids)
-
-
-def test_technical_blocks_never_drops_a_cue_larger_than_the_budget() -> None:
-    cue_ids = (CUE_A, CUE_B)
-    texts = {CUE_A: "字" * 9000, CUE_B: "短"}
-    blocks = _technical_blocks(cue_ids, texts, max_chars=3500, overlap=1)
-    # The over-budget cue forms its own block rather than being dropped or looping.
-    assert blocks[0] == (CUE_A,)
-    assert CUE_B in {cue for block in blocks for cue in block}
-
-
-def test_long_part_is_windowed_into_valid_segments_not_model_output_invalid(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The regression run #1 surfaced: a long transcript rendered in one call
-    # overflows the model window and returns free prose (model_output_invalid).
-    # Windowed into technical blocks, each block's prompt fits and projects, and the
-    # merged proposals adjudicate into formal segments instead.
-    asset_sha256 = _install_valid_asset(tmp_path)
-    _write_calibration(tmp_path, _calibration_document(asset_sha256))
-    cue_ids = tuple(f"{PART_ID}:{TRACK_ID}:{i}" for i in range(4))
-    cue_texts = {cue_id: "字" * 1500 for cue_id in cue_ids}
-    part = (LoadedPart(part_id=PART_ID, track_id=TRACK_ID, cue_ids=cue_ids),)
-
-    calls: list[tuple[str, ...]] = []
-
-    def fake_generate_semantics(model_path, prompt, calibration, prompt_version, **kwargs):
-        # Each rendered cue line is "- <cue_id>: <text>"; the cue id has no spaces.
-        block_cues = tuple(
-            line[2:].split(": ", 1)[0]
-            for line in prompt.splitlines()
-            if line.startswith(f"- {PART_ID}:{TRACK_ID}:")
-        )
-        calls.append(block_cues)
-        envelope = {
+def _valid_envelope(segments: list[dict[str, object]]) -> str:
+    return json.dumps(
+        {
             "schema_version": 1,
             "output_schema_version": "phase-06-output-schema-v1",
             "adapter_identity": "phase-06-controlled-text-adapter-v1",
             "result": {
-                "parts": [
-                    {
-                        "part_id": PART_ID,
-                        "segments": [
-                            {
-                                "boundary": {
-                                    "start_cue_id": block_cues[0],
-                                    "end_cue_id": block_cues[-1],
-                                },
-                                "content": {
-                                    "title": {"text": "标题", "cue_ids": [block_cues[0]]},
-                                    "details": [{"text": "细节", "cue_ids": [block_cues[0]]}],
-                                },
-                            }
-                        ],
-                        "chapters": [],
-                    }
-                ],
+                "parts": [{"part_id": "P0", "segments": segments, "chapters": []}],
                 "collection_summary": None,
             },
         }
-        return json.dumps(envelope), 4242
+    )
+
+
+def test_build_local_id_maps_aliases_parts_and_cues_by_position() -> None:
+    parts = (LoadedPart(part_id=PART_ID, track_id=TRACK_ID, cue_ids=(CUE_A, CUE_B)),)
+    cue_map, part_map = _build_local_id_maps(parts)
+    assert part_map == {"P0": PART_ID}
+    assert cue_map == {"P0:0": CUE_A, "P0:1": CUE_B}
+
+
+def test_prompt_renders_token_efficient_aliases_not_the_full_source_id() -> None:
+    # The 64-hex source id must not be repeated on every cue line: cues render under
+    # the Part-local P{index}:{position} alias while the verbatim text is unchanged.
+    source_id = "s" * 64
+    cue = f"{source_id}:{TRACK_ID}:0"
+    part = (LoadedPart(part_id=source_id, track_id=TRACK_ID, cue_ids=(cue,)),)
+    prompt = render_text_semantics_prompt(_contracts(), part, {cue: "第一条字幕文本"})
+    assert "- P0:0: 第一条字幕文本" in prompt
+    assert source_id not in prompt  # the long source id never appears in the prompt
+
+
+def test_real_run_remaps_short_aliases_back_to_full_cue_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The model cites the short aliases it sees; the engine must remap them back to
+    # the full canonical cue ids before adjudication, so no alias leaks into segments.
+    asset_sha256 = _install_valid_asset(tmp_path)
+    _write_calibration(tmp_path, _calibration_document(asset_sha256))
+    part = (LoadedPart(part_id=PART_ID, track_id=TRACK_ID, cue_ids=(CUE_A, CUE_B)),)
+
+    def fake_generate_semantics(model_path, prompt, calibration, prompt_version, **kwargs):
+        assert "- P0:0:" in prompt and "- P0:1:" in prompt  # prompt carries the aliases
+        return (
+            _valid_envelope(
+                [
+                    {
+                        "boundary": {"start_cue_id": "P0:0", "end_cue_id": "P0:1"},
+                        "content": {
+                            "title": {"text": "标题", "cue_ids": ["P0:0"]},
+                            "details": [{"text": "细节", "cue_ids": ["P0:1"]}],
+                        },
+                    }
+                ]
+            ),
+            4242,
+        )
 
     monkeypatch.setattr(text_semantics_engine, "generate_semantics", fake_generate_semantics)
-
     result = generate_text_semantics(
         tmp_path,
         tmp_path / "work",
@@ -593,22 +568,93 @@ def test_long_part_is_windowed_into_valid_segments_not_model_output_invalid(
         source_id=PART_ID,
         stream_index=0,
         available=part,
-        cue_texts=cue_texts,
+        cue_texts=CUE_TEXTS,
         command=["unused"],
         timeout_seconds=30,
     )
+    assert result.status in {"complete", "partial"}
+    assert len(result.segments) == 1
+    # The verified segment carries the FULL canonical cue ids, never a P0:* alias.
+    assert result.segments[0].cue_ids == (CUE_A, CUE_B)
+    owned = [cid for seg in result.segments for cid in seg.cue_ids]
+    assert not any(cid.startswith("P0") for cid in owned)
 
-    # Blocking engaged: more than one model call, each over a bounded cue window.
-    assert len(calls) > 1
-    assert all(len(block) <= 2 for block in calls)
-    # The long Part projected and adjudicated -- never the run-#1 prose failure.
-    assert result.status != "model_output_invalid"
-    assert result.segments != ()
-    # Every cue is owned exactly once across the adjudicated segments.
-    owned = [cue for segment in result.segments for cue in segment.cue_ids]
-    assert sorted(owned) == sorted(cue_ids)
-    # Peak is the heaviest block's measured peak.
-    assert result.peak_memory_bytes == 4242
+
+def test_context_budget_gate_stops_before_loading_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A prompt that would not fit the calibrated window stops with a typed reason
+    # BEFORE the model is invoked, so a maintainer decides whether to raise the window.
+    asset_sha256 = _install_valid_asset(tmp_path)
+    _write_calibration(tmp_path, _calibration_document(asset_sha256))
+    part = (LoadedPart(part_id=PART_ID, track_id=TRACK_ID, cue_ids=(CUE_A, CUE_B)),)
+
+    calls = {"n": 0}
+
+    def fake_generate_semantics(*args, **kwargs):
+        calls["n"] += 1
+        return "{}", 1
+
+    monkeypatch.setattr(text_semantics_engine, "generate_semantics", fake_generate_semantics)
+    monkeypatch.setattr(text_semantics_engine, "_count_prompt_tokens", lambda *a: 10_000_000)
+
+    with pytest.raises(TextSemanticsEngineError) as error:
+        generate_text_semantics(
+            tmp_path,
+            tmp_path / "work",
+            _contracts(),
+            source_id=PART_ID,
+            stream_index=0,
+            available=part,
+            cue_texts=CUE_TEXTS,
+            command=["unused"],
+            timeout_seconds=30,
+        )
+    assert error.value.reason == "text_semantics_context_budget_exceeded"
+    assert calls["n"] == 0  # the model was never invoked
+
+
+def test_context_budget_gate_proceeds_when_the_prompt_fits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asset_sha256 = _install_valid_asset(tmp_path)
+    _write_calibration(tmp_path, _calibration_document(asset_sha256))
+    part = (LoadedPart(part_id=PART_ID, track_id=TRACK_ID, cue_ids=(CUE_A, CUE_B)),)
+    monkeypatch.setattr(text_semantics_engine, "_count_prompt_tokens", lambda *a: 10)
+
+    calls = {"n": 0}
+
+    def fake_generate_semantics(model_path, prompt, calibration, prompt_version, **kwargs):
+        calls["n"] += 1
+        return (
+            _valid_envelope(
+                [
+                    {
+                        "boundary": {"start_cue_id": "P0:0", "end_cue_id": "P0:1"},
+                        "content": {
+                            "title": {"text": "标题", "cue_ids": ["P0:0"]},
+                            "details": [{"text": "细节", "cue_ids": ["P0:0"]}],
+                        },
+                    }
+                ]
+            ),
+            5,
+        )
+
+    monkeypatch.setattr(text_semantics_engine, "generate_semantics", fake_generate_semantics)
+    result = generate_text_semantics(
+        tmp_path,
+        tmp_path / "work",
+        _contracts(),
+        source_id=PART_ID,
+        stream_index=0,
+        available=part,
+        cue_texts=CUE_TEXTS,
+        command=["unused"],
+        timeout_seconds=30,
+    )
+    assert calls["n"] == 1
+    assert result.status in {"complete", "partial"}
 
 
 def test_decode_generation_output_strips_markdown_code_fence() -> None:

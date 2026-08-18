@@ -127,3 +127,9 @@ follow_imports = "skip"
 [[tool.mypy.overrides]]
 module = ["rapidocr", "rapidocr.*", "cv2", "cv2.*"]
 ignore_missing_imports = true
+
+# tokenizers ships no py.typed; the text-semantics engine (Phase 12 ticket 08) uses
+# it only for a best-effort pre-flight prompt token count before the model loads.
+[[tool.mypy.overrides]]
+module = ["tokenizers", "tokenizers.*"]
+ignore_missing_imports = true

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "capability": "text_semantics",
   "candidate_id": "qwen3-4b-instruct-2507-8bit",
-  "calibration_version": "qwen3-4b-instruct-2507-8bit-prompt-v2-real-sample-confirmed-2026-08-17",
+  "calibration_version": "qwen3-4b-instruct-2507-8bit-prompt-v3-2026-08-18",
   "model_identity": {
     "model_asset_sha256": "2a1b7ba81037c15882e233f7a1e40dd41251d51fb4afac48a164a3cc61e479e2",
     "backend": "mlx-lm",
@@ -12,7 +12,7 @@
     "rules_fingerprint": "text-analysis-rules-v1"
   },
   "prompt_template_version": "phase-06-prompt-template-v2",
-  "qualification_scope": "real_sample_confirmed",
+  "qualification_scope": "pending_reconfirmation",
   "real_sample_qualification": {
     "confirmed_at": "2026-08-17",
     "confirmed_by": "maintainer",
@@ -25,7 +25,7 @@
       "docs/phase-11-prototypes/text_semantics/f6fd0cd7-zh.record.json",
       "docs/phase-11-prototypes/text_semantics/104eeec2-en.record.json"
     ],
-    "note": "Confirmed on real zh+en Voice of America material under prompt-template v2 (Phase 11 ticket 15), which renders each cue's verbatim recognized text plus the exact output envelope. Both clips project into verified, cue-cited SemanticSegments in Chinese prose (zh: 9 finer cues -> one segment titled 江歌案的舆论引爆与法律争议, 6 cited details; en: 11 finer cues -> one segment titled 中国'皇亲国戚'的财富崛起与社会不平等, 8 cited details); the v1 prompt returned model_output_invalid (a cue-id echo) on both. Recorded observation for Phase 12: the model groups a single-topic clip into one segment; multi-segment behaviour is not yet exercised and remains to be tuned against human reference.",
+    "note": "The 2026-08-17 confirmation was recorded for the prior parameters and cue-id rendering (window/output bounds max_kv_size 8192 / max_tokens 4096, cue ids rendered as the full {part_id}:{track_id}:{ordinal}). For this v3 revision the context window was raised to 32768 and the output budget to 16384 so the whole run-1 transcript fits a single whole-transcript call (the broken overlapping technical-block windowing was removed), and the cue ids shown in the prompt were switched to a token-efficient Part-local form (P{index}:{position}) that is remapped back to the full canonical cue ids before adjudication. Those changes alter the prompt the model sees, so the prior real-sample confirmation no longer applies: real-sample semantic-quality re-confirmation by the maintainer on real zh+en material is pending. Recorded observation carried forward from Phase 11 ticket 15: the model groups a single-topic clip into one segment; multi-segment behaviour is not yet exercised and remains to be tuned against human reference.",
     "peak_memory_bytes": {
       "f6fd0cd7-zh": 4972155456,
       "104eeec2-en": 5051028740
@@ -34,8 +34,8 @@
   "decoding": {
     "temperature": 0.0,
     "seed": 0,
-    "max_tokens": 4096,
-    "max_kv_size": 8192
+    "max_tokens": 16384,
+    "max_kv_size": 32768
   },
-  "notes": "Model-specific text-semantics decoding calibration profile (ADR 0056) for the Qwen3-4B-Instruct-2507-8bit engine executed through the Model runtime subprocess (ADR 0055) with mlx-lm. model_identity binds the exact pinned model asset SHA-256, the mlx-lm backend and version, the 8-bit precision, the apple-m1 device class, and the text-analysis rules fingerprint; any bound-identity change invalidates the profile. prompt_template_version binds the versioned prompt template the profile was calibrated for, so a prompt revision invalidates the profile. This profile was recalibrated for prompt-template v2 (Phase 11 ticket 15), which renders each cue's verbatim recognized text and the exact output envelope into the prompt; the ticket-10 v1 prompt carried only cue identities and produced no segmentable content. decoding fixes the deterministic sampling controls: temperature 0.0 is decoded as greedy argmax and seed makes the (already deterministic) run reproducible, max_tokens bounds the generation length, and max_kv_size bounds the KV cache so peak memory stays within the 12 GiB envelope on this device. qualification_scope is 'real_sample_confirmed': the maintainer confirmed the Chinese/English semantic quality on real Voice of America zh+en material under prompt-template v2 (Phase 11 ticket 15); the real_sample_qualification block records that confirmation and its evidence. Model-proposed boundaries and content are always validated against the revalidated cue evidence by the unchanged Text-model output projection and adjudication, so this profile never makes unproven model output authoritative."
+  "notes": "Model-specific text-semantics decoding calibration profile (ADR 0056) for the Qwen3-4B-Instruct-2507-8bit engine executed through the Model runtime subprocess (ADR 0055) with mlx-lm. model_identity binds the exact pinned model asset SHA-256, the mlx-lm backend and version, the 8-bit precision, the apple-m1 device class, and the text-analysis rules fingerprint; any bound-identity change invalidates the profile. prompt_template_version binds the versioned prompt template the profile was calibrated for, so a prompt revision invalidates the profile. This profile was recalibrated for prompt-template v2 (Phase 11 ticket 15), which renders each cue's verbatim recognized text and the exact output envelope into the prompt; the ticket-10 v1 prompt carried only cue identities and produced no segmentable content. decoding fixes the deterministic sampling controls: temperature 0.0 is decoded as greedy argmax and seed makes the (already deterministic) run reproducible, max_tokens bounds the generation length, and max_kv_size bounds the KV cache. This v3 revision raises the context window to 32768 and the output budget to 16384: Qwen3-4B natively supports a 262144-token context, so the whole run-1 transcript now fits a single whole-transcript call and the previous overlapping technical-block windowing (which made segments un-tileable and forced the conservative fallback) has been removed; a pre-flight token-budget gate rejects a prompt that would not fit before any model is loaded. The cue ids shown in the prompt were switched to a token-efficient Part-local form (P{index}:{position}) that the engine remaps back to the full canonical {part_id}:{track_id}:{ordinal} identities before adjudication, so the 64-hex source id is no longer repeated on every cue line. qualification_scope is 'pending_reconfirmation': the maintainer's earlier confirmation was recorded for the previous window/output bounds and the full cue-id rendering, so it no longer applies to this revision; real-sample semantic-quality re-confirmation by the maintainer is pending. Model-proposed boundaries and content are always validated against the revalidated cue evidence by the unchanged Text-model output projection and adjudication, so this profile never makes unproven model output authoritative."
 }

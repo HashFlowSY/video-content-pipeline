@@ -60,7 +60,6 @@ from video_content_pipeline.text_generation import (
     LoadedPart,
     UnavailablePartInfo,
     generate_analysis,
-    index_result_parts,
 )
 
 #: The provider-neutral capability and its acquired candidate.
@@ -342,7 +341,12 @@ def render_text_semantics_prompt(
     adapter parity), the only boundaries the model may propose over. Giving the model
     both the cue text to segment and the exact output shape to return is what prompt
     template v2 fixed over the ticket-10 v1 rendition, which carried only cue identities
-    (Phase 11 ticket 15). It is a stable function of the bound contract versions, the
+    (Phase 11 ticket 15). Cue identities are rendered in a token-efficient Part-local
+    alias form -- each available Part is aliased ``P{index}`` and each of its cues is
+    ``P{index}:{position}`` (0-based position within the Part's ``cue_ids``) -- so the
+    64-hex source id is not repeated on every cue line; the engine remaps these aliases
+    back to the full canonical cue ids before adjudication (see ``_build_local_id_maps``
+    / ``_remap_local_ids``). It is a stable function of the bound contract versions, the
     revalidated cue inventory, and the provided cue text, so the same inputs always
     render the same prompt (the subprocess request carries this exact text). Pure and
     deterministic; touches no model.
@@ -360,10 +364,12 @@ def render_text_semantics_prompt(
             lines.append(f"[{role}:{section_id}] {text}")
     lines.extend(_output_contract_lines(contracts, available))
     lines.append("# authoritative-cues")
-    for part in available:
-        lines.append(f"## part {part.part_id} track {part.track_id}")
-        for cue_identity in part.cue_ids:
-            lines.append(f"- {cue_identity}: {cue_texts.get(cue_identity, '')}")
+    for part_index, part in enumerate(available):
+        part_alias = _local_part_alias(part_index)
+        lines.append(f"## part {part_alias} track {part.track_id}")
+        for position, cue_identity in enumerate(part.cue_ids):
+            local_cue = _local_cue_alias(part_index, position)
+            lines.append(f"- {local_cue}: {cue_texts.get(cue_identity, '')}")
     return "\n".join(lines) + "\n"
 
 
@@ -377,7 +383,9 @@ def _output_contract_lines(
     identities so the rendered instructions and the envelope the Text-model output
     projection enforces can never drift. A compact skeleton over the first available
     Part's own cue identities shows the per-segment ``boundary`` and cited-``content``
-    shape. Pure and deterministic.
+    shape, rendered in the same token-efficient Part-local alias form the authoritative
+    cues use (``P0`` for the first Part and ``P0:{position}`` for its cues). Pure and
+    deterministic.
     """
 
     envelope = contracts.output_schema.document.get("envelope")
@@ -385,10 +393,10 @@ def _output_contract_lines(
         envelope.get("expected_schema_version") if isinstance(envelope, Mapping) else None
     )
     example = available[0] if available else None
-    example_part = example.part_id if example is not None else "part-1"
     example_cues = example.cue_ids if example is not None else ()
-    start_cue = example_cues[0] if example_cues else f"{example_part}:0"
-    end_cue = example_cues[-1] if example_cues else start_cue
+    example_part = _local_part_alias(0)
+    start_cue = _local_cue_alias(0, 0)
+    end_cue = _local_cue_alias(0, len(example_cues) - 1) if example_cues else start_cue
     skeleton = {
         "schema_version": expected_schema_version,
         "output_schema_version": contracts.output_schema.version,
@@ -416,9 +424,12 @@ def _output_contract_lines(
         "# output-contract",
         "Return exactly one JSON object with this shape and these fixed identity values:",
         json.dumps(skeleton, ensure_ascii=False, indent=2, sort_keys=True),
-        "Rules: a segment boundary names an existing cue in the same Part as start_cue_id "
-        "and end_cue_id; every title and detail must cite one or more of the cue_ids inside "
-        "its own segment; emit no field you cannot cite from the provided cues.",
+        "Rules: use the exact cue ids shown below in the authoritative-cues block (the "
+        "token-efficient Part-local form P{index}:{position}, e.g. P0:0); a segment "
+        "boundary names an existing cue in the same Part as start_cue_id and end_cue_id; "
+        "part_id is that Part's alias (e.g. P0); every title and detail must cite one or "
+        "more of the cue_ids inside its own segment; emit no field you cannot cite from "
+        "the provided cues.",
     ]
 
 
@@ -505,75 +516,126 @@ class Qwen3TextSemanticsResult:
     peak_memory_bytes: int
 
 
-#: Per-block cue-text budget in characters. The engine renders each Part's cues
-#: into overlapping technical blocks (Phase 6 spec: blocks overlap only as context
-#: transport; the boundary adjudicator dedups cross-block spans) so no single model
-#: call exceeds the bounded KV window (``calibration.max_kv_size``, 8192 tokens).
-#: Rendering a whole long source in one call overflows that window and the output
-#: degrades below the JSON envelope into free prose (observed on real 30-minute
-#: material). ~3500 characters of cue text sits well under half the token window
-#: once the instructions and the output envelope are accounted for.
-_MAX_BLOCK_CUE_CHARS = 3500
-#: Cues shared between consecutive blocks so a real segment boundary between two
-#: cues is visible inside at least one block that also holds the JSON envelope.
-_BLOCK_CUE_OVERLAP = 1
+def _local_part_alias(part_index: int) -> str:
+    """The token-efficient Part alias shown in the prompt (``P0``, ``P1``, ...)."""
+
+    return f"P{part_index}"
 
 
-def _technical_blocks(
-    cue_ids: Sequence[str],
-    cue_texts: Mapping[str, str],
-    *,
-    max_chars: int = _MAX_BLOCK_CUE_CHARS,
-    overlap: int = _BLOCK_CUE_OVERLAP,
-) -> tuple[tuple[str, ...], ...]:
-    """Split a Part's ordered cues into overlapping technical blocks that fit the window.
+def _local_cue_alias(part_index: int, position: int) -> str:
+    """The token-efficient cue id shown in the prompt (``P{index}:{position}``)."""
 
-    Each block is a contiguous run of cues whose rendered text stays within
-    ``max_chars``; consecutive blocks share ``overlap`` trailing cues so a real
-    segment boundary between two cues is visible inside at least one block. A Part
-    whose whole inventory already fits is returned as a single block, so short
-    sources render and behave exactly as the pre-blocking single call did. A lone
-    cue longer than ``max_chars`` still forms its own block (never dropped).
+    return f"{_local_part_alias(part_index)}:{position}"
+
+
+def _build_local_id_maps(
+    available: Sequence[LoadedPart],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Map the prompt's Part-local aliases back to the full canonical identities.
+
+    Returns ``(cue_map, part_map)``: ``cue_map`` sends each ``P{i}:{j}`` cue alias to
+    the full ``available[i].cue_ids[j]`` identity (by position, never assuming the
+    ordinal equals the position), and ``part_map`` sends each ``P{i}`` alias to that
+    Part's real ``part_id``. The engine applies these to the model's output before
+    adjudication so a short alias never reaches the segments or the report.
     """
 
-    ids = tuple(cue_ids)
-    if not ids:
-        return ()
-    blocks: list[tuple[str, ...]] = []
-    start = 0
-    total = len(ids)
-    while start < total:
-        chars = 0
-        end = start
-        while end < total:
-            length = len(cue_texts.get(ids[end], ""))
-            if end > start and chars + length > max_chars:
-                break
-            chars += length
-            end += 1
-        blocks.append(ids[start:end])
-        if end >= total:
-            break
-        following = end - overlap
-        start = following if following > start else end
-    return tuple(blocks)
+    cue_map: dict[str, str] = {}
+    part_map: dict[str, str] = {}
+    for part_index, part in enumerate(available):
+        part_map[_local_part_alias(part_index)] = part.part_id
+        for position, cue_identity in enumerate(part.cue_ids):
+            cue_map[_local_cue_alias(part_index, position)] = cue_identity
+    return cue_map, part_map
 
 
-def _tag_block_segment(segment: Mapping[str, object], block_id: str) -> dict[str, object]:
-    """Return a copy of a proposed segment whose boundary carries this block's id.
+#: Result keys whose value is a single cue-id string, a list of cue-id strings, or a
+#: Part identity -- the only places the alias->full remap rewrites, so free text
+#: (titles, details, any generated prose) is never touched.
+_CUE_ID_SCALAR_KEYS = frozenset({"start_cue_id", "end_cue_id"})
+_CUE_ID_LIST_KEYS = frozenset({"cue_ids"})
+_PART_ID_KEYS = frozenset({"part_id"})
 
-    The per-block model call cannot know the global block structure, so the engine
-    stamps the authoritative ``technical_block_id`` the boundary adjudicator uses to
-    deduplicate identical cue spans surfaced by two overlapping blocks.
+
+def _remap_local_ids(
+    value: object, cue_map: Mapping[str, str], part_map: Mapping[str, str]
+) -> object:
+    """Recursively rewrite Part-local aliases in a model result to full identities.
+
+    Only values under the known cue-id / part-id keys are rewritten; an unknown alias
+    is passed through unchanged so a malformed reference still fails adjudication
+    rather than being silently corrected, and every other string -- titles, details,
+    free text -- is left exactly as the model wrote it.
     """
 
-    tagged = dict(segment)
-    boundary = tagged.get("boundary")
-    if isinstance(boundary, Mapping):
-        stamped = dict(boundary)
-        stamped["technical_block_id"] = block_id
-        tagged["boundary"] = stamped
-    return tagged
+    if isinstance(value, Mapping):
+        remapped: dict[str, object] = {}
+        for key, item in value.items():
+            if key in _CUE_ID_SCALAR_KEYS and isinstance(item, str):
+                remapped[key] = cue_map.get(item, item)
+            elif key in _PART_ID_KEYS and isinstance(item, str):
+                remapped[key] = part_map.get(item, item)
+            elif key in _CUE_ID_LIST_KEYS and isinstance(item, list):
+                remapped[key] = [
+                    cue_map.get(entry, entry)
+                    if isinstance(entry, str)
+                    else _remap_local_ids(entry, cue_map, part_map)
+                    for entry in item
+                ]
+            else:
+                remapped[key] = _remap_local_ids(item, cue_map, part_map)
+        return remapped
+    if isinstance(value, list):
+        return [_remap_local_ids(entry, cue_map, part_map) for entry in value]
+    return value
+
+
+def _count_prompt_tokens(model_path: Path, prompt: str) -> int | None:
+    """Best-effort real token count of ``prompt`` via the model's own tokenizer.
+
+    Returns ``None`` when the tokenizer cannot be loaded -- e.g. a stub asset in a
+    unit test that carries no ``tokenizer.json`` -- so the pre-flight budget check is
+    simply skipped and the model's own runtime ``max_kv_size`` stays the backstop; the
+    real pinned asset always ships ``tokenizer.json``.
+    """
+
+    tokenizer_path = model_path / "tokenizer.json"
+    if not tokenizer_path.is_file():
+        return None
+    try:
+        from tokenizers import Tokenizer
+
+        return len(Tokenizer.from_file(str(tokenizer_path)).encode(prompt).ids)
+    except Exception:  # noqa: BLE001 - a tokenizer we cannot read just skips the pre-check
+        return None
+
+
+def _enforce_context_budget(
+    model_path: Path, prompt: str, calibration: Qwen3TextSemanticsCalibration
+) -> None:
+    """Reject a prompt that would not fit the calibrated window before the model loads.
+
+    The whole transcript is sent in one call, so the model must hold the prompt *and*
+    its generation within ``max_kv_size``. Counting the prompt's real tokens with the
+    model's own tokenizer (no model load) and reserving ``max_tokens`` for output, a
+    prompt that would overflow raises ``text_semantics_context_budget_exceeded`` with
+    the numbers -- so a maintainer decides whether to raise the window (confirming peak
+    memory stays within the 12 GiB envelope) rather than the run silently truncating.
+    """
+
+    prompt_tokens = _count_prompt_tokens(model_path, prompt)
+    if prompt_tokens is None:
+        return
+    required = prompt_tokens + calibration.max_tokens
+    if required > calibration.max_kv_size:
+        raise TextSemanticsEngineError(
+            "text_semantics_context_budget_exceeded",
+            f"The rendered prompt is {prompt_tokens} tokens; reserving "
+            f"{calibration.max_tokens} tokens for output needs {required}, over the "
+            f"{calibration.max_kv_size}-token context window (max_kv_size). Raise "
+            "max_kv_size (and confirm the resulting peak memory stays within the 12 GiB "
+            "envelope) or shorten the source before re-running.",
+        )
 
 
 def generate_text_semantics(
@@ -593,11 +655,14 @@ def generate_text_semantics(
 
     Verifies and loads the pinned asset, gate-checks the model-specific decoding
     calibration (ADR 0056) against that asset and the bound prompt-template version,
-    renders the versioned prompt over the authoritative cues -- each cue's identity plus
-    its verbatim ``cue_texts`` recognized text and the exact output envelope -- and runs
-    one Model runtime subprocess (ADR 0055) to generate the semantic analysis. The raw
-    output is retained as restricted local audit evidence, then projected through the
-    unchanged Text-model output projection and composed through the unchanged
+    renders the versioned prompt over the authoritative cues -- each cue rendered under
+    a token-efficient Part-local alias (``P{index}:{position}``) plus its verbatim
+    ``cue_texts`` text and the exact output envelope -- and, once a pre-flight token
+    budget confirms the whole transcript fits the calibrated window, runs one Model
+    runtime subprocess (ADR 0055) to generate the semantic analysis. The model's local
+    aliases are remapped back to the full canonical cue/Part ids before adjudication,
+    so the raw output is retained as restricted local audit evidence, projected through
+    the unchanged Text-model output projection, and composed through the unchanged
     adjudication: model-proposed boundaries and content are validated against the
     revalidated cue evidence and every invalid proposal is retained as a diagnostic. A
     whole invalid or malformed model output concludes ``model_output_invalid`` with no
@@ -612,81 +677,25 @@ def generate_text_semantics(
     )
     child_command = list(command) if command is not None else default_text_semantics_command()
 
-    # Render and run each Part's cues in overlapping technical blocks that fit the
-    # bounded KV window, then merge every block's proposed segments (each stamped
-    # with its block id) into one result the unchanged adjudication tiles. A Part
-    # whose whole inventory fits is a single block, so short sources make exactly one
-    # call and behave as before; chapters and the collection summary are taken only
-    # from a single-block Part and are conservatively omitted when a Part was split.
-    raw_chunks: list[str] = []
-    peaks: list[int] = []
-    merged_parts: list[dict[str, object]] = []
-    block_diagnostics: list[PlanningDiagnostic] = []
-    collection_container: object | None = None
-    any_projected = False
+    prompt = render_text_semantics_prompt(contracts, available, cue_texts)
+    _enforce_context_budget(model_path, prompt, calibration)
 
-    for part in available:
-        blocks = _technical_blocks(part.cue_ids, cue_texts)
-        part_segments: list[object] = []
-        part_chapters: list[object] = []
-        for block_index, block_cue_ids in enumerate(blocks):
-            block_part = LoadedPart(
-                part_id=part.part_id, track_id=part.track_id, cue_ids=block_cue_ids
-            )
-            prompt = render_text_semantics_prompt(contracts, (block_part,), cue_texts)
-            raw_text, peak = generate_semantics(
-                model_path,
-                prompt,
-                calibration,
-                contracts.prompt_template.version,
-                command=child_command,
-                timeout_seconds=timeout_seconds,
-            )
-            raw_chunks.append(raw_text)
-            peaks.append(peak)
-            projection = project_text_model_output(_decode_generation_output(raw_text), contracts)
-            if projection.projection is None:
-                block_diagnostics.append(
-                    projection.diagnostic
-                    or PlanningDiagnostic(
-                        "model_output_invalid",
-                        f"Text-model output for {part.part_id} block {block_index} is invalid.",
-                    )
-                )
-                continue
-            any_projected = True
-            result = projection.projection.get("result")
-            result = result if isinstance(result, Mapping) else {}
-            block_part_result = index_result_parts(result).get(part.part_id)
-            if block_part_result is None:
-                proposed = result.get("parts")
-                first = proposed[0] if isinstance(proposed, list) and proposed else None
-                block_part_result = first if isinstance(first, Mapping) else {}
-            block_id = f"{part.part_id}:block-{block_index}"
-            raw_segments = block_part_result.get("segments")
-            for segment in raw_segments if isinstance(raw_segments, list) else ():
-                if isinstance(segment, Mapping):
-                    part_segments.append(_tag_block_segment(segment, block_id))
-            if len(blocks) == 1:
-                chapters = block_part_result.get("chapters")
-                part_chapters = list(chapters) if isinstance(chapters, list) else []
-                candidate_collection = result.get("collection_summary")
-                if candidate_collection is not None:
-                    collection_container = candidate_collection
-        merged_parts.append(
-            {"part_id": part.part_id, "segments": part_segments, "chapters": part_chapters}
-        )
-
-    raw_pointer = record_restricted_raw_output(
-        workspace_path, "text-semantics-generation", "\n\n".join(raw_chunks).encode("utf-8")
+    raw_text, peak = generate_semantics(
+        model_path,
+        prompt,
+        calibration,
+        contracts.prompt_template.version,
+        command=child_command,
+        timeout_seconds=timeout_seconds,
     )
-    peak = max(peaks) if peaks else 0
+    raw_pointer = record_restricted_raw_output(
+        workspace_path, "text-semantics-generation", raw_text.encode("utf-8")
+    )
 
-    if not any_projected:
-        diagnostics = tuple(block_diagnostics) or (
-            PlanningDiagnostic(
-                "model_output_invalid", "The text-semantics model output is invalid."
-            ),
+    projection = project_text_model_output(_decode_generation_output(raw_text), contracts)
+    if projection.projection is None:
+        diagnostic = projection.diagnostic or PlanningDiagnostic(
+            "model_output_invalid", "The text-semantics model output is invalid."
         )
         return Qwen3TextSemanticsResult(
             source_id=source_id,
@@ -696,18 +705,27 @@ def generate_text_semantics(
             chapters=(),
             collection_summary=None,
             unsupported_item_count=0,
-            diagnostics=diagnostics,
+            diagnostics=(diagnostic,),
             restricted_raw_output=raw_pointer,
-            projection_state={"state": "model_output_invalid"},
+            projection_state={"state": projection.state},
             model_asset_sha256=asset_sha256,
             calibration_version=calibration.calibration_version,
             peak_memory_bytes=peak,
         )
 
-    merged_result: dict[str, object] = {"parts": merged_parts}
-    if collection_container is not None:
-        merged_result["collection_summary"] = collection_container
-    analysis = generate_analysis(available, unavailable, merged_result)
+    # Remap the model's token-efficient local aliases back to the full canonical cue
+    # and Part identities before adjudication, so no short alias ever reaches the
+    # verified segments or the published report.
+    cue_map, part_map = _build_local_id_maps(available)
+    raw_result = projection.projection.get("result")
+    result_container = (
+        _remap_local_ids(raw_result, cue_map, part_map) if isinstance(raw_result, Mapping) else {}
+    )
+    analysis = generate_analysis(
+        available,
+        unavailable,
+        result_container if isinstance(result_container, Mapping) else {},
+    )
     return Qwen3TextSemanticsResult(
         source_id=source_id,
         stream_index=stream_index,
@@ -716,7 +734,7 @@ def generate_text_semantics(
         chapters=analysis.chapters,
         collection_summary=analysis.collection_summary,
         unsupported_item_count=analysis.unsupported_item_count,
-        diagnostics=(*block_diagnostics, *analysis.diagnostics),
+        diagnostics=analysis.diagnostics,
         restricted_raw_output=raw_pointer,
         projection_state={
             "state": "projected",
