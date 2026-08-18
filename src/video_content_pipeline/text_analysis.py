@@ -111,6 +111,7 @@ from video_content_pipeline.text_generation import (
     load_cue_inventory,
 )
 from video_content_pipeline.timecode import ExactTime, HalfOpenInterval
+from video_content_pipeline.transcription import subtitle_unavailable_parts
 
 # The future-real-model one-large-model rule: a conservative resource estimate
 # above this envelope pauses for an explicit resource decision instead of
@@ -751,7 +752,18 @@ def analyze_text(
                 "Subtitle candidate report does not belong to this RunPlan.",
             )
         subtitle_rules_value = _revalidate_subtitle_rules(subtitle_report, project_root)
-        selected_primary_tracks = _selected_primary_tracks(plan, subtitle_report)
+        if (
+            subtitle_report.state is CandidateReportState.BLOCKED
+            and subtitle_unavailable_parts(subtitle_report)
+        ):
+            # Full-ASR handoff: every Part's subtitle is unavailable and hands off to
+            # ASR, so the report is blocked and there is no resolvable Primary track.
+            # The text-semantics source is the transcription's published transcript,
+            # resolved per Part in _real_text_parts. A report blocked for any other
+            # reason (no ASR handoff) still fails through _selected_primary_tracks.
+            selected_primary_tracks = ()
+        else:
+            selected_primary_tracks = _selected_primary_tracks(plan, subtitle_report)
         text_rules_value = text_analysis_rules_fingerprint(project_root)
         contracts = revalidate_text_generation_contracts(project_root)
         if audio_report_id is not None:
