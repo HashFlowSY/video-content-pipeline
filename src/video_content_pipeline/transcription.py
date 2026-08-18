@@ -22,6 +22,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from video_content_pipeline.capabilities import (
     CandidateAssessment,
@@ -60,6 +61,10 @@ from video_content_pipeline.subtitle_pipeline import (
 # transcription-contracts module (its projection and fixture loaders validate
 # against it) and re-exported here for the ticket-01/02 capability evaluation.
 from video_content_pipeline.transcription_contracts import ASR_CAPABILITIES, ProjectedAsrCue
+
+if TYPE_CHECKING:
+    from video_content_pipeline.audio_derivation import DerivativeTimeMapping
+    from video_content_pipeline.timecode import ExactTime
 
 
 class TranscriptionError(ValueError):
@@ -814,6 +819,242 @@ def publish_asr_subtitle_candidate(
         conflict_error=lambda message: TranscriptionError("transcription_report_invalid", message),
     )
     return input_evidence(candidate_path), len(cues)
+
+
+def _asr_speech_runs_from_vad_part(
+    vad_part: Mapping[str, object], mapping: DerivativeTimeMapping
+) -> tuple[tuple[int, int], ...]:
+    """Recover the derivative speech-run sample spans from a Part's VAD evidence.
+
+    The audio report persists the Complete VAD partition (source-time intervals),
+    not the raw sample runs. The ``speech_likely`` intervals are exactly the
+    coalesced speech spans, and each boundary was placed at an exact derivative
+    sample, so mapping them back through :meth:`sample_for_source_time` recovers the
+    integer sample runs that :func:`derive_speech_chunks` re-chunks at the semantic
+    window -- deterministically, no re-run of VAD.
+    """
+
+    intervals = vad_part.get("voice_activity_intervals")
+    if not isinstance(intervals, list):
+        raise TranscriptionError(
+            "transcription_audio_evidence_invalid", "VAD Part evidence omits its partition."
+        )
+    runs: list[tuple[int, int]] = []
+    for entry in intervals:
+        if not isinstance(entry, Mapping) or entry.get("state") != "speech_likely":
+            continue
+        interval = entry.get("interval")
+        if not isinstance(interval, Mapping):
+            raise TranscriptionError(
+                "transcription_audio_evidence_invalid", "A VAD interval is malformed."
+            )
+        start = _asr_exact_time(interval.get("start"))
+        end = _asr_exact_time(interval.get("end"))
+        runs.append((mapping.sample_for_source_time(start), mapping.sample_for_source_time(end)))
+    runs.sort()
+    return tuple(runs)
+
+
+def _asr_exact_time(value: object) -> ExactTime:
+    from video_content_pipeline.timecode import ExactTime
+
+    if not isinstance(value, Mapping):
+        raise TranscriptionError(
+            "transcription_audio_evidence_invalid", "A VAD time is not an object."
+        )
+    numerator = value.get("numerator")
+    denominator = value.get("denominator")
+    if (
+        not isinstance(numerator, int)
+        or isinstance(numerator, bool)
+        or not isinstance(denominator, int)
+        or isinstance(denominator, bool)
+        or denominator <= 0
+    ):
+        raise TranscriptionError("transcription_audio_evidence_invalid", "A VAD time is malformed.")
+    return ExactTime(numerator, denominator)
+
+
+def _asr_primary_stage_execution(
+    candidate_id: str,
+    resource_high_bytes: int | None,
+    peak_memory_bytes: int,
+    workspace_path: Path,
+) -> dict[str, object]:
+    """Record the asr_primary stage execution with its measured child peak.
+
+    The ASR engine already runs each chunk in its own Model runtime subprocess, so
+    ``peak_memory_bytes`` is the honest max child peak and the released/0 unload is
+    truthful once those children exit. An over-envelope peak fails closed to
+    ``release_unverified`` exactly as the audio stage's gate does.
+    """
+
+    stage_path = workspace_path / "stage-execution" / "asr_primary" / candidate_id
+    record: dict[str, object] = {
+        "capability": "asr_primary",
+        "candidate_id": candidate_id,
+        "state": "completed",
+        "resource_measurement": {"peak_bytes": peak_memory_bytes},
+        "unload_evidence": {"state": "released", "resident_bytes": 0},
+    }
+    if (
+        resource_high_bytes is None
+        or peak_memory_bytes < 0
+        or peak_memory_bytes > resource_high_bytes
+    ):
+        record["state"] = "release_unverified"
+        return record
+    measurement_path = stage_path / "resource-measurement.json"
+    write_json_once(
+        measurement_path,
+        {"peak_bytes": peak_memory_bytes},
+        conflict_error=lambda message: TranscriptionError("transcription_report_invalid", message),
+    )
+    record["resource_measurement"] = input_evidence(measurement_path).as_json()
+    return record
+
+
+def build_asr_transcript(
+    project_root: Path,
+    audio_report_document: Mapping[str, object],
+    full_asr_source_ids: Sequence[str],
+    asr_candidate: Mapping[str, object],
+    workspace_path: Path,
+    *,
+    command: Sequence[str] | None = None,
+) -> tuple[tuple[dict[str, object], ...], tuple[dict[str, object], ...]]:
+    """Compose the real primary ASR transcript for the full-ASR Parts.
+
+    For each Part: recovers its pinned 16 kHz derivative and VAD speech runs from the
+    audio report, re-chunks at the semantic-cue window (D2), runs the real primary
+    ASR (self-isolated per chunk), and publishes the cues as the subtitle candidate
+    the downstream stages read. Returns ``(transcript_entries, stage_execution)``;
+    the stage-execution carries the heaviest Part's measured peak.
+    """
+
+    from video_content_pipeline.asr_engine import transcribe_derivative
+    from video_content_pipeline.audio_derivation import DerivativeTimeMapping
+    from video_content_pipeline.vad_chunking import SEMANTIC_CUE_WINDOW, derive_speech_chunks
+
+    derivatives = _asr_index_by_source(
+        audio_report_document.get("analysis_audio_derivatives"), "a prepared derivative"
+    )
+    languages = _asr_languages_by_source(audio_report_document.get("analysis_audio_streams"))
+    vad_parts = _asr_vad_parts_by_source(audio_report_document.get("formal_evidence"))
+
+    candidate_id = asr_candidate.get("candidate_id")
+    if not isinstance(candidate_id, str):
+        raise TranscriptionError("model_output_invalid", "ASR candidate identity is missing.")
+
+    transcript_entries: list[dict[str, object]] = []
+    peak = 0
+    for source_id in sorted(full_asr_source_ids):
+        derivative = derivatives.get(source_id)
+        language = languages.get(source_id)
+        vad_part = vad_parts.get(source_id)
+        if derivative is None or language is None or vad_part is None:
+            raise TranscriptionError(
+                "transcription_audio_evidence_invalid",
+                "A full-ASR Part lacks its audio derivative, language, or VAD evidence.",
+            )
+        stream_index = derivative["stream_index"]
+        mapping_json = derivative["mapping"]
+        if (
+            not isinstance(stream_index, int)
+            or isinstance(stream_index, bool)
+            or not isinstance(mapping_json, Mapping)
+        ):
+            raise TranscriptionError(
+                "transcription_audio_evidence_invalid", "A prepared derivative is malformed."
+            )
+        mapping = DerivativeTimeMapping.from_json(mapping_json)
+        wav_path = Path(str(derivative["path"]))
+        speech_runs = _asr_speech_runs_from_vad_part(vad_part, mapping)
+        chunks = derive_speech_chunks(speech_runs, mapping, max_chunk_duration=SEMANTIC_CUE_WINDOW)
+        result = transcribe_derivative(
+            project_root,
+            wav_path,
+            source_id=source_id,
+            stream_index=stream_index,
+            language=language,
+            chunks=chunks,
+            command=command,
+        )
+        candidate_path = workspace_path / "transcript" / source_id / "source-candidate.json"
+        evidence, count = publish_asr_subtitle_candidate(candidate_path, result.cues)
+        transcript_entries.append(
+            {
+                "source_id": source_id,
+                "stream_index": stream_index,
+                "source_candidate": evidence.as_json(),
+                "cue_count": count,
+            }
+        )
+        peak = max(peak, result.peak_memory_bytes)
+
+    high_bytes = _asr_resource_high_bytes(asr_candidate)
+    stage_execution = (
+        _asr_primary_stage_execution(candidate_id, high_bytes, peak, workspace_path),
+    )
+    return tuple(transcript_entries), stage_execution
+
+
+def _asr_index_by_source(value: object, what: str) -> dict[str, dict[str, object]]:
+    if not isinstance(value, list):
+        raise TranscriptionError(
+            "transcription_audio_evidence_invalid", f"The audio report omits {what}."
+        )
+    result: dict[str, dict[str, object]] = {}
+    for entry in value:
+        if (
+            not isinstance(entry, Mapping)
+            or not isinstance(entry.get("source_id"), str)
+            or not isinstance(entry.get("stream_index"), int)
+            or isinstance(entry.get("stream_index"), bool)
+        ):
+            raise TranscriptionError(
+                "transcription_audio_evidence_invalid", f"The audio report has an invalid {what}."
+            )
+        result[str(entry["source_id"])] = dict(entry)
+    return result
+
+
+def _asr_languages_by_source(value: object) -> dict[str, str]:
+    if not isinstance(value, list):
+        raise TranscriptionError(
+            "transcription_audio_evidence_invalid", "The audio report omits its stream selections."
+        )
+    result: dict[str, str] = {}
+    for entry in value:
+        if isinstance(entry, Mapping) and isinstance(entry.get("source_id"), str):
+            language = entry.get("language")
+            if isinstance(language, str) and language:
+                result[str(entry["source_id"])] = language
+    return result
+
+
+def _asr_vad_parts_by_source(value: object) -> dict[str, Mapping[str, object]]:
+    if not isinstance(value, list):
+        raise TranscriptionError(
+            "transcription_audio_evidence_invalid", "The audio report omits its VAD evidence."
+        )
+    result: dict[str, Mapping[str, object]] = {}
+    for evidence in value:
+        if not isinstance(evidence, Mapping) or evidence.get("capability") != "vad":
+            continue
+        parts = evidence.get("parts")
+        if not isinstance(parts, list):
+            continue
+        for part in parts:
+            if isinstance(part, Mapping) and isinstance(part.get("source_id"), str):
+                result[str(part["source_id"])] = part
+    return result
+
+
+def _asr_resource_high_bytes(candidate: Mapping[str, object]) -> int | None:
+    evidence = candidate.get("eligibility_evidence")
+    high_bytes = evidence.get("resource_high_bytes") if isinstance(evidence, Mapping) else None
+    return high_bytes if isinstance(high_bytes, int) and not isinstance(high_bytes, bool) else None
 
 
 def _source_artifact_bindings(plan: RunPlan) -> tuple[SourceArtifactBinding, ...]:
