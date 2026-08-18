@@ -295,8 +295,8 @@
       "acquisition_method": "pinned raw.githubusercontent.com URL (git tag v6.2.1)",
       "resource_estimate": {
         "high_bytes": 1073741824,
-        "basis": "device-baselines:apple-m1 measured 118.8 MiB on a 4-5min prototype clip; run-1 full-length (35min) child peak measured 393 MiB (the analysis-audio buffer scales with duration); 1 GiB ceiling holds headroom under the 12 GiB envelope",
-        "confidence": "measured"
+        "basis": "device-baselines:apple-m1 measured 118.8 MiB on a 4-5min prototype clip; run-1 full-length (35min) child peak measured 393 MiB (the analysis-audio buffer scales with duration); 1 GiB is a chosen ceiling holding headroom under the 12 GiB envelope, not a measured peak",
+        "confidence": "estimated"
       }
     },
     {
