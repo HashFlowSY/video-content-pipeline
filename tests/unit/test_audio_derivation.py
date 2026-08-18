@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import wave
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,17 @@ def _profile() -> PreprocessingProfile:
         loudness_mode="preserve",
         chunk_samples=48_000,
     )
+
+
+def _write_pcm_wav(path: Path, *, frames: int, rate: int, channels: int = 1) -> None:
+    """Write a silent mono/stereo PCM-16 wav with an exact frame count."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(channels)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(b"\x00\x00" * frames * channels)
 
 
 def test_preprocessing_profile_rejects_implicit_audio_transforms() -> None:
@@ -131,7 +143,8 @@ def test_prepare_analysis_audio_revalidates_ffmpeg_and_retains_mapping(
 
     def fake_run(arguments: tuple[str, ...], *, timeout_seconds: int | None = None):
         captured_arguments.extend(arguments)
-        destination.write_bytes(b"derived")
+        # A 2 s coverage window at 48 kHz mono lands on an exact sample boundary.
+        _write_pcm_wav(destination, frames=96_000, rate=48_000)
         return type("Result", (), {"returncode": 0, "stderr": ""})()
 
     monkeypatch.setattr("video_content_pipeline.audio_derivation.run_tool", fake_run)
@@ -142,13 +155,68 @@ def test_prepare_analysis_audio_revalidates_ffmpeg_and_retains_mapping(
 
     assert derivative.source_artifact_sha256 == source_hash
     assert derivative.path == destination
+    # The sample count is read back from the wav FFmpeg produced, not predicted.
     assert derivative.mapping.sample_count == 96_000
+    assert derivative.mapping.source_interval == coverage.coverage
     # FFmpeg's -ss/-t take seconds as a decimal, not a "num/den" rational.
     assert captured_arguments[captured_arguments.index("-ss") + 1] == "-0.5"
     assert captured_arguments[captured_arguments.index("-t") + 1] == "2"
     assert derivative.as_json()["ffmpeg"]["sha256"] == "c" * 64
     assert derivative.as_json()["preprocessing_profile"]["id"] == _profile().profile_id
     assert destination.with_suffix(".mapping.json").exists()
+
+
+def test_prepare_analysis_audio_maps_non_sample_aligned_real_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Real 44.1 kHz media, resampled to 16 kHz, whose coverage duration is not an
+    # exact number of 16 kHz samples -- the case that broke run #1. The derivative
+    # is defined by the integer sample count FFmpeg actually produced, and its
+    # mapping spans exactly those samples from the coverage start.
+    source_path = tmp_path / "source.mkv"
+    source_path.write_bytes(b"source")
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    artifact = SourceArtifact("part-a", source_hash, source_path.stat().st_size, source_path)
+    # 2098.507506 s of coverage: 2098.507506 * 16000 is not an integer.
+    coverage = StreamCoverage(
+        coverage=HalfOpenInterval(ExactTime(0), ExactTime(1_049_253_753, 500_000)),
+        gaps=(),
+        diagnostics=(),
+    )
+    profile = PreprocessingProfile(
+        profile_id="phase-5-analysis-audio-v1",
+        sample_rate=16_000,
+        channel_count=1,
+        loudness_mode="preserve",
+        chunk_samples=16_000,
+    )
+    ffmpeg = PinnedExternalTool("ffmpeg", tmp_path / "ffmpeg", "fixture", "c" * 64)
+    destination = tmp_path / "work" / "analysis.wav"
+    produced_frames = 33_576_120  # floor(2098.507506 * 16000)
+
+    monkeypatch.setattr(
+        "video_content_pipeline.audio_derivation.revalidate_external_tool", lambda _: None
+    )
+
+    def fake_run(arguments: tuple[str, ...], *, timeout_seconds: int | None = None):
+        _write_pcm_wav(destination, frames=produced_frames, rate=16_000)
+        return type("Result", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr("video_content_pipeline.audio_derivation.run_tool", fake_run)
+
+    derivative = prepare_analysis_audio(
+        artifact, _selection(), coverage, ffmpeg, profile, destination
+    )
+
+    assert derivative.mapping.sample_count == produced_frames
+    # The mapping is sample-aligned: it starts at the coverage start and spans
+    # exactly the produced samples, never claiming the sub-sample tail.
+    assert derivative.mapping.source_interval.start == ExactTime(0)
+    assert derivative.mapping.source_interval.end == ExactTime(produced_frames, 16_000)
+    assert derivative.mapping.source_interval.end < coverage.coverage.end
+    assert derivative.mapping.source_time_for_sample(produced_frames) == ExactTime(
+        produced_frames, 16_000
+    )
 
 
 def test_exact_timestamp_serializes_ffmpeg_decimal_seconds() -> None:

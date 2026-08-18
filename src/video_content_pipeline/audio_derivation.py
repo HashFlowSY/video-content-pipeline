@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import wave
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
@@ -280,14 +281,11 @@ def prepare_analysis_audio(
         raise AnalysisAudioDerivationError(
             "source_artifact_changed", "The SourceArtifact hash changed before derivation."
         )
-    duration = (coverage.coverage.end - coverage.coverage.start).as_fraction()
-    sample_count = duration * profile.sample_rate
-    if sample_count.denominator != 1:
+    if coverage.coverage.end <= coverage.coverage.start:
         raise AnalysisAudioDerivationError(
             "derivative_boundary_unmappable",
-            "The profile sample rate cannot represent the observed source boundary exactly.",
+            "Analysis audio requires a positive-length source coverage interval.",
         )
-    mapping = DerivativeTimeMapping(coverage.coverage, profile.sample_rate, sample_count.numerator)
     destination = destination.resolve()
     if destination.exists():
         raise AnalysisAudioDerivationError(
@@ -335,6 +333,15 @@ def prepare_analysis_audio(
             "ffmpeg_derivation_failed",
             result.stderr.strip() or "Pinned FFmpeg did not produce the derivative.",
         )
+    frame_count = _read_derivative_frame_count(destination, profile)
+    mapping = DerivativeTimeMapping(
+        HalfOpenInterval(
+            coverage.coverage.start,
+            coverage.coverage.start + ExactTime(frame_count, profile.sample_rate),
+        ),
+        profile.sample_rate,
+        frame_count,
+    )
     derivative_hash, derivative_size = sha256_file(destination)
     derivative = AnalysisAudioDerivative(
         source_id=selection.source_id,
@@ -357,6 +364,40 @@ def prepare_analysis_audio(
         )
     mapping_path.write_text(json.dumps(derivative.as_json(), sort_keys=True, indent=2) + "\n")
     return derivative
+
+
+def _read_derivative_frame_count(path: Path, profile: PreprocessingProfile) -> int:
+    """Return the exact PCM frame count the pinned FFmpeg actually wrote.
+
+    The derivative's sample count is authoritative evidence, not a prediction.
+    Real source coverage almost never lands on an exact profile-rate sample
+    boundary, so the derivative is defined as the integer number of samples
+    FFmpeg produced at the profile's rate -- its mapping spans exactly those
+    samples from the coverage start. Reading the count back from the file also
+    proves FFmpeg honored the requested rate, mono/stereo layout, and PCM-16
+    width, which every downstream engine (VAD, ASR) relies on.
+    """
+
+    try:
+        with wave.open(str(path), "rb") as handle:
+            channels = handle.getnchannels()
+            width = handle.getsampwidth()
+            rate = handle.getframerate()
+            frames = handle.getnframes()
+    except (OSError, wave.Error) as error:
+        raise AnalysisAudioDerivationError(
+            "ffmpeg_derivation_failed", "The derivative is not a readable PCM wav."
+        ) from error
+    if channels != profile.channel_count or width != 2 or rate != profile.sample_rate:
+        raise AnalysisAudioDerivationError(
+            "derivative_boundary_unmappable",
+            "The derivative does not match the pinned preprocessing profile.",
+        )
+    if frames <= 0:
+        raise AnalysisAudioDerivationError(
+            "derivative_boundary_unmappable", "The derivative contains no audio samples."
+        )
+    return frames
 
 
 def _required_string(value: Mapping[str, object], key: str) -> str:

@@ -78,10 +78,10 @@ def test_diarization_vacancy_is_filled_with_two_acquired_candidates() -> None:
         states[candidate["candidate_id"]] = assess_candidate(
             candidate, "diarization", REPO_ROOT
         ).state
-    # The segmentation candidate is promoted with its measured resource estimate
-    # (Phase 12 ticket 08); the embedding candidate has no device baseline and stays
-    # unsupported (its footprint is inside the segmentation candidate's measured peak).
-    assert states["sherpa-onnx-pyannote-segmentation-3-0"] == "eligible"
+    # Neither diarization candidate is promoted: diarization is off run #1's
+    # full-ASR critical path (Phase 12 ticket 08), so both stay unsupported until a
+    # run that needs them calibrates and selects a candidate.
+    assert states["sherpa-onnx-pyannote-segmentation-3-0"] != "eligible"
     assert states["3dspeaker-campplus-zh-en-advanced"] != "eligible"
 
 
@@ -140,9 +140,10 @@ def test_every_candidate_is_acquired_and_carries_provenance() -> None:
         assert auth["separate_from_media_authorization"] is True
         # Acquisition does not, by itself, make a candidate runtime-eligible: the
         # separate maintainer-authorized promotion (Phase 12 ticket 08) that adds a
-        # measured resource_estimate is what flips a candidate to eligible. The five
-        # wired, device-baselined capabilities carry it; asr_review, the diarization
-        # embedding, and OCR do not yet.
+        # resource_estimate is what flips a candidate to eligible. Run #1's full-ASR
+        # critical path carries it on exactly three capabilities -- vad, asr_primary,
+        # and text_semantics; forced_alignment, diarization, asr_review, and OCR are
+        # off that path and stay unsupported until a run that needs them.
         state = assess_candidate(candidate, capability, REPO_ROOT).state
         if "resource_estimate" in candidate:
             assert state == "eligible"
