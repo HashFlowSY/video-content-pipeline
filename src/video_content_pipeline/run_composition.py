@@ -767,24 +767,81 @@ def _read_source_cue_lines(
 def _read_text_content_report(state: _CompositionState) -> str | None:
     """Render the published content report from the text stage's verified segments.
 
-    Deliberately rendered from the segments rather than reusing the stage's own
-    ``text-analysis-report.md``: that internal audit document echoes the run's
-    plan id, which would make an otherwise content-only artifact vary by install
-    location. This rendering carries only segment content, so identical inputs
-    yield identical bytes.
+    Each segment renders its title as a heading and its verified body -- the
+    cue-cited detail points, and any people, question/answer pairs, and unresolved
+    questions -- as readable Markdown. Deliberately rendered from the segments
+    rather than reusing the stage's own ``text-analysis-report.md`` (that internal
+    audit document echoes the run's plan id, which would make an otherwise
+    content-only artifact vary by install location); this carries only verified
+    segment content, so identical inputs yield identical bytes.
     """
 
     segments = _text_segments(state)
     if segments is None:
         return None
-    lines = ["# 内容报告", ""]
+    lines = ["# 内容报告"]
     for segment in segments:
-        title = segment.get("title") if isinstance(segment, Mapping) else None
-        ordinal = segment.get("ordinal") if isinstance(segment, Mapping) else None
+        if not isinstance(segment, Mapping):
+            continue
+        title = segment.get("title")
         text = title.get("text") if isinstance(title, Mapping) else None
-        heading = text if isinstance(text, str) and text else f"段落 {ordinal}"
+        heading = text if isinstance(text, str) and text else f"段落 {segment.get('ordinal')}"
+        lines.append("")
         lines.append(f"## {heading}")
+        lines.extend(_segment_body_lines(segment))
     return "\n".join(lines) + "\n"
+
+
+def _segment_body_lines(segment: Mapping[str, object]) -> list[str]:
+    """The verified content of one segment as Markdown: details plus any people,
+    Q&A pairs, and unresolved questions, each section emitted only when non-empty."""
+
+    lines: list[str] = []
+    details = [text for text in map(_claim_text, _content_list(segment.get("details"))) if text]
+    if details:
+        lines.append("")
+        lines.extend(f"- {detail}" for detail in details)
+    people: list[str] = []
+    for person in _content_list(segment.get("people")):
+        reference = person.get("reference") if isinstance(person, Mapping) else None
+        if not isinstance(reference, str) or not reference:
+            continue
+        role = person.get("role") if isinstance(person, Mapping) else None
+        people.append(
+            f"- {reference}（{role}）" if isinstance(role, str) and role else f"- {reference}"
+        )
+    if people:
+        lines.extend(["", "### 人物", *people])
+    qa_lines: list[str] = []
+    for pair in _content_list(segment.get("questions_and_answers")):
+        if not isinstance(pair, Mapping):
+            continue
+        question = _claim_text(pair.get("question"))
+        answer = _claim_text(pair.get("answer"))
+        if question and answer:
+            qa_lines.extend([f"- 问：{question}", f"  答：{answer}"])
+    if qa_lines:
+        lines.extend(["", "### 问答", *qa_lines])
+    unresolved = [
+        text
+        for text in map(_claim_text, _content_list(segment.get("unresolved_questions")))
+        if text
+    ]
+    if unresolved:
+        lines.extend(["", "### 待解问题", *(f"- {question}" for question in unresolved)])
+    return lines
+
+
+def _content_list(value: object) -> list[object]:
+    return value if isinstance(value, list) else []
+
+
+def _claim_text(item: object) -> str | None:
+    if isinstance(item, Mapping):
+        text = item.get("text")
+        if isinstance(text, str) and text:
+            return text
+    return None
 
 
 def _read_text_segments(state: _CompositionState) -> str | None:

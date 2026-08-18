@@ -381,3 +381,24 @@ def test_executor_stops_when_a_stage_decision_pauses(tmp_path: Path) -> None:
     assert results[audio_unit].kind is StageResultKind.DECISION_REQUIRED
     # Transcription never received a call because audio did not complete.
     assert not any(c[0] == "transcribe" for c in recorder.calls)
+
+
+def test_content_report_renders_the_segment_body_not_only_the_title() -> None:
+    # The published content report must carry each segment's verified body (details,
+    # people, Q&A, unresolved questions), not only its title heading.
+    from video_content_pipeline.run_composition import _segment_body_lines
+
+    segment = {
+        "title": {"text": "标题"},
+        "details": [{"text": "细节一"}, {"text": "细节二"}],
+        "people": [{"reference": "张三", "role": "老师"}, {"reference": "李四", "role": None}],
+        "questions_and_answers": [{"question": {"text": "问题"}, "answer": {"text": "回答"}}],
+        "unresolved_questions": [{"text": "待解"}],
+    }
+    body = "\n".join(_segment_body_lines(segment))
+    assert "- 细节一" in body and "- 细节二" in body
+    assert "### 人物" in body and "张三（老师）" in body and "- 李四" in body
+    assert "### 问答" in body and "问：问题" in body and "答：回答" in body
+    assert "### 待解问题" in body and "- 待解" in body
+    # A segment with no verified body renders no body lines (title heading only).
+    assert _segment_body_lines({"title": {"text": "空"}}) == []
