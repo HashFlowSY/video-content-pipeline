@@ -51,7 +51,22 @@ self-isolate. Also needs Option-A transcript resolution for full-ASR named Parts
 run #1 even invokes enhancement (run choices) — if not selected, wiring can be
 minimal + a guard.
 
-## VISUAL-TEXT — visual_text_command.py (ocr_primary) — NEEDS NEW ocr_child
+## OCR SEAM DONE (`d6a8731`) + VISUAL-TEXT WIRING FINDING
+ocr_child.py + ocr_engine.run_isolated_ocr / IsolatedOcrResult / default_ocr_command
+built + tested (mirror vad/diarization). BUT run_visual_text's real bridge ALSO needs
+REAL FRAME EXTRACTION: offline _execute_ocr uses a controlled fixture + a
+frame-metric FIXTURE (_frame_metric_fixture_path "stands in for pinned-ffmpeg
+extraction"); production has NO real ffmpeg frame extractor (only prototype
+_extract_frames). So the real visual-text bridge = frame extraction (ffmpeg at
+selected page PTS -> images) + run_isolated_ocr + gate + stage_execution + a
+ProjectedOcrItem.from_json to feed the gate. Substantial.
+DECISION POINT: OCR is NOT among run #1's full-ASR deliverables (subtitles/speakers/
+summary/detailed-content). run #1 can proceed WITHOUT promoting ocr_primary
+(visual-text stays offline/acquisition-gated); the visual-text real bridge + frame
+extraction is a follow-up not on run #1's critical path. Enhancement is user-scoped
+(optional for run #1) too.
+
+## VISUAL-TEXT (original design below) — visual_text_command.py (ocr_primary) — ocr_child DONE
 ONNX-scale RapidOCR runs in-process (ocr_engine.analyze_frames_ocr). Per ADR 0058
 build `ocr_child.py` + `run_isolated_ocr` mirroring vad_child/diarization_child
 (child runs analyze_frames_ocr, returns recognized regions json + peak). Then real
