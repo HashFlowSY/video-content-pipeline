@@ -88,13 +88,15 @@ from video_content_pipeline.run_reports import (
     ResourceUsage,
     ToolRecord,
 )
-from video_content_pipeline.run_state import RunStateError, read_journal
+from video_content_pipeline.run_state import RunStateError, read_journal, read_run_state
 from video_content_pipeline.stage_dag import (
     StageInvalidationKey,
     StageName,
     StageResult,
     StageResultKind,
     StageUnit,
+    UnitStatus,
+    read_recorded_units,
 )
 from video_content_pipeline.subtitle_pipeline import (
     CandidateState,
@@ -1224,6 +1226,31 @@ def _gather_report_inputs(state: _CompositionState) -> RunReportInputs:
     )
 
 
+def _adopted_stage_reports(layout: RunLayout) -> dict[StageName, str]:
+    """Rebuild the stage-to-report chain from this run's recorded completed units.
+
+    A fresh run has no recorded state yet and starts with an empty chain. On a
+    resume, the composition adopts already-completed units without re-invoking
+    their stage functions, so their chained report ids would be lost -- and the
+    first downstream stage that *does* run reads its upstream report id from the
+    chain (e.g. text analysis needs the transcription report id). Reloading the
+    completed units' persisted report ids restores that chain so the resumed run
+    continues instead of failing ``*_report_unavailable``. Reads only the run's
+    own state document; a missing or unreadable state contributes nothing.
+    """
+
+    try:
+        state = read_run_state(layout.state_path)
+        recorded_units = read_recorded_units(state)
+    except (RunStateError, OSError, ValueError):
+        return {}
+    chain: dict[StageName, str] = {}
+    for unit, recorded in recorded_units.items():
+        if recorded.status is UnitStatus.COMPLETED and recorded.report_id is not None:
+            chain[unit.stage] = recorded.report_id
+    return chain
+
+
 def build_run_composition(
     layout: RunLayout,
     plan: RunPlan,
@@ -1249,6 +1276,7 @@ def build_run_composition(
     state = _CompositionState(
         layout=layout, plan=plan, functions=functions or StageFunctions(), profile=profile
     )
+    state.reports.update(_adopted_stage_reports(layout))
     return RunComposition(
         executor=_build_executor(state),
         evidence=lambda: _gather_evidence(state),

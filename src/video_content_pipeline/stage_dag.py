@@ -374,19 +374,32 @@ class RecordedUnit:
     unit: StageUnit
     status: UnitStatus
     key: StageInvalidationKey
+    report_id: str | None = None
 
 
 def unit_record(
-    unit: StageUnit, status: UnitStatus, key: StageInvalidationKey
+    unit: StageUnit,
+    status: UnitStatus,
+    key: StageInvalidationKey,
+    report_id: str | None = None,
 ) -> dict[str, object]:
-    """Render a Stage unit checkpoint for the run state's ``stage_units`` slot."""
+    """Render a Stage unit checkpoint for the run state's ``stage_units`` slot.
 
-    return {
+    A completed unit carries the ``report_id`` its stage function produced so a
+    later resume can rebuild the composition's stage-to-report chain for the units
+    it adopts (a resumed downstream stage reads its upstream stages' report ids
+    from that chain, not by re-running them).
+    """
+
+    record: dict[str, object] = {
         "stage": unit.stage.value,
         "scope": unit.scope,
         "status": status.value,
         "invalidation_key": key.as_json(),
     }
+    if report_id is not None:
+        record["report_id"] = report_id
+    return record
 
 
 def read_recorded_units(state: RunState) -> dict[StageUnit, RecordedUnit]:
@@ -414,11 +427,15 @@ def read_recorded_units(state: RunState) -> dict[StageUnit, RecordedUnit]:
             raise StageDagError(
                 "stage_unit_invalid", f"Unknown stage or status in {entry!r}."
             ) from error
+        report_id = entry.get("report_id")
+        if report_id is not None and not isinstance(report_id, str):
+            raise StageDagError("stage_unit_invalid", "A stage unit report id must be a string.")
         unit = StageUnit(stage, scope)
         recorded[unit] = RecordedUnit(
             unit=unit,
             status=status,
             key=StageInvalidationKey.from_json(entry.get("invalidation_key")),
+            report_id=report_id,
         )
     return recorded
 
@@ -558,7 +575,7 @@ def execute_stages(
     all_part_scopes = {unit.scope for unit in units if not unit.is_collection}
 
     progress: dict[StageUnit, dict[str, object]] = {
-        unit: unit_record(unit, UnitStatus.COMPLETED, fresh[unit])
+        unit: unit_record(unit, UnitStatus.COMPLETED, fresh[unit], recorded[unit].report_id)
         for unit in units
         if unit in adoptable
     }
@@ -587,7 +604,13 @@ def execute_stages(
             return StageRunResult(StageRunDisposition.CANCELLED, frozenset(failed_scopes))
         result = executor(unit, fresh[unit])
         if result.kind is StageResultKind.COMPLETED:
-            progress[unit] = unit_record(unit, UnitStatus.COMPLETED, fresh[unit])
+            report_id = result.detail.get("report_id")
+            progress[unit] = unit_record(
+                unit,
+                UnitStatus.COMPLETED,
+                fresh[unit],
+                report_id if isinstance(report_id, str) else None,
+            )
             persist()
         elif result.kind is StageResultKind.FAILED:
             progress[unit] = unit_record(unit, UnitStatus.FAILED, fresh[unit])

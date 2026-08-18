@@ -278,6 +278,48 @@ def test_full_asr_run_grants_the_resource_confirmation_up_front(tmp_path: Path) 
     assert asr_call2[2]["resumption_decision"] is None
 
 
+def test_resume_rebuilds_stage_report_chain_for_downstream_stages(tmp_path: Path) -> None:
+    # On resume the composition adopts already-completed upstream stages without
+    # re-invoking them, so it must rebuild their report-id chain from the recorded
+    # state -- otherwise the first downstream stage that runs (here text analysis)
+    # sees no subtitle/transcription report id and fails *_report_unavailable.
+    from video_content_pipeline.orchestration import initialize_run_workspace
+    from video_content_pipeline.run_state import RunStateWriter, RunStatus
+    from video_content_pipeline.stage_dag import (
+        UnitStatus,
+        compute_invalidation_keys,
+        unit_record,
+    )
+
+    plan = _plan()
+    layout = initialize_run_workspace(_layout(tmp_path))
+    keys = compute_invalidation_keys(plan)
+    units = {unit.stage: unit for unit in plan_stage_units(plan)}
+    writer = RunStateWriter.create(layout, plan_id=plan.plan_id)
+    writer.transition_to(RunStatus.QUEUED)
+    writer.transition_to(RunStatus.RUNNING)
+    writer.set_progress(
+        stage_units=[
+            unit_record(units[stage], UnitStatus.COMPLETED, keys[units[stage]], report_id)
+            for stage, report_id in (
+                (StageName.SUBTITLES, "sub-1"),
+                (StageName.AUDIO_ANALYSIS, "aud-1"),
+                (StageName.TRANSCRIPTION, "asr-1"),
+            )
+        ]
+    )
+
+    recorder = _Recorder()
+    composition = build_run_composition(layout, plan, functions=recorder.functions())
+    text_unit = units[StageName.TEXT_ANALYSIS]
+    composition.executor(text_unit, keys[text_unit])
+
+    text_call = next(c for c in recorder.calls if c[0] == "text")
+    assert text_call[1][1] == "sub-1"  # subtitle report id, positional
+    assert text_call[2]["audio_report_id"] == "aud-1"
+    assert text_call[2]["transcription_report_id"] == "asr-1"
+
+
 def test_executor_translates_front_loaded_choices(tmp_path: Path) -> None:
     plan = _plan(
         extra=(
