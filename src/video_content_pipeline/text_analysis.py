@@ -663,6 +663,7 @@ def analyze_text(
     resumed_from_report_id: str | None = None,
     resumption_decision: str | None = None,
     real_engines: RealEngineSelection | None = None,
+    transcription_report_id: str | None = None,
 ) -> dict[str, object]:
     """Create one immutable text-analysis report from fully revalidated inputs.
 
@@ -710,6 +711,7 @@ def analyze_text(
     unsupported_item_count = 0
     restricted_raw_output: tuple[RestrictedRawOutput, ...] = ()
     raw_output_state = "not_generated"
+    stage_execution: tuple[dict[str, object], ...] = ()
     projection_state: dict[str, object] = {"state": "not_projected"}
     adapter_state = ControlledTextAdapterState(
         state=TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE.value,
@@ -781,6 +783,40 @@ def analyze_text(
                     "A conservative text-model resource estimate exceeds the 12 GiB envelope.",
                 ),
             )
+        elif real_engines is not None and "text_semantics" in real_engines.capabilities:
+            # The real path shares every revalidation and the resource gate above;
+            # only here does it run the acquired text-semantics engine over the
+            # revalidated cues (embedded Primary tracks, or the full-ASR published
+            # transcript resolved from the transcription report).
+            if contracts is None:
+                raise TextAnalysisError(
+                    "text_analysis_input_invalid", "Text generation contracts are unavailable."
+                )
+            text_candidate = _eligible_text_semantics_candidate(project_root)
+            parts, unavailable = _real_text_parts(
+                plan,
+                subtitle_report,
+                selected_primary_tracks,
+                transcription_report_id,
+                project_root,
+            )
+            real_outcome = build_text_semantics_analysis(
+                project_root,
+                workspace_path,
+                contracts,
+                parts,
+                unavailable,
+                text_candidate,
+            )
+            status = real_outcome.status
+            diagnostics = real_outcome.diagnostics
+            segments = real_outcome.segments
+            chapters = real_outcome.chapters
+            collection_summary = real_outcome.collection_summary
+            unsupported_item_count = real_outcome.unsupported_item_count
+            restricted_raw_output = real_outcome.restricted_raw_output
+            raw_output_state = "generated"
+            stage_execution = real_outcome.stage_execution
         else:
             outcome = _run_controlled_generation(
                 contracts=contracts,
@@ -824,6 +860,7 @@ def analyze_text(
         unsupported_item_count = 0
         restricted_raw_output = ()
         raw_output_state = "not_generated"
+        stage_execution = ()
         projection_state = {"state": "not_projected"}
         adapter_state = ControlledTextAdapterState(
             state=TextAnalysisReportStatus.CONTROLLED_ADAPTER_UNAVAILABLE.value,
@@ -879,6 +916,7 @@ def analyze_text(
         collection_summary=collection_summary,
         unsupported_item_count=unsupported_item_count,
         diagnostics=diagnostics,
+        stage_execution=stage_execution,
     )
     report = _render_and_bind_markdown(report)
     _write_json_once(report_path, report.as_json())
@@ -1002,6 +1040,117 @@ def _sampling_identity(adapter_document: Mapping[str, object]) -> dict[str, obje
         configuration = {}
     encoded = json.dumps(dict(configuration), sort_keys=True).encode("utf-8")
     return {"sha256": sha256(encoded).hexdigest(), "configuration": dict(configuration)}
+
+
+def _eligible_text_semantics_candidate(project_root: Path) -> dict[str, object]:
+    """The eligible acquired text_semantics candidate (as its JSON dict).
+
+    Qualifies by eligibility alone (the engine loads and re-verifies its own asset +
+    calibration at run time). Raises ``model_acquisition_required`` when none is
+    eligible so a real run fails closed rather than silently degrading.
+    """
+
+    report = evaluate_text_semantics_capability(project_root)
+    for capability in report.capabilities:
+        if capability.capability != TEXT_SEMANTICS_CAPABILITY:
+            continue
+        eligible = [c for c in capability.candidates if c.state == "eligible"]
+        if eligible:
+            return eligible[0].as_json()
+    raise TextAnalysisError(
+        "model_acquisition_required", "No eligible acquired text_semantics candidate is available."
+    )
+
+
+def _transcription_transcript_by_source(
+    project_root: Path, transcription_report_id: str | None
+) -> dict[str, tuple[int, Path]]:
+    """Map each full-ASR Part to its published transcript candidate (stream, path)."""
+
+    if transcription_report_id is None:
+        return {}
+    path = (
+        project_root
+        / "work"
+        / "transcription-reports"
+        / transcription_report_id
+        / "transcription-report.json"
+    )
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise TextAnalysisError(
+            "transcription_report_invalid", "Bound transcription report cannot be read."
+        ) from error
+    transcript = document.get("transcript") if isinstance(document, Mapping) else None
+    result: dict[str, tuple[int, Path]] = {}
+    if isinstance(transcript, list):
+        for entry in transcript:
+            if not isinstance(entry, Mapping) or not isinstance(entry.get("source_id"), str):
+                continue
+            candidate = entry.get("source_candidate")
+            stream_index = entry.get("stream_index")
+            if (
+                isinstance(candidate, Mapping)
+                and isinstance(candidate.get("path"), str)
+                and isinstance(stream_index, int)
+                and not isinstance(stream_index, bool)
+            ):
+                result[str(entry["source_id"])] = (stream_index, Path(str(candidate["path"])))
+    return result
+
+
+def _real_text_parts(
+    plan: RunPlan,
+    subtitle_report: SubtitleCandidateReport,
+    selected_primary_tracks: tuple[SelectedPrimaryTrack, ...],
+    transcription_report_id: str | None,
+    project_root: Path,
+) -> tuple[tuple[tuple[str, int, Path], ...], tuple[UnavailablePartInfo, ...]]:
+    """Resolve each Part's cue-candidate source for the real text-semantics run.
+
+    An embedded Primary subtitle track resolves to its retained source candidate; a
+    full-ASR Part (no selected track) resolves to the transcript candidate the
+    transcription report published (Option-A). A Part with neither is recorded as
+    ``text_content=unavailable`` so the collection declares the omission honestly.
+    """
+
+    candidates_by_key = {
+        (candidate.source_id, candidate.stream_index): candidate
+        for candidate in subtitle_report.candidates
+    }
+    parts: list[tuple[str, int, Path]] = []
+    covered: set[str] = set()
+    for track in selected_primary_tracks:
+        candidate = candidates_by_key.get((track.source_id, track.stream_index))
+        if candidate is None or candidate.source_candidate_path is None:
+            raise TextAnalysisError(
+                "subtitle_track_changed",
+                "A selected Primary subtitle track lost its retained cue evidence.",
+            )
+        parts.append((track.source_id, track.stream_index, Path(candidate.source_candidate_path)))
+        covered.add(track.source_id)
+
+    transcript_by_source = _transcription_transcript_by_source(
+        project_root, transcription_report_id
+    )
+    unavailable: list[UnavailablePartInfo] = []
+    for artifact in plan.source_artifacts:
+        if artifact.source_id in covered:
+            continue
+        transcript_entry = transcript_by_source.get(artifact.source_id)
+        if transcript_entry is not None:
+            stream_index, candidate_path = transcript_entry
+            parts.append((artifact.source_id, stream_index, candidate_path))
+            covered.add(artifact.source_id)
+            continue
+        part_candidates = [
+            candidate
+            for candidate in subtitle_report.candidates
+            if candidate.source_id == artifact.source_id
+        ]
+        unavailable.append(_unavailable_part(artifact.source_id, part_candidates))
+    return tuple(parts), tuple(unavailable)
 
 
 @dataclass(frozen=True)

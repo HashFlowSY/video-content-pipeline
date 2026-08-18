@@ -531,6 +531,7 @@ def _invoke_text_analysis(state: _CompositionState) -> StageResult:
         state.layout.project_root,
         audio_report_id=state.reports.get(StageName.AUDIO_ANALYSIS),
         real_engines=_real_engines(state, StageName.TEXT_ANALYSIS),
+        transcription_report_id=state.reports.get(StageName.TRANSCRIPTION),
     )
     status, report = _split(result)
     return _record(state, StageName.TEXT_ANALYSIS, map_stage_return(status, report))

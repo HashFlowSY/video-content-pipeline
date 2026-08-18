@@ -139,6 +139,34 @@ def test_build_text_semantics_analysis_maps_invalid_output_to_failed(
     assert outcome.status == TextAnalysisReportStatus.FAILED
 
 
+def test_transcription_transcript_by_source_maps_published_candidates(tmp_path: Path) -> None:
+    import json as _json
+
+    from video_content_pipeline.text_analysis import _transcription_transcript_by_source
+
+    report_dir = tmp_path / "work" / "transcription-reports" / "tid"
+    report_dir.mkdir(parents=True)
+    candidate_path = "/proj/transcript/part-a/source-candidate.json"
+    (report_dir / "transcription-report.json").write_text(
+        _json.dumps(
+            {
+                "transcript": [
+                    {
+                        "source_id": "part-a",
+                        "stream_index": 1,
+                        "source_candidate": {"path": candidate_path},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    mapping = _transcription_transcript_by_source(tmp_path, "tid")
+    assert mapping == {"part-a": (1, Path(candidate_path))}
+    # No bound report id => no full-ASR candidates (subtitle-priority runs).
+    assert _transcription_transcript_by_source(tmp_path, None) == {}
+
+
 def test_build_text_semantics_analysis_requires_a_part(tmp_path: Path) -> None:
     with pytest.raises(TextAnalysisError) as error:
         build_text_semantics_analysis(
