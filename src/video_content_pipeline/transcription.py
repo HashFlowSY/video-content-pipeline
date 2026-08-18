@@ -45,10 +45,7 @@ from video_content_pipeline.planning import (
     load_run_plan,
     revalidate_confirmed_inspection_evidence,
 )
-from video_content_pipeline.real_engine_adapter import (
-    RealEngineSelection,
-    dispatch_real_stage,
-)
+from video_content_pipeline.real_engine_adapter import RealEngineSelection
 from video_content_pipeline.source import SourceArtifact
 from video_content_pipeline.subtitle_pipeline import (
     SubtitleCandidateReport,
@@ -493,8 +490,6 @@ def transcribe(
     :func:`~video_content_pipeline.real_engine_adapter.dispatch_real_stage`.
     """
 
-    if real_engines is not None:
-        return dispatch_real_stage(real_engines, stage="transcription")
     report_id = uuid.uuid4().hex
     workspace_path = project_root / "work" / "transcription-reports" / report_id
     report_path = workspace_path / "transcription-report.json"
@@ -515,6 +510,8 @@ def transcribe(
     independent_review: IndependentReviewResolution | None = None
     required_decision: dict[str, object] | None = None
     diagnostics: tuple[PlanningDiagnostic, ...] = ()
+    transcript: tuple[dict[str, object], ...] = ()
+    stage_execution: tuple[dict[str, object], ...] = ()
 
     try:
         plan_path = project_root / "plans" / plan_id / "run-plan.json"
@@ -611,6 +608,32 @@ def transcribe(
                     "execution.",
                 ),
             )
+        elif real_engines is not None and "asr_primary" in real_engines.capabilities:
+            # The real path shares every revalidation, precondition, and resource
+            # gate above; only here, once they all pass, does it run the acquired
+            # primary ASR instead of recording model_acquisition_required.
+            asr_candidate = _eligible_asr_primary_candidate(capabilities)
+            audio_document = _load_audio_report_document(audio_report_evidence)
+            if asr_candidate is None:
+                status = TranscriptionReportStatus.MODEL_ACQUISITION_REQUIRED
+                diagnostics = (
+                    PlanningDiagnostic(
+                        "model_acquisition_required",
+                        "No eligible acquired primary ASR candidate is available.",
+                    ),
+                )
+            else:
+                full_asr_source_ids = (
+                    start_precondition.source_ids if start_precondition is not None else ()
+                )
+                transcript, stage_execution = build_asr_transcript(
+                    project_root,
+                    audio_document,
+                    full_asr_source_ids,
+                    asr_candidate,
+                    workspace_path,
+                )
+                status = TranscriptionReportStatus.COMPLETE
         else:
             status = TranscriptionReportStatus.MODEL_ACQUISITION_REQUIRED
             diagnostics = (
@@ -637,6 +660,8 @@ def transcribe(
         capabilities = ()
         independent_review = None
         required_decision = None
+        transcript = ()
+        stage_execution = ()
         diagnostics = (
             PlanningDiagnostic(
                 getattr(error, "reason", "transcription_input_invalid"),
@@ -670,6 +695,8 @@ def transcribe(
         independent_review=independent_review,
         required_decision=required_decision,
         diagnostics=diagnostics,
+        transcript=transcript,
+        stage_execution=stage_execution,
     )
     _write_json_once(report_path, report.as_json())
     return {"status": report.status.value, "report": report.as_json()}
@@ -912,6 +939,44 @@ def _asr_primary_stage_execution(
     )
     record["resource_measurement"] = input_evidence(measurement_path).as_json()
     return record
+
+
+def _eligible_asr_primary_candidate(
+    capabilities: tuple[AsrCapabilityAvailability, ...],
+) -> dict[str, object] | None:
+    """The eligible acquired asr_primary candidate (as its JSON dict), if any.
+
+    A real transcription qualifies its candidate by eligibility alone, mirroring the
+    audio stage: the engine loads its own model-matched assets and re-verifies them
+    at run time. Returns ``None`` when no asr_primary candidate is eligible.
+    """
+
+    for capability in capabilities:
+        if capability.capability != "asr_primary":
+            continue
+        eligible = [c for c in capability.candidates if c.state == "eligible"]
+        if not eligible:
+            return None
+        return eligible[0].as_json()
+    return None
+
+
+def _load_audio_report_document(
+    audio_report_evidence: InputEvidence | None,
+) -> Mapping[str, object]:
+    if audio_report_evidence is None:
+        raise TranscriptionError(
+            "audio_report_invalid", "A real transcription requires a bound Audio analysis report."
+        )
+    try:
+        document = json.loads(audio_report_evidence.path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise TranscriptionError(
+            "audio_report_invalid", "Audio analysis report cannot be read."
+        ) from error
+    if not isinstance(document, Mapping):
+        raise TranscriptionError("audio_report_invalid", "Audio analysis report is invalid.")
+    return document
 
 
 def build_asr_transcript(

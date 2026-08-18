@@ -352,6 +352,80 @@ def test_resume_transcription_records_confirmation_and_requires_acquisition(
     assert paused_path.read_bytes() == paused_bytes
 
 
+def _eligible_primary(project_root: Path) -> dict[str, object]:
+    candidate = _over_envelope_primary(project_root)
+    candidate["resource_estimate"] = {"high_bytes": 5 * 1024**3}
+    return candidate
+
+
+def test_transcribe_real_engines_complete_full_asr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A confirmed real full-ASR run reaches ``complete`` and carries its transcript.
+
+    The composition (build_asr_transcript) is unit-tested elsewhere; here the focus
+    is the transcribe() wiring: past every revalidation, precondition, and the
+    Full-ASR resource-confirmation gate, a real run runs the acquired primary ASR and
+    records COMPLETE with the published transcript + asr_primary stage execution.
+    """
+
+    from video_content_pipeline import transcription
+    from video_content_pipeline.real_engine_adapter import RealEngineSelection
+
+    plan = _confirmed_plan(tmp_path)
+    subtitle_report = _subtitle_report(tmp_path, plan, unavailable=True)
+    audio_id, _ = _audio_report(tmp_path, plan, subtitle_report.report_id)
+    _write_registry(
+        tmp_path,
+        [
+            _eligible_primary(tmp_path),
+            {"candidate_id": "whisper-large-v3", "capability": "asr_review"},
+        ],
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_build(
+        project_root, audio_document, full_asr_source_ids, asr_candidate, workspace_path, **kwargs
+    ):
+        captured["candidate_id"] = asr_candidate.get("candidate_id")
+        captured["source_ids"] = tuple(full_asr_source_ids)
+        return (
+            ({"source_id": "part-a", "cue_count": 3},),
+            ({"capability": "asr_primary", "state": "completed"},),
+        )
+
+    monkeypatch.setattr(transcription, "build_asr_transcript", fake_build)
+
+    result = transcription.transcribe(
+        plan.plan_id,
+        subtitle_report.report_id,
+        audio_id,
+        tmp_path,
+        resumption_decision=_CONFIRM_DECISION,
+        real_engines=RealEngineSelection(
+            project_root=tmp_path, capabilities=frozenset({"asr_primary"})
+        ),
+    )
+
+    assert result["status"] == "complete"
+    report = result["report"]
+    assert report["transcript"] == [{"source_id": "part-a", "cue_count": 3}]
+    assert report["stage_execution"] == [{"capability": "asr_primary", "state": "completed"}]
+    assert captured["candidate_id"] == "qwen3-asr-1-7b"
+    # Without confirmation the same real run still pauses at the resource gate.
+    paused = transcription.transcribe(
+        plan.plan_id,
+        subtitle_report.report_id,
+        audio_id,
+        tmp_path,
+        real_engines=RealEngineSelection(
+            project_root=tmp_path, capabilities=frozenset({"asr_primary"})
+        ),
+    )
+    assert paused["status"] == "awaiting_full_asr_resource_confirmation"
+
+
 # --- Start preconditions ---------------------------------------------------
 
 
