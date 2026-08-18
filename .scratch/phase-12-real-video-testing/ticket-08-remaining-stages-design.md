@@ -6,6 +6,13 @@ spine's revalidation/report/stage_execution and only swaps evidence derivation +
 measured runtime controls (mirror audio + transcription). Real-aware qualification
 = eligibility alone. Real calibration profiles already exist under config/.
 
+## TEXT-ANALYSIS DONE (`d5925b1` composition, `18b6675` wiring)
+build_text_semantics_analysis + load_part_with_cue_texts + TextAnalysisReport
+stage_execution field; analyze_text real branch + _real_text_parts full-ASR
+resolution (transcription_report_id, Option-A) + run_composition threading. Offline
+byte-identical; full suite 1702 green. Tests test_text_analysis_real_bridge.py.
+
+## (below: original design, done)
 ## TEXT-ANALYSIS (critical path for run #1 deliverables) — text_analysis.py
 Offline is a full completed structure (unlike transcription): `_run_controlled_generation`
 (text_analysis.py:1002) loads cues from `selected_primary_tracks` and projects a
