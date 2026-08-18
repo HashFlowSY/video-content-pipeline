@@ -38,7 +38,7 @@ run #1 lands.
 
 | Run id | Source | Date | Branch(es) claimed | Confirmation record |
 |---|---|---|---|---|
-| `20260818T114653Z-19562f62a649ee1b` | maintainer local file `f10e8895…a48889` (34m58s) | 2026-08-18 | branch 2 (full ASR) — completed, verified, published | [run record](phase-12-runs/20260818T114653Z-19562f62a649ee1b.md) — real cue-cited semantic content, published content-report carries all 74 detail points; supersedes the earlier attempts `20260818T074454Z-…` and `20260818T111753Z-…`. **D10 ratings PENDING maintainer review**; branch not yet flipped |
+| `20260818T114653Z-19562f62a649ee1b` | maintainer local file `f10e8895…a48889` (34m58s) | 2026-08-18 | branch 2 (full ASR) — completed, verified, published | [run record](phase-12-runs/20260818T114653Z-19562f62a649ee1b.md) — real cue-cited semantic content, published content-report carries all 74 detail points; supersedes the earlier attempts `20260818T074454Z-…` and `20260818T111753Z-…`. Maintainer inspected 2026-08-18, **interim verdict 「目前看可以用」**; **final per-capability D10 ratings and the branch-2 flip deferred by the maintainer** pending a clearer confirmation — branch **not** flipped, count stays 0/5 |
 
 ## Standing per-run procedure
 

@@ -22,10 +22,10 @@ publication).
 maintainer-gated and an agent never fills them — see notes)
 
 - [x] Confirmation record exists in the maintainer-review shape, bound to the run identity and model-stack snapshot — `docs/phase-12-runs/20260818T114653Z-19562f62a649ee1b.md` (`37b93aa`)
-- [ ] Maintainer inspected subtitles, speakers, detailed content, and summary and their verdict is recorded verbatim — **MAINTAINER-GATED** (record prepared with per-dimension evidence pointers; awaiting the human verdict)
-- [ ] Per-capability verbal ratings recorded (acceptable/marginal/unacceptable × three dimensions) — **MAINTAINER-GATED** (D10 rows are `_pending_`; an agent never records D10)
+- [x] Maintainer inspected subtitles, speakers, detailed content, and summary and their verdict is recorded verbatim — inspected 2026-08-18; interim verdict 「内容我都看过了，目前看可以用」recorded verbatim in the run record
+- [ ] Per-capability verbal ratings recorded (acceptable/marginal/unacceptable × three dimensions) — **DEFERRED BY MAINTAINER** (gave a general "usable for now"; declined to lock per-capability D10 yet, so rows stay `_pending_`)
 - [x] Observed severity of the diarization and text_semantics leftovers noted with evidence pointers — diarization = none-observable (de-promoted, did not run); text_semantics single-segment collapse noted with segments.json evidence (`37b93aa`)
-- [ ] Ledger shows the branch(es) this run covered, honestly stated; branch count updated (expected 1/5) — **MAINTAINER-GATED** (branch 2 flips only on a recorded confirmation; ledger honestly stays 0/5 until then)
+- [ ] Ledger shows the branch(es) this run covered, honestly stated; branch count updated (expected 1/5) — **DEFERRED BY MAINTAINER** (chose "暂不翻分支"; branch 2 not flipped, count honestly stays 0/5 until a clearer confirmation)
 - [x] No CER/WER appears anywhere in the record — only "no proofed reference exists" statements
 
 **Handoff to maintainer.** Run identity `20260818T114653Z-19562f62a649ee1b`
