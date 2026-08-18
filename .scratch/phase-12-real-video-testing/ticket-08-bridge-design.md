@@ -125,6 +125,16 @@ model_runtime children (real MLX peak returned) — call analyze_derivative_* di
 in parent (orchestration is model-free). Only VAD/diarization/OCR needed new
 children (VAD+diar done; OCR pending for visual stage).
 
+## AUDIO STAGE COMPLETE (`b18e203`)
+Real engines wired into analyze_audio; offline byte-identical (full suite 1694
+green); ADR 0058 (supersedes 0055 ONNX-in-process) + CONTEXT-MAP indexed. Real
+derive fns + _real_calibration_profile + _candidate_qualifies + runtime_controls +
+_alignment_part_from_view factored. Unit tests test_audio_analysis_real_bridge.py.
+Full-ASR reality: alignment empty (no Primary cues); VAD+diarization are the heavy
+real work for run #1.
+
+## DONE-BELOW-here was the audio plan (kept for reference)
+
 ## NEXT (audio integration — do with fresh context, edits to 3800-line audio_analysis.py)
 1. `_record_stage_execution(..., *, runtime_controls=None)`: use runtime_controls in
    place of candidate["execution_controls"] when given. Real path passes

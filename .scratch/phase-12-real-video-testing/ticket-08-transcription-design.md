@@ -72,6 +72,42 @@ Decide whether run #1 transcribes at the coarse or semantic-cue window.
 - D2 = **semantic (finer) cues** (re-chunk at SEMANTIC_CUE_WINDOW).
 - D3 = **asr_review with enhancement**; transcription = primary transcript only.
 
+## PROGRESS
+- `d7af970` completed-transcription publication contract (TranscriptionReport
+  transcript/stage_execution fields + publish_asr_subtitle_candidate; round-trip
+  test vs enhancement.load_retained_subtitle_cues).
+- `edd1279` build_asr_transcript(project_root, audio_report_document,
+  full_asr_source_ids, asr_candidate, workspace, *, command=None) ->
+  (transcript_entries, stage_execution). Recovers derivative + speech runs from
+  VAD speech_likely intervals (exact via mapping.sample_for_source_time),
+  re-chunks at SEMANTIC_CUE_WINDOW, runs transcribe_derivative, publishes candidate,
+  asr_primary stage_execution w/ envelope gate. Unit-tested (engine monkeypatched).
+
+## NEXT (transcription wiring — fresh context, edits to transcribe())
+1. Remove top short-circuit `if real_engines is not None: return dispatch_real_stage`
+   (transcription.py ~483). Remove the now-unused dispatch_real_stage import.
+2. Thread real_engines into transcribe(). At the offline `else:` that sets
+   MODEL_ACQUISITION_REQUIRED (~line 601, after all resource pauses cleared &
+   confirmation_granted), when real_engines is not None: read the audio report
+   DOCUMENT (json at work/audio-analysis-reports/<audio_report_id>/), pick the
+   eligible asr_primary candidate from `capabilities`, full_asr_source_ids =
+   start_precondition.source_ids (the subtitle_unavailable set), call
+   build_asr_transcript(...) -> transcript + stage_execution, set
+   status=COMPLETE, pass transcript= + stage_execution= into TranscriptionReport.
+   Offline path unchanged (real_engines None => model_acquisition_required).
+   NOTE run #1 must first clear the full_asr_resource_confirmation pause via resume
+   (resumption_decision=full_asr_resource_plan_confirmed) — that's a run-flow step.
+3. Tests: a transcribe() real-path test (monkeypatch build_asr_transcript or the
+   engine) asserting COMPLETE + transcript + stage_execution; offline unchanged.
+
+## THEN Option-A downstream plumbing (separate commit)
+Thread transcription_report_id into enhance()/analyze_text()/run_visual_text() +
+their run_composition invokers (_invoke_enhancement/_invoke_text_analysis/
+_invoke_visual_text pass state.reports.get(StageName.TRANSCRIPTION)). In each,
+when a Part is full-ASR (no subtitle source candidate), resolve its subtitle cues
+from the completed transcription report's published source-candidate (transcript
+entry -> source_candidate path) instead of the subtitle report. Each with tests.
+
 ## Open decisions for the maintainer
 - D1: downstream discovery = **Option A (thread transcription_report_id)** — OK?
 - D2: run #1 transcription window = coarse VAD chunks vs SEMANTIC_CUE_WINDOW finer
